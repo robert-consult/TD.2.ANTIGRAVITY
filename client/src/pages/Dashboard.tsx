@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Header } from "@/components/Header";
 import { MobileNavigation, SideNavigation } from "@/components/Navigation";
 import { AppShell } from "@/components/layout/AppShell";
@@ -7,6 +7,15 @@ import { useQuery } from "@tanstack/react-query";
 import { lazyWithPing } from "@/lib/lazyWithPing";
 import { StaleDataBadge } from "@/components/StaleDataBadge";
 import { useStaleData } from "@/lib/staleData";
+import {
+  areDashboardRouteStatesEqual,
+  readDashboardRouteState,
+  subscribeDashboardRouteState,
+  type DashboardAccountPanel,
+  type DashboardRouteState,
+  type DashboardTab,
+  writeDashboardRouteState,
+} from "@/lib/dashboardUrlState";
 
 const QuotesScreen = lazyWithPing(() => import("./QuotesScreen"));
 const ChartScreen = lazyWithPing(() => import("./ChartScreen"));
@@ -37,11 +46,14 @@ function DashboardLoadingFallback({ activeTab }: { activeTab: string }) {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState("quotes");
-  const [selectedSymbol, setSelectedSymbol] = useState("");
+  const initialRouteState = useMemo(() => readDashboardRouteState(), []);
+  const [activeTab, setActiveTab] = useState<DashboardTab>(initialRouteState.tab);
+  const [selectedSymbol, setSelectedSymbol] = useState(initialRouteState.symbol ?? "");
+  const [accountPanel, setAccountPanel] = useState<DashboardAccountPanel>(initialRouteState.panel ?? "account");
   const [, startTransition] = useTransition();
   const { quotes } = useQuotes();
   const hasHydratedDashboardData = useStaleData("/api/account/summary");
+  const hasCommittedRouteStateRef = useRef(false);
 
   const { data: symbols = [] } = useQuery<Array<{ symbol: string }>>({
     queryKey: ["/api/config/symbols"],
@@ -56,6 +68,23 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
+    return subscribeDashboardRouteState((nextState) => {
+      setActiveTab((currentTab) => (currentTab === nextState.tab ? currentTab : nextState.tab));
+      setAccountPanel((currentPanel) => {
+        const nextPanel = nextState.panel ?? "account";
+        return currentPanel === nextPanel ? currentPanel : nextPanel;
+      });
+      if (nextState.symbol) {
+        setSelectedSymbol((currentSymbol) => (currentSymbol === nextState.symbol ? currentSymbol : nextState.symbol!));
+        return;
+      }
+      if (nextState.tab === "chart" || nextState.tab === "trade") {
+        setSelectedSymbol("");
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     if (!activeSymbols.length) {
       setSelectedSymbol("");
       return;
@@ -66,9 +95,24 @@ export default function Dashboard() {
     }
   }, [activeSymbols, selectedSymbol]);
 
+  useEffect(() => {
+    const nextRouteState: DashboardRouteState = {
+      tab: activeTab,
+      ...(selectedSymbol ? { symbol: selectedSymbol } : {}),
+      ...(activeTab === "account" && accountPanel === "mailbox" ? { panel: accountPanel } : {}),
+    };
+    const currentRouteState = readDashboardRouteState();
+    if (areDashboardRouteStatesEqual(nextRouteState, currentRouteState)) {
+      hasCommittedRouteStateRef.current = true;
+      return;
+    }
+    writeDashboardRouteState(nextRouteState, { replace: !hasCommittedRouteStateRef.current });
+    hasCommittedRouteStateRef.current = true;
+  }, [accountPanel, activeTab, selectedSymbol]);
+
   const setActiveTabDeferred = useCallback((nextTab: string) => {
     startTransition(() => {
-      setActiveTab(nextTab);
+      setActiveTab(nextTab as DashboardTab);
     });
   }, [startTransition]);
 
@@ -87,6 +131,10 @@ export default function Dashboard() {
       setActiveTabDeferred("chart");
     }
   };
+
+  const handleAccountPanelChange = useCallback((nextPanel: DashboardAccountPanel) => {
+    setAccountPanel(nextPanel);
+  }, []);
 
   return (
     <AppShell
@@ -124,7 +172,12 @@ export default function Dashboard() {
 
         {activeTab === "leaderboard" && <LeaderboardScreen />}
 
-        {activeTab === "account" && <AccountScreen />}
+        {activeTab === "account" && (
+          <AccountScreen
+            activePanel={accountPanel}
+            onActivePanelChange={handleAccountPanelChange}
+          />
+        )}
       </Suspense>
     </AppShell>
   );

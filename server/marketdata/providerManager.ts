@@ -8,6 +8,7 @@ import type { MarketDataProvider } from "./providerTypes";
 import { envSecretKeyFromRef, resolveSecretRef } from "./secret";
 
 const ACTIVE_PROVIDER_CACHE_TTL_MS = Number(process.env.MARKET_DATA_PROVIDER_CACHE_TTL_MS ?? 2_000);
+const DEFAULT_PROVIDER_KEY = "twelvedata";
 
 type ProviderRow = typeof marketDataProviders.$inferSelect;
 
@@ -47,6 +48,14 @@ function parseCsv(raw: unknown): string[] {
     .filter(Boolean);
 }
 
+function envFlagEnabled(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined) return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function isConfigUsable(cfg: MarketDataProviderConfig): boolean {
   if (cfg.driver === "twelvedata") return Boolean(resolveSecretRef(cfg.apiKey));
   if (cfg.driver === "oneforge") return Boolean(resolveSecretRef(cfg.apiKey));
@@ -63,19 +72,61 @@ async function loadProviderRow(providerKey: string): Promise<ProviderRow | null>
   return row;
 }
 
-async function getConfiguredProviderKeys(): Promise<{ activeKey: string | null; fallbackKeys: string[] }> {
-  const row = await db.query.systemConfig.findFirst({ where: eq(systemConfig.id, 1) });
-  const activeKey = row?.marketDataActiveProviderKey ? String(row.marketDataActiveProviderKey) : null;
-  const fallbackKeys = parseCsv(row?.marketDataFallbackProviderKeysCsv).filter((k) => k !== activeKey);
+export function allowLegacyEnvProviderFallback(
+  nodeEnv = process.env.NODE_ENV ?? "",
+  override = process.env.MARKET_DATA_PROVIDER_ALLOW_ENV_FALLBACK,
+): boolean {
+  return envFlagEnabled(override, String(nodeEnv).trim().toLowerCase() !== "production");
+}
 
-  // Back-compat: if system_config isn't populated yet, infer from env.
-  if (!activeKey) {
-    if (process.env.TWELVE_DATA_API_KEY) return { activeKey: "twelvedata", fallbackKeys: process.env.FORGE_KEY ? ["1forge"] : [] };
-    if (process.env.FORGE_KEY) return { activeKey: "1forge", fallbackKeys: [] };
-    return { activeKey: null, fallbackKeys: [] };
+export function resolveLegacyEnvProviderKeys(env: NodeJS.ProcessEnv = process.env): string[] {
+  const keys: string[] = [];
+  if (env.TWELVE_DATA_API_KEY) keys.push(DEFAULT_PROVIDER_KEY);
+  if (env.FORGE_KEY) keys.push("1forge");
+  return [...new Set(keys)];
+}
+
+export function buildConfiguredProviderCandidateKeys(args: {
+  activeKey?: string | null;
+  fallbackKeys?: string[];
+  allowLegacyEnvFallback?: boolean;
+  legacyEnvKeys?: string[];
+}): string[] {
+  const keys: string[] = [];
+
+  const activeKey = String(args.activeKey ?? "").trim() || null;
+  const fallbackKeys = (args.fallbackKeys ?? []).map((key) => String(key).trim()).filter(Boolean);
+
+  if (activeKey) keys.push(activeKey);
+  else keys.push(DEFAULT_PROVIDER_KEY);
+
+  for (const key of fallbackKeys) {
+    if (key !== activeKey) keys.push(key);
   }
 
-  return { activeKey, fallbackKeys };
+  if (args.allowLegacyEnvFallback) {
+    for (const key of args.legacyEnvKeys ?? []) keys.push(String(key).trim());
+  }
+
+  return [...new Set(keys.filter(Boolean))];
+}
+
+async function getConfiguredProviderKeys(): Promise<{
+  activeKey: string | null;
+  fallbackKeys: string[];
+  candidateKeys: string[];
+}> {
+  const row = await db.query.systemConfig.findFirst({ where: eq(systemConfig.id, 1) });
+  const activeKey = row?.marketDataActiveProviderKey ? String(row.marketDataActiveProviderKey).trim() : null;
+  const fallbackKeys = parseCsv(row?.marketDataFallbackProviderKeysCsv).filter((k) => k !== activeKey);
+  const candidateKeys = buildConfiguredProviderCandidateKeys({
+    activeKey,
+    fallbackKeys,
+    allowLegacyEnvFallback: !activeKey && allowLegacyEnvProviderFallback(),
+    legacyEnvKeys: resolveLegacyEnvProviderKeys(),
+  });
+
+  return { activeKey, fallbackKeys, candidateKeys };
 }
 
 export async function getActiveProviderSelection(): Promise<{ providerKey: string; provider: MarketDataProvider } | null> {
@@ -87,8 +138,8 @@ export async function getActiveProviderSelection(): Promise<{ providerKey: strin
   if (inflight) return inflight;
 
   inflight = (async () => {
-    const { activeKey, fallbackKeys } = await getConfiguredProviderKeys();
-    const candidates = [activeKey, ...fallbackKeys].filter((v): v is string => Boolean(v));
+    const { candidateKeys } = await getConfiguredProviderKeys();
+    const candidates = candidateKeys.filter((v): v is string => Boolean(v));
     for (const key of candidates) {
       const row = await loadProviderRow(key);
       if (!row) continue;
@@ -145,10 +196,11 @@ export async function activateProvider(providerKey: string, actor?: { adminEmail
 export async function checkConfiguredProviderSecrets(): Promise<{
   activeKey: string | null;
   fallbackKeys: string[];
+  candidateKeys: string[];
   missingEnvByProviderKey: Record<string, string[]>;
 }> {
-  const { activeKey, fallbackKeys } = await getConfiguredProviderKeys();
-  const keys = [activeKey, ...fallbackKeys].filter((k): k is string => Boolean(k));
+  const { activeKey, fallbackKeys, candidateKeys } = await getConfiguredProviderKeys();
+  const keys = candidateKeys.filter((k): k is string => Boolean(k));
 
   const missingEnvByProviderKey: Record<string, string[]> = {};
 
@@ -175,5 +227,5 @@ export async function checkConfiguredProviderSecrets(): Promise<{
     if (missingKeys.length) missingEnvByProviderKey[providerKey] = [...new Set(missingKeys)].sort();
   }
 
-  return { activeKey, fallbackKeys, missingEnvByProviderKey };
+  return { activeKey, fallbackKeys, candidateKeys: keys, missingEnvByProviderKey };
 }

@@ -27,3 +27,10 @@ admin_data_exports/
 # --- Local TLS/dev certs (never commit private keys) ---
 petascale/kes/certs/*.key
 petascale/kes/certs/*.crt
+
+# --- Production readiness generated secrets / operator material ---
+.sops.agekey
+.sops.yaml
+*.agekey
+age-keys.txt
+PRODUCTION READINESS/generated/

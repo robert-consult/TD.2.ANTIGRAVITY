@@ -118,13 +118,17 @@ export const keyboard = {
     onShow(callback: (info: { keyboardHeight: number }) => void) {
         if (!isNativeApp()) return () => { };
         const listener = Keyboard.addListener("keyboardWillShow", callback);
-        return () => listener.then((l) => l.remove());
+        return () => {
+            void listener.then((l) => l.remove());
+        };
     },
 
     onHide(callback: () => void) {
         if (!isNativeApp()) return () => { };
         const listener = Keyboard.addListener("keyboardWillHide", callback);
-        return () => listener.then((l) => l.remove());
+        return () => {
+            void listener.then((l) => l.remove());
+        };
     },
 };
 
@@ -144,7 +148,9 @@ export const network = {
 
     onChange(callback: (status: { connected: boolean; connectionType: string }) => void) {
         const listener = Network.addListener("networkStatusChange", callback);
-        return () => listener.then((l) => l.remove());
+        return () => {
+            void listener.then((l) => l.remove());
+        };
     },
 };
 
@@ -171,13 +177,17 @@ export const splash = {
 export const appLifecycle = {
     onStateChange(callback: (state: { isActive: boolean }) => void) {
         const listener = App.addListener("appStateChange", callback);
-        return () => listener.then((l) => l.remove());
+        return () => {
+            void listener.then((l) => l.remove());
+        };
     },
 
     onBackButton(callback: () => void) {
         if (!isAndroid()) return () => { };
         const listener = App.addListener("backButton", callback);
-        return () => listener.then((l) => l.remove());
+        return () => {
+            void listener.then((l) => l.remove());
+        };
     },
 
     async exitApp() {

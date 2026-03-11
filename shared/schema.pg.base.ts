@@ -520,6 +520,41 @@ export const notifications = pgTable(
   }),
 );
 
+// Registered push-notification endpoints (native and wrapper clients)
+export const pushDevices = pgTable(
+  "push_devices",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    appVariant: text("app_variant").notNull().default("native"), // native | wrapper
+    platform: text("platform").notNull().default("android"), // android | ios | web
+    environment: text("environment").notNull().default("production"), // development | staging | production
+    pushProvider: text("push_provider").notNull().default("FCM"), // FCM | APNS
+    token: text("token").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    deviceId: text("device_id"),
+    deviceInstallId: text("device_install_id"),
+    deviceFingerprint: text("device_fingerprint"),
+    appVersion: text("app_version"),
+    buildNumber: text("build_number"),
+    locale: text("locale"),
+    timezone: text("timezone"),
+    metadataJson: text("metadata_json"),
+    lastSeenAt: integer("last_seen_at").notNull().default(nowUnix),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+    revokedAt: integer("revoked_at"),
+  },
+  (table) => ({
+    userUpdatedIdx: index("push_devices_user_updated_idx").on(table.userId, table.updatedAt),
+    userPlatformIdx: index("push_devices_user_platform_idx").on(table.userId, table.platform),
+    tokenHashUq: uniqueIndex("push_devices_token_hash_uq").on(table.tokenHash),
+    deviceInstallIdx: index("push_devices_device_install_idx").on(table.deviceInstallId),
+  }),
+);
+
 // Immutable mailbox audit trail (append-only hash-chain)
 export const mailboxMessageAudit = pgTable(
   "mailbox_message_audit",
@@ -622,6 +657,13 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
   }),
 }));
 
+export const pushDevicesRelations = relations(pushDevices, ({ one }) => ({
+  user: one(users, {
+    fields: [pushDevices.userId],
+    references: [users.id],
+  }),
+}));
+
 export const mailboxMessageAuditRelations = relations(mailboxMessageAudit, ({ one }) => ({
   thread: one(mailboxThreads, {
     fields: [mailboxMessageAudit.threadId],
@@ -642,6 +684,7 @@ export const insertMailboxThreadSchema = createInsertSchema(mailboxThreads);
 export const insertMailboxMessageSchema = createInsertSchema(mailboxMessages);
 export const insertMailboxParticipantSchema = createInsertSchema(mailboxParticipants);
 export const insertNotificationSchema = createInsertSchema(notifications);
+export const insertPushDeviceSchema = createInsertSchema(pushDevices);
 export const insertMailboxMessageAuditSchema = createInsertSchema(mailboxMessageAudit);
 export const insertCommunicationSettingsSchema = createInsertSchema(communicationSettings);
 

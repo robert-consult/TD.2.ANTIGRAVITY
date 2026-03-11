@@ -1,37 +1,90 @@
-import axios from "axios";
-import { Express } from "express";
+import type { Express, Request, Response } from "express";
+import { storage } from "../storage";
+import { getActiveProviderSelection } from "../marketdata/providerManager";
 
 export function registerMarketRoutes(app: Express) {
-  // NOTE: `forex.1forge.com` is not reliably resolvable in some environments; `api.1forge.com` is.
-  const base = "https://api.1forge.com";
-  const apiKey = process.env.FORGE_KEY!;
+  function normalizeRequestedSymbols(raw: unknown): string[] {
+    return String(raw ?? "")
+      .split(",")
+      .map((value) => value.trim().replace("/", "").toUpperCase())
+      .filter(Boolean);
+  }
 
-  app.get("/api/market/quotes", async (req, res) => {
+  app.get("/api/market/quotes", async (req: Request, res: Response) => {
     try {
-      const { pairs } = req.query;
-      if (!apiKey) {
-        return res.status(500).json({ message: "API key not configured" });
+      const requestedSymbols = normalizeRequestedSymbols(req.query.pairs ?? req.query.symbols);
+      if (!requestedSymbols.length) {
+        return res.status(400).json({ ok: false, error: "pairs or symbols query parameter is required" });
       }
-      
-      const r = await axios.get(`${base}/quotes`, { params: { pairs, api_key: apiKey } });
-      res.json(r.data);
-    } catch (error) {
-      console.error("Error fetching quotes:", error);
-      res.status(500).json({ message: "Error fetching market data" });
+
+      const selection = await getActiveProviderSelection();
+      if (!selection) {
+        return res.status(503).json({ ok: false, error: "No active market-data provider is available" });
+      }
+
+      const providerSymbols = requestedSymbols
+        .map((canonicalSymbol) => {
+          const providerSymbol =
+            typeof selection.provider.mapSymbol === "function"
+              ? selection.provider.mapSymbol(canonicalSymbol)
+              : canonicalSymbol;
+          return providerSymbol ? { canonicalSymbol, providerSymbol } : null;
+        })
+        .filter((value): value is { canonicalSymbol: string; providerSymbol: string } => value !== null);
+
+      if (!providerSymbols.length) {
+        return res.status(400).json({ ok: false, error: "None of the requested symbols are supported by the active provider" });
+      }
+
+      const result = await selection.provider.fetchQuotes({ symbols: providerSymbols });
+      return res.json({
+        ok: true,
+        providerKey: selection.providerKey,
+        driver: selection.provider.driver,
+        rows: result.quotes.map((quote) => ({
+          symbol: quote.canonicalSymbol,
+          bid: quote.bid,
+          ask: quote.ask,
+          price: quote.price,
+          timestamp: quote.tsMs,
+        })),
+        ...(String(req.query.includeRaw ?? "").trim() === "1" ? { raw: result.raw ?? null } : {}),
+      });
+    } catch (error: any) {
+      console.error("Error fetching market data quotes:", error);
+      return res.status(500).json({ ok: false, error: String(error?.message ?? error) });
     }
   });
 
-  app.get("/api/market/symbols", async (_req, res) => {
+  app.get("/api/market/symbols", async (req: Request, res: Response) => {
     try {
-      if (!apiKey) {
-        return res.status(500).json({ message: "API key not configured" });
+      const selection = await getActiveProviderSelection();
+      const source = String(req.query.source ?? "").trim().toLowerCase();
+      const category = String(req.query.category ?? "forex").trim().toLowerCase();
+      const limitRaw = Number(req.query.limit ?? 100);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.trunc(limitRaw))) : 100;
+
+      if (source === "provider" && selection?.provider.listReference) {
+        const rows = await selection.provider.listReference({ category, limit });
+        return res.json({
+          ok: true,
+          source: "provider",
+          providerKey: selection.providerKey,
+          category,
+          rows,
+        });
       }
-      
-      const r = await axios.get(`${base}/symbols`, { params: { api_key: apiKey } });
-      res.json(r.data);
-    } catch (error) {
-      console.error("Error fetching symbols:", error);
-      res.status(500).json({ message: "Error fetching market data" });
+
+      const rows = await storage.getSymbolConfigs();
+      return res.json({
+        ok: true,
+        source: "db",
+        providerKey: selection?.providerKey ?? null,
+        rows,
+      });
+    } catch (error: any) {
+      console.error("Error fetching market symbols:", error);
+      return res.status(500).json({ ok: false, error: String(error?.message ?? error) });
     }
   });
 }

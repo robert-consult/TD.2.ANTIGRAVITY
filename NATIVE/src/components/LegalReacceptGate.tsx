@@ -17,6 +17,7 @@ import {
     NativeScrollEvent,
 } from 'react-native';
 import { legalApi } from '../services/api';
+import { subscribeLegalReaccept } from '../services/legalSignals';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import { colors, spacing, typography } from '../theme';
@@ -114,6 +115,12 @@ export const LegalReacceptGate: React.FC<Props> = ({ onVisibilityChange }) => {
     useEffect(() => {
         if (!user?.legalReacceptRequired) setForcedOpen(false);
     }, [user?.legalReacceptRequired]);
+
+    useEffect(() => {
+        return subscribeLegalReaccept(() => {
+            setForcedOpen(true);
+        });
+    }, []);
 
     const canAccept = Boolean(
         status?.required &&

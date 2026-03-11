@@ -10,8 +10,8 @@
         "lint": "eslint .",
         "build:android": "cd android && ./gradlew assembleRelease",
         "build:android:bundle": "cd android && ./gradlew bundleRelease",
-        "build:ios": "cd ios && xcodebuild -workspace TradeQuipNative.xcworkspace -scheme TradeQuipNative -configuration Release -sdk iphoneos",
-        "pod:install": "cd ios && pod install --repo-update"
+        "build:ios": "cd ios && bash ../scripts/build-ios.sh",
+        "pod:install": "cd ios && bash ../scripts/pod-install.sh"
     },
     "dependencies": {
         "@hookform/resolvers": "^5.2.2",

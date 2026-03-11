@@ -100,7 +100,11 @@ export async function upsertPartnerInquiryRoutingConfig(input: {
 
   const [existing] = await db.select({ id: systemConfig.id }).from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
   if (!existing) {
-    await db.insert(systemConfig).values({ id: 1 });
+    await db.insert(systemConfig).values({
+      id: 1,
+      marketDataActiveProviderKey: "twelvedata",
+      marketDataFallbackProviderKeysCsv: "",
+    });
   }
 
   await db

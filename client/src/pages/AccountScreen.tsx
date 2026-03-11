@@ -12,8 +12,17 @@ import { MailboxMinitab } from "@/components/Mailbox/MailboxMinitab";
 import { useMailboxThreads } from "@/hooks/use-mailbox";
 import { StaleDataBadge } from "@/components/StaleDataBadge";
 import { useStaleData } from "@/lib/staleData";
+import type { DashboardAccountPanel } from "@/lib/dashboardUrlState";
 
-export default function AccountScreen() {
+type AccountScreenProps = {
+  activePanel?: DashboardAccountPanel;
+  onActivePanelChange?: (panel: DashboardAccountPanel) => void;
+};
+
+export default function AccountScreen({
+  activePanel = "account",
+  onActivePanelChange,
+}: AccountScreenProps) {
   const sideLabels: Record<string, { label: string }> = {
     BUY: { label: "Buy" },
     SELL: { label: "Sell" },
@@ -210,7 +219,11 @@ export default function AccountScreen() {
 
       <div className="flex-1 p-3 sm:p-6">
         <div className="max-w-4xl">
-          <Tabs defaultValue="account" className="space-y-4 sm:space-y-6">
+          <Tabs
+            value={activePanel}
+            onValueChange={(value) => onActivePanelChange?.(value as DashboardAccountPanel)}
+            className="space-y-4 sm:space-y-6"
+          >
             <TabsList className="tq-account-tabs bg-neutral-800 border border-gray-700 h-auto p-1 w-full max-w-sm grid grid-cols-2 gap-1">
               <TabsTrigger value="account" className="tq-account-tab text-xs sm:text-sm data-[state=active]:bg-neutral-700">
                 Account

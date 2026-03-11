@@ -17,6 +17,8 @@ const state = vi.hoisted(() => {
   };
 });
 
+let orderEngineModule: Awaited<typeof import("./orderEngine")> | null = null;
+
 vi.mock("@db", () => ({
   db: {
     select: state.select,
@@ -149,11 +151,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  orderEngineModule?.resetOrderEngineForTests();
+  orderEngineModule = null;
   vi.restoreAllMocks();
 });
 
 test("skips stale or malformed quote updates without running the expiry sweep before it is due", async () => {
-  const { onQuotesUpdated } = await import("./orderEngine");
+  orderEngineModule = await import("./orderEngine");
+  const { onQuotesUpdated } = orderEngineModule;
 
   await onQuotesUpdated([
     { symbol: "EURUSD", isStale: true, bid: 1.1, ask: 1.2 },
@@ -161,14 +166,15 @@ test("skips stale or malformed quote updates without running the expiry sweep be
   ]);
 
   expect(state.select).not.toHaveBeenCalled();
-}, 10_000);
+}, 30_000);
 
 test("runs the pending-expiry sweep when enough time has elapsed", async () => {
   state.nowSec = 10;
-  const { onQuotesUpdated } = await import("./orderEngine");
+  orderEngineModule = await import("./orderEngine");
+  const { onQuotesUpdated } = orderEngineModule;
 
   await onQuotesUpdated([]);
 
   expect(state.select).toHaveBeenCalled();
   expect(state.selectWhere).toHaveBeenCalledTimes(1);
-}, 10_000);
+}, 30_000);

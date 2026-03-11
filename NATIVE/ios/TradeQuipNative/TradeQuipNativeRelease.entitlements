@@ -6,8 +6,8 @@
     <string>production</string>
     <key>com.apple.developer.associated-domains</key>
     <array>
-        <string>applinks:tradequip.app</string>
-        <string>webcredentials:tradequip.app</string>
+        <string>applinks:tradehub.example.com</string>
+        <string>webcredentials:tradehub.example.com</string>
     </array>
 </dict>
 </plist>

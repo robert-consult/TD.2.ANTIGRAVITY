@@ -3,11 +3,16 @@
  * Real-time quotes with WebSocket support
  */
 
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+    WS_MSG_QUOTES_SNAPSHOT,
+    WS_MSG_QUOTES_UPDATE,
+} from '@shared/ws/protocol';
 import { quotesApi } from '../services/api';
 import { wsService } from '../services/websocket';
 import { useAuth } from './useAuth';
+import { useWsConnectionState } from './useWsConnectionState';
 
 export interface SymbolConfig {
     id: number;
@@ -51,7 +56,7 @@ function calculatePctChange(current: number | null, previous: number | null): nu
 export function useQuotes() {
     const queryClient = useQueryClient();
     const { isAuthenticated } = useAuth();
-    const [isLive, setIsLive] = useState(wsService.isConnected());
+    const isLive = useWsConnectionState();
 
     // Get symbols configuration
     const {
@@ -138,7 +143,7 @@ export function useQuotes() {
         },
         enabled: isAuthenticated,
         staleTime: 1000,
-        refetchInterval: wsService.isConnected() ? false : 5000,
+        refetchInterval: isLive ? false : 5000,
     });
 
     // Get quote by symbol name
@@ -226,7 +231,6 @@ export function useQuotes() {
         };
 
         const subscribeNow = () => {
-            setIsLive(true);
             if (enabledSymbols.length) {
                 wsService.subscribeQuotes(enabledSymbols);
             } else {
@@ -235,14 +239,14 @@ export function useQuotes() {
         };
 
         const unsubConnect = wsService.onConnect(() => subscribeNow());
-        const unsubDisconnect = wsService.onDisconnect(() => setIsLive(false));
+        const unsubDisconnect = wsService.onDisconnect(() => undefined);
 
         const unsubMessage = wsService.onMessage((message) => {
             if (!message || typeof message !== 'object') return;
-            if (message.type === 'quotes:snapshot') {
+            if (message.type === WS_MSG_QUOTES_SNAPSHOT) {
                 applyRows((message as any).rows ?? [], true);
             }
-            if (message.type === 'quotes:update') {
+            if (message.type === WS_MSG_QUOTES_UPDATE) {
                 applyRows((message as any).rows ?? [], false);
             }
         });
@@ -258,6 +262,11 @@ export function useQuotes() {
             unsubMessage();
         };
     }, [enabledSymbols, isAuthenticated, queryClient, symbolNameMap]);
+
+    useEffect(() => {
+        if (!isAuthenticated || isLive) return;
+        refetchQuotes().catch(() => undefined);
+    }, [isAuthenticated, isLive, refetchQuotes]);
 
     return {
         // Data

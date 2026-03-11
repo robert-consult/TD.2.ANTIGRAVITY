@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-config
+  namespace: tradehub
+data:
+  APP_URL: "https://staging.tradehub.example.com"
+  BULL_BOARD_ENABLED: "1"
+  MARKET_DATA_PROVIDER_ALLOW_ENV_FALLBACK: "0"
+  ALLOW_INSECURE_INTERNAL_TRANSPORT: "1"

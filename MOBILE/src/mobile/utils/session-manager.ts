@@ -5,6 +5,9 @@
 
 import { App } from "@capacitor/app";
 import { isNativeApp } from "./mobile-utils";
+import { fetchCsrfToken } from "./csrf";
+
+let currentUserStatusRequest: Promise<SessionStatus> | null = null;
 
 export interface SessionStatus {
     isAuthenticated: boolean;
@@ -14,49 +17,57 @@ export interface SessionStatus {
     expiresAt?: number;
 }
 
+async function fetchCurrentUserStatus(): Promise<SessionStatus> {
+    if (currentUserStatusRequest) {
+        return currentUserStatusRequest;
+    }
+
+    currentUserStatusRequest = (async () => {
+        try {
+            const response = await fetch("/api/auth/current-user", {
+                method: "GET",
+                credentials: "include",
+                cache: "no-store",
+                headers: {
+                    "Accept": "application/json",
+                },
+            });
+
+            if (!response.ok) {
+                return { isAuthenticated: false };
+            }
+
+            const data = await response.json();
+            return {
+                isAuthenticated: true,
+                userId: data.id,
+                email: data.email,
+                isAdmin: data.isAdmin,
+            };
+        } catch (error) {
+            console.error("Session check failed:", error);
+            return { isAuthenticated: false };
+        } finally {
+            currentUserStatusRequest = null;
+        }
+    })();
+
+    return currentUserStatusRequest;
+}
+
 /**
  * Check current session status with backend
  */
 export async function checkSessionStatus(): Promise<SessionStatus> {
-    try {
-        const response = await fetch("/api/auth/current-user", {
-            method: "GET",
-            credentials: "include",
-            headers: {
-                "Accept": "application/json",
-            },
-        });
-
-        if (!response.ok) {
-            return { isAuthenticated: false };
-        }
-
-        const data = await response.json();
-        return {
-            isAuthenticated: true,
-            userId: data.id,
-            email: data.email,
-            isAdmin: data.isAdmin,
-        };
-    } catch (error) {
-        console.error("Session check failed:", error);
-        return { isAuthenticated: false };
-    }
+    return fetchCurrentUserStatus();
 }
 
 /**
  * Refresh session to extend expiration
  */
 export async function refreshSession(): Promise<boolean> {
-    try {
-        const response = await fetch("/api/auth/refresh", {
-            method: "POST",
-            credentials: "include",
-        });
-        return response.ok;
-    } catch {
-        return false;
-    }
+    const status = await fetchCurrentUserStatus();
+    return status.isAuthenticated;
 }
 
 /**
@@ -82,7 +93,7 @@ export function initSessionMonitoring(callbacks: {
         return () => { };
     }
 
-    let intervalId: NodeJS.Timeout | null = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     // Check session when app comes to foreground
     const appStateListener = App.addListener("appStateChange", async (state) => {
@@ -114,7 +125,7 @@ export function initSessionMonitoring(callbacks: {
 
     // Return cleanup function
     return () => {
-        appStateListener.then((l) => l.remove());
+        void appStateListener.then((l) => l.remove());
         if (intervalId) {
             clearInterval(intervalId);
         }
@@ -126,9 +137,11 @@ export function initSessionMonitoring(callbacks: {
  */
 export async function secureLogout(): Promise<boolean> {
     try {
-        const response = await fetch("/api/logout", {
+        const token = await fetchCsrfToken();
+        const response = await fetch("/api/auth/logout", {
             method: "POST",
             credentials: "include",
+            headers: token ? { "x-csrf-token": token } : undefined,
         });
         return response.ok;
     } catch {
@@ -140,7 +153,7 @@ export async function secureLogout(): Promise<boolean> {
  * Cookie debugging helper (development only)
  */
 export function debugCookies(): void {
-    if (process.env.NODE_ENV !== "production") {
+    if (import.meta.env.DEV) {
         console.log("Document cookies:", document.cookie);
         console.log("Cookie enabled:", navigator.cookieEnabled);
     }

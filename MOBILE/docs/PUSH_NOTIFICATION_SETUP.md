@@ -1,149 +1,78 @@
-# Firebase Push Notification Setup Guide
+# Wrapper Push Notification Setup Guide
 
-## Prerequisites
+## Scope
 
-1. **Firebase Project**: Create a project at [Firebase Console](https://console.firebase.google.com)
-2. **Android App**: Register your Android app with package name `com.tradequip.app`
+This document covers the Capacitor wrapper push contract in `MOBILE/`. The server-side registry already exists under `/api/push/*`.
 
----
+## Current State
 
-## Step 1: Download google-services.json
+- Wrapper clients register and revoke device tokens through:
+  - `POST /api/push/register`
+  - `POST /api/push/unregister`
+  - `GET /api/push`
+- The wrapper sends `appVariant: "wrapper"` and includes environment, locale, timezone, app version, build number, and device identity metadata.
+- Android is the concrete repo-validated wrapper push path today.
+- iOS wrapper push still requires operator-side Apple/FCM/APNs provisioning before release.
 
-1. Go to Firebase Console → Project Settings → Your Apps
-2. Download `google-services.json`
-3. Copy to: `MOBILE/android/app/google-services.json`
+## Android Wrapper Setup
 
----
+1. Create/register the Android app in Firebase with package id `com.tradequip.app`.
+2. Download `google-services.json`.
+3. Place it at `MOBILE/android/app/google-services.json` for the target environment.
+4. Ensure notification click targets and app-link domains resolve to `https://tradehub.example.com`.
 
-## Step 2: Update Gradle Configuration
+## iOS Wrapper Setup
 
-### android/build.gradle (Project level)
-```gradle
-buildscript {
-    dependencies {
-        classpath 'com.google.gms:google-services:4.4.0'
-    }
+1. Create/register the iOS app in Apple Developer and, if using Firebase mediation, in Firebase as well.
+2. Enable push notifications and associated domains for the wrapper bundle id.
+3. Provide the correct APNs/Auth Key or Firebase-backed APNs configuration for the release environment.
+4. Validate notification landing paths against the live web routes listed below.
+
+## Backend Payload Contract
+
+Wrapper clients should send a token payload shaped like:
+
+```json
+{
+  "token": "<device token>",
+  "appVariant": "wrapper",
+  "platform": "android",
+  "environment": "production",
+  "pushProvider": "FCM",
+  "deviceId": "<stable device id>",
+  "deviceInstallId": "<stable install id>",
+  "appVersion": "<app version>",
+  "buildNumber": "<build number>",
+  "locale": "en-US",
+  "timezone": "America/Chicago",
+  "metadata": {
+    "wrapperMode": "remote-url"
+  }
 }
 ```
 
-### android/app/build.gradle (App level)
-```gradle
-apply plugin: 'com.google.gms.google-services'
+The server stores the token in the shared `push_devices` registry, scopes it to the authenticated user, and revokes it on logout when the wrapper clears the active token.
 
-dependencies {
-    implementation platform('com.google.firebase:firebase-bom:32.7.0')
-    implementation 'com.google.firebase:firebase-messaging'
-}
-```
+## Supported Notification Targets
 
----
+Wrapper notification payloads should map into real app routes only:
 
-## Step 3: Update AndroidManifest.xml
+- `/`
+- `/?tab=quotes`
+- `/?tab=chart&symbol=USDJPY`
+- `/?tab=trade&symbol=USDJPY`
+- `/?tab=history`
+- `/?tab=leaderboard`
+- `/?tab=account`
+- `/?tab=account&panel=mailbox`
+- `/profile`
+- `/journal`
+- `/verify-email?token=...`
 
-Add to `android/app/src/main/AndroidManifest.xml`:
+Avoid legacy wrapper-local routes such as `/settings`, `/account`, `/chart/:symbol`, or `/trade/:symbol` unless they are being normalized into the query-backed dashboard contract first.
 
-```xml
-<manifest>
-    <application>
-        <!-- Firebase Messaging Service -->
-        <service
-            android:name="com.google.firebase.messaging.FirebaseMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-        
-        <!-- Notification Icon -->
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@drawable/ic_notification" />
-        
-        <!-- Notification Color -->
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_color"
-            android:resource="@color/brand_blue" />
-    </application>
-</manifest>
-```
+## Release Notes
 
----
-
-## Step 4: Backend Integration
-
-Create endpoint to store FCM tokens:
-
-```typescript
-// server/routes/push.ts
-app.post('/api/push/register', ensureAuth, async (req, res) => {
-  const { token, platform } = req.body;
-  const userId = req.session.userId;
-  
-  await db.insert(pushTokens).values({
-    userId,
-    token,
-    platform,
-    createdAt: new Date(),
-  });
-  
-  res.json({ success: true });
-});
-```
-
----
-
-## Step 5: Send Notifications (Server)
-
-```typescript
-import admin from 'firebase-admin';
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
-async function sendPushNotification(token: string, title: string, body: string, data?: object) {
-  await admin.messaging().send({
-    token,
-    notification: { title, body },
-    data: data as { [key: string]: string },
-    android: {
-      priority: 'high',
-      notification: {
-        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-        channelId: 'tradequip_trades',
-      },
-    },
-  });
-}
-```
-
----
-
-## Notification Types for TradeQuip
-
-| Type | When | Priority |
-|------|------|----------|
-| `trade_executed` | Trade opens/closes | High |
-| `price_alert` | Price target hit | High |
-| `margin_warning` | Low margin | Critical |
-| `account_update` | Balance change | Normal |
-| `news_alert` | Market news | Low |
-
----
-
-## Testing
-
-```bash
-# Test FCM with curl
-curl -X POST \
-  https://fcm.googleapis.com/fcm/send \
-  -H 'Authorization: key=YOUR_SERVER_KEY' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "to": "DEVICE_FCM_TOKEN",
-    "notification": {
-      "title": "Trade Executed",
-      "body": "Your USDJPY buy order has been filled"
-    }
-  }'
-```
+- Do not treat tracked Firebase files as authoritative production credentials.
+- Replace placeholder or environment-mismatched config files before release.
+- Validate registration and logout-driven revocation on both wrapper platforms as part of release testing.

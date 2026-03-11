@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-ingress
+  namespace: tradehub
+spec:
+  tls:
+    - hosts:
+        - staging.tradehub.example.com
+      secretName: tradehub-staging-tls
+  rules:
+    - host: staging.tradehub.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tradehub-api
+                port:
+                  number: 80

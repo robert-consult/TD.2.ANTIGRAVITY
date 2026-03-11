@@ -1,0 +1,7 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-worker-canary
+  namespace: tradehub
+spec:
+  replicas: 0

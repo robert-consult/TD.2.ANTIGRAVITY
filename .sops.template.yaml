@@ -1,0 +1,9 @@
+creation_rules:
+  - path_regex: k8s/overlays/.+/tradehub-secrets\\.sops\\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age:
+      - AGE-RECIPIENT-PLACEHOLDER
+  - path_regex: ops/kubernetes/overlays/.+/grafana-admin\\.sops\\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age:
+      - AGE-RECIPIENT-PLACEHOLDER

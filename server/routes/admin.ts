@@ -1040,6 +1040,8 @@ export function registerAdminRoutes(app: Express) {
           quoteRefreshMs: next.quoteRefreshMs ?? 870,
           feedPollMs: next.feedPollMs ?? 870,
           staleThresholdMs: next.staleThresholdMs ?? 30000,
+          marketDataActiveProviderKey: (next as any).marketDataActiveProviderKey ?? "twelvedata",
+          marketDataFallbackProviderKeysCsv: (next as any).marketDataFallbackProviderKeysCsv ?? "",
           fxRolloverTz: next.fxRolloverTz ?? "America/New_York",
           fxRolloverTime: next.fxRolloverTime ?? "17:00",
           signupCaptchaEnforce: next.signupCaptchaEnforce ?? true,

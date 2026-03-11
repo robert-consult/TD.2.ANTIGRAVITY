@@ -87,3 +87,41 @@ jest.mock('react-native-device-info', () => ({
   getModel: () => 'jest-model',
   getVersion: () => '0.0.0',
 }));
+
+jest.mock('@react-native-firebase/messaging', () => {
+  const mock = () => ({
+    requestPermission: jest.fn().mockResolvedValue(1),
+    getToken: jest.fn().mockResolvedValue('jest-fcm-token'),
+    onTokenRefresh: jest.fn(() => jest.fn()),
+    onMessage: jest.fn(() => jest.fn()),
+    onNotificationOpenedApp: jest.fn(() => jest.fn()),
+    getInitialNotification: jest.fn().mockResolvedValue(null),
+    hasPermission: jest.fn().mockResolvedValue(1),
+    subscribeToTopic: jest.fn().mockResolvedValue(undefined),
+    unsubscribeFromTopic: jest.fn().mockResolvedValue(undefined),
+  });
+  mock.AuthorizationStatus = {
+    AUTHORIZED: 1,
+    PROVISIONAL: 2,
+  };
+  return {
+    __esModule: true,
+    default: mock,
+  };
+});
+
+jest.mock('@notifee/react-native', () => ({
+  __esModule: true,
+  default: {
+    createChannel: jest.fn().mockResolvedValue(undefined),
+    displayNotification: jest.fn().mockResolvedValue(undefined),
+    onForegroundEvent: jest.fn(() => jest.fn()),
+  },
+  AndroidImportance: {
+    HIGH: 4,
+    DEFAULT: 3,
+  },
+  EventType: {
+    PRESS: 1,
+  },
+}));

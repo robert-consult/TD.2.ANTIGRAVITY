@@ -253,6 +253,14 @@ async function runMarginCallJob() {
 let currentIntervalId: ReturnType<typeof setInterval> | null = null;
 let started = false;
 
+export function stopMarginCallScheduler(): void {
+    if (currentIntervalId) {
+        clearInterval(currentIntervalId);
+        currentIntervalId = null;
+    }
+    started = false;
+}
+
 export async function startMarginCallScheduler(): Promise<void> {
     if (started) return;
     started = true;

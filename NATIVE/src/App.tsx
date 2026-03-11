@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { StatusBar, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { StatusBar, ActivityIndicator, Text, StyleSheet, Linking } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -23,6 +23,8 @@ import { LeaderboardScreen } from './screens/main/LeaderboardScreen';
 import { useAuth } from './hooks/useAuth';
 import { LegalReacceptGate } from './components/LegalReacceptGate';
 import { startGriftPing, stopGriftPing } from './services/griftPing';
+import pushNotificationService from './services/pushNotifications';
+import { getDeepLinkPrefixes, resolveAllowedDeepLink } from './services/runtimeConfig';
 
 const Stack = createStackNavigator();
 const queryClient = new QueryClient({
@@ -36,7 +38,7 @@ const queryClient = new QueryClient({
 });
 
 const linking = {
-    prefixes: ['tradequip://', 'https://tradequip.app'],
+    prefixes: getDeepLinkPrefixes(),
     config: {
         screens: {
             SignIn: 'signin',
@@ -49,8 +51,14 @@ const linking = {
                 screens: {
                     Dashboard: 'dashboard',
                     Quotes: 'quotes',
-                    Charts: 'charts',
-                    Trade: 'trade',
+                    Charts: {
+                        path: 'chart/:symbol?',
+                        parse: { symbol: (symbol: string) => symbol },
+                    },
+                    Trade: {
+                        path: 'trade/:symbol?',
+                        parse: { symbol: (symbol: string) => symbol },
+                    },
                     History: 'history',
                     Account: 'account',
                 },
@@ -59,6 +67,22 @@ const linking = {
             ProfileSettings: 'profile',
             Leaderboard: 'leaderboard',
         },
+    },
+    async getInitialURL() {
+        const url = await Linking.getInitialURL();
+        return url ? resolveAllowedDeepLink(url) : null;
+    },
+    subscribe(listener: (url: string) => void) {
+        const subscription = Linking.addEventListener('url', ({ url }) => {
+            const nextUrl = resolveAllowedDeepLink(url);
+            if (nextUrl) {
+                listener(nextUrl);
+            }
+        });
+
+        return () => {
+            subscription.remove();
+        };
     },
 };
 
@@ -76,6 +100,52 @@ const LoadingScreen = () => (
 // Navigation wrapper that reads auth state
 const Navigation = () => {
     const { isAuthenticated, isLoading, checkAuth } = useAuth();
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+
+        const openNotificationTarget = async (remoteMessage: any) => {
+            const rawLink = String(
+                remoteMessage?.data?.link ??
+                remoteMessage?.data?.path ??
+                remoteMessage?.notification?.android?.link ??
+                '',
+            ).trim();
+            if (!rawLink) return;
+
+            const nextUrl = resolveAllowedDeepLink(rawLink);
+            if (!nextUrl) {
+                console.warn('[push] rejected notification target', rawLink);
+                return;
+            }
+
+            try {
+                await Linking.openURL(nextUrl);
+            } catch (error) {
+                console.warn('[push] failed to open notification target', error);
+            }
+        };
+
+        pushNotificationService.setOnNotificationOpened((remoteMessage) => {
+            openNotificationTarget(remoteMessage).catch((error) => {
+                console.warn('[push] notification target handling failed', error);
+            });
+        });
+
+        pushNotificationService.initialize().catch((error) => {
+            console.warn('[push] initialization failed', error);
+        });
+
+        const unsubscribeTokenRefresh = pushNotificationService.onTokenRefresh((token) => {
+            pushNotificationService.syncTokenWithServer(token).catch((error) => {
+                console.warn('[push] token refresh sync failed in app shell', error);
+            });
+        });
+
+        return () => {
+            unsubscribeTokenRefresh();
+        };
+    }, [isAuthenticated]);
 
     // Check auth on mount
     useEffect(() => {

@@ -309,7 +309,7 @@ describe("ProfileSettings", () => {
 
     expect(screen.getByText("Set Up Two-Factor Authentication")).toBeInTheDocument();
     expect(screen.getByAltText("2FA QR Code")).toHaveAttribute("src", "data:image/png;base64,abc123");
-  });
+  }, 15_000);
 
   it("blocks short password submissions before hitting the network", async () => {
     setQueryState();

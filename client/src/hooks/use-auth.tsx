@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { prefetchStartupData } from "@/lib/startupDataPrefetch";
 import { readStoredLocaleForUser, shouldPreferStoredUserLocale } from "@/i18n/localeStorage";
 import { DEFAULT_LOCALE } from "@shared/locale/preferences";
+import { isNativeApp, unregisterStoredPushToken } from "../../../MOBILE/src/mobile/utils";
 
 interface User {
   id: number;
@@ -323,6 +324,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       setLoading(true);
       const userId = user?.id;
+      if (isNativeApp()) {
+        await unregisterStoredPushToken().catch((error) => {
+          console.warn("[mobile] push token unregister failed during logout", error);
+        });
+      }
       await apiRequest("POST", "/api/auth/logout");
       if (userId) {
         sessionStorage.removeItem(`verification_reminder_dismissed_${userId}`);

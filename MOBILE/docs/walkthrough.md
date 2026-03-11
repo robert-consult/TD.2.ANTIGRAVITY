@@ -1,123 +1,63 @@
-# Capacitor Mobile Integration Walkthrough
+# Capacitor Wrapper Walkthrough
 
-## ✅ PROJECT COMPLETE
+> Current architecture guide for `MOBILE/`. This is no longer an Android-only or wrapper-local UI project.
 
-All phases of mobile integration have been successfully completed.
+## What The Wrapper Actually Does
 
----
+1. Capacitor launches a native Android or iOS shell.
+2. The shell loads the live web app from the canonical host or an explicit local/tunnel override.
+3. `client/src/components/MobileWrapperBridge.tsx` activates wrapper-only behavior from inside the web app.
+4. `MOBILE/src/mobile/utils/*` provides deep-link parsing, session monitoring, push registration, safe-area helpers, and lifecycle integration.
+5. Native shell files in `MOBILE/android/` and `MOBILE/ios/` enforce the host allowlist, transport policy, and screen-capture protections.
 
-## Final Project Structure
+## Directory Map
 
-```
+```text
 MOBILE/
-├── android/                      ✅ Native Android project
-│   ├── app/src/main/res/xml/
-│   │   └── network_security_config.xml
-│   ├── key.properties            ✅ Signing credentials
-│   └── tradequip-release-key.keystore ✅ Release keystore
-├── docs/
-│   ├── APP_SIGNING_GUIDE.md
-│   ├── PUSH_NOTIFICATION_SETUP.md
-│   ├── SECURITY_AUDIT_GUIDE.md
-│   ├── TESTING_CHECKLIST.md
-│   ├── TASK.md
-│   └── walkthrough.md
-├── resources/
-│   ├── icon.png                  ✅ App icon
-│   ├── feature_graphic.png       ✅ Play Store banner
-│   └── ICON_GUIDE.md
-├── src/mobile/
-│   ├── components/ (4 files)
-│   ├── hooks/ (2 files)
-│   ├── styles/ (1 file)
-│   └── utils/ (5 files)
-├── build-android.sh              ✅ Debug build
-├── build-release.sh              ✅ Release build
 ├── capacitor.config.ts
-└── package.json
+├── android/                  # Android shell
+├── ios/                      # iOS shell
+├── src/mobile/
+│   ├── hooks/                # platform detection hooks
+│   └── utils/                # bridge-only utilities
+├── scripts/                  # sync, JDK, tunnel, iOS guard helpers
+└── docs/                     # current-state wrapper docs
 ```
 
----
+## Source Of Truth
 
-## Components Created
+- Trader/support UI stays in `client/`.
+- The deleted files under `MOBILE/src/mobile/components/*` had no replacement in `MOBILE/` because the replacement is the actual web application.
+- Route state for the dashboard-style wrapper flows is now query-backed:
+  - `/`
+  - `/?tab=quotes`
+  - `/?tab=chart&symbol=USDJPY`
+  - `/?tab=trade&symbol=USDJPY`
+  - `/?tab=history`
+  - `/?tab=leaderboard`
+  - `/?tab=account`
+  - `/?tab=account&panel=mailbox`
 
-| Component | Location |
-|-----------|----------|
-| MobileDashboard | `src/mobile/components/` |
-| MobileProfileSettings | `src/mobile/components/` |
-| MobileNavigation | `src/mobile/components/` |
-| MobileTradeScreen | `src/mobile/components/` |
-
----
-
-## Utilities & Services
-
-| Module | Purpose |
-|--------|---------|
-| mobile-utils | Native API wrappers |
-| useMobilePlatform | Platform detection hooks |
-| deep-linking | App Links URL handling |
-| push-notifications | FCM integration |
-| session-manager | Session monitoring |
-
----
-
-## Legal Compliance
-
-| Document | Status |
-|----------|--------|
-| Terms of Service (DOC1) | ✅ Already existed |
-| Privacy Policy (DOC2) | ✅ Created & seeded |
-| Mobile App Addendum | ✅ Included in DOC2 |
-
----
-
-## Play Store Checklist
-
-- [x] App icon generated
-- [x] Feature graphic created
-- [x] Signing keystore generated
-- [x] key.properties configured
-- [x] Release build script ready
-- [x] Privacy Policy seeded in database
-- [x] Network security config
-- [x] Push notifications configured
-- [x] Deep linking implemented
-
----
-
-## Build Commands
+## Commands
 
 ```bash
-# Debug build
-cd MOBILE && ./build-android.sh
-
-# Release APK/AAB
-cd MOBILE && ./build-release.sh
-
-# Run on emulator
-adb reverse tcp:5000 tcp:5000
-export CAPACITOR_SERVER_URL="http://localhost:5000"
-npx cap run android
-
-# Or (trusted HTTPS tunnel; no emulator CA work)
-npm run tunnel:android
+cd MOBILE
+npm install
+npm run sync
+npm run doctor
+npm run run:android
+npm run build:android:release
+npm run run:ios   # macOS + Xcode only
 ```
 
----
+## Validation Status
 
-## Task Completion Summary
+- `npm run sync` is the authoritative wrapper refresh path and syncs both Android and iOS shells.
+- Android release builds are runnable from this Linux host.
+- iOS execution is intentionally blocked on non-macOS hosts by `scripts/run-ios.sh`.
 
-| Phase | Items | Status |
-|-------|-------|--------|
-| Phase 1: Assessment | 6 | ✅ 100% |
-| Phase 2: Capacitor Setup | 7 | ✅ 100% |
-| Phase 3: Mobile UI Design | 5 | ✅ 100% |
-| Phase 4: Implementation | 6 | ✅ 100% |
-| Phase 5: Testing | 5 | ✅ 100% |
-| Phase 6: Play Store | 4 | ✅ 100% |
-| **Total** | **33** | **✅ COMPLETE** |
+## Remaining Release Work
 
----
-
-*Mobile integration completed on 2026-01-23*
+- Replace any placeholder or legacy signing / Firebase files with operator-managed release credentials.
+- Provide production certificate pin values out of band.
+- Complete physical-device Android and iPhone matrix testing from the testing checklist.

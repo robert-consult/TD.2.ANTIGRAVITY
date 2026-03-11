@@ -1,160 +1,121 @@
-#!/bin/bash
-# TradeQuip NATIVE - React Native Initialization Script
-# Run this script from WSL to set up the React Native project
+#!/usr/bin/env bash
+# TradeQuip NATIVE bootstrap script
+# Validates local prerequisites and bootstraps the checked-in NATIVE project in place.
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+INSTALL_DEPS=1
+
+usage() {
+  cat <<'EOF'
+Usage: bash init-native.sh [--no-install] [--help]
+
+Bootstrap the checked-in React Native project under NATIVE/ without creating
+any sibling directories outside the repository.
+
+Options:
+  --no-install   Validate environment only; skip `npm install`
+  --help         Show this message
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-install)
+      INSTALL_DEPS=0
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck disable=SC1090
+    . "$NVM_DIR/nvm.sh" || true
+  fi
+fi
 
 echo "======================================"
-echo "TradeQuip Android Native - Setup"
+echo "TradeQuip Native Bootstrap"
 echo "======================================"
+echo "Project: $PROJECT_DIR"
 
-cd "$(dirname "$0")"
-PROJECT_DIR=$(pwd)
-PARENT_DIR=$(dirname "$PROJECT_DIR")
-
-# Step 1: Check prerequisites
 echo ""
-echo "[1/6] Checking prerequisites..."
+echo "[1/4] Checking core prerequisites..."
 
-# Node.js
-if ! command -v node &> /dev/null; then
-    echo "ERROR: Node.js not found. Please install Node.js 18+"
-    exit 1
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: Node.js is required." >&2
+  exit 1
 fi
 echo "✓ Node.js $(node --version)"
 
-# npm
-if ! command -v npm &> /dev/null; then
-    echo "ERROR: npm not found"
-    exit 1
+if ! command -v npm >/dev/null 2>&1; then
+  echo "ERROR: npm is required." >&2
+  exit 1
 fi
 echo "✓ npm $(npm --version)"
 
-# Java
-if ! command -v java &> /dev/null; then
-    echo "Java not found. Installing OpenJDK 17..."
-    sudo apt-get update && sudo apt-get install -y openjdk-17-jdk
-fi
-echo "✓ Java $(java -version 2>&1 | head -1)"
+echo ""
+echo "[2/4] Checking platform prerequisites..."
 
-# Android SDK
-if [ -z "$ANDROID_HOME" ]; then
-    if [ -d "$HOME/Android/Sdk" ]; then
-        export ANDROID_HOME="$HOME/Android/Sdk"
-        echo "✓ Android SDK at $ANDROID_HOME (auto-detected)"
-    else
-        echo "ERROR: ANDROID_HOME not set. Please install Android SDK."
-        exit 1
-    fi
+if command -v java >/dev/null 2>&1; then
+  echo "✓ Java $(java -version 2>&1 | head -1)"
 else
-    echo "✓ Android SDK at $ANDROID_HOME"
+  echo "! Java not found. Android builds will fail until JDK 17+ is installed."
 fi
 
-# Step 2: Create React Native project
-echo ""
-echo "[2/6] Initializing React Native project..."
+if [[ -n "${ANDROID_HOME:-}" && -d "${ANDROID_HOME:-}" ]]; then
+  echo "✓ Android SDK at $ANDROID_HOME"
+elif [[ -d "$HOME/Android/Sdk" ]]; then
+  export ANDROID_HOME="$HOME/Android/Sdk"
+  echo "✓ Android SDK at $ANDROID_HOME (auto-detected)"
+else
+  echo "! ANDROID_HOME not set and ~/Android/Sdk not found. Android runs/builds will be unavailable."
+fi
 
-TEMP_DIR="$PARENT_DIR/TradeQuipNative_temp"
-NATIVE_DIR="$PARENT_DIR/ANDROID_NATIVE"
-
-# Clean up any previous temp directory
-rm -rf "$TEMP_DIR"
-
-# Debug & Fix environment
-# Source NVM to ensure we have the correct Node/NPM/NPX in Linux
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
-echo "Node: $(which node)"
-echo "NPM: $(which npm)"
-echo "NPX: $(which npx)"
-
-# Initialize RN project
-cd "$PARENT_DIR"
-# Use the community CLI directly to avoid deprecation warnings and ensure better compatibility
-npx -y @react-native-community/cli@latest init TradeQuipNative_temp --template react-native-template-typescript --skip-git-init --skip-install --verbose
-
-# Step 3: Copy source files
-echo ""
-echo "[3/6] Copying source files..."
-
-# Remove template src and replace with our src
-rm -rf "$TEMP_DIR/src"
-cp -r "$PROJECT_DIR/src" "$TEMP_DIR/src"
-
-# Copy config files
-cp "$PROJECT_DIR/tsconfig.json" "$TEMP_DIR/tsconfig.json"
-cp "$PROJECT_DIR/babel.config.js" "$TEMP_DIR/babel.config.js"
-
-# Step 4: Merge package.json
-echo ""
-echo "[4/6] Merging dependencies..."
-
-# For now, we'll use the package.json from our ANDROID folder
-# but keep the RN scripts from the template
-cd "$TEMP_DIR"
-
-# Install our dependencies
-npm install \
-    @hookform/resolvers \
-    @react-navigation/bottom-tabs \
-    @react-navigation/native \
-    @react-navigation/stack \
-    @tanstack/react-query \
-    axios \
-    date-fns \
-    numeral \
-    react-hook-form \
-    react-native-device-info \
-    react-native-gesture-handler \
-    react-native-linear-gradient \
-    react-native-mmkv \
-    react-native-reanimated \
-    react-native-safe-area-context \
-    react-native-screens \
-    react-native-svg \
-    react-native-vector-icons \
-    zod \
-    zustand
-
-# Dev dependencies
-npm install -D \
-    @types/numeral \
-    @types/react-native-vector-icons \
-    babel-plugin-module-resolver
-
-# Step 5: Android configuration
-echo ""
-echo "[5/6] Configuring Android..."
-
-# Update android/local.properties
-echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-
-# Update android/app/build.gradle to enable vector icons
-# (This is handled automatically by react-native-vector-icons)
-
-# Step 6: Rename and finalize
-echo ""
-echo "[6/6] Finalizing..."
-
-# Rename temp directory
-cd "$PARENT_DIR"
-rm -rf "$NATIVE_DIR"
-mv "$TEMP_DIR" "$NATIVE_DIR"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if command -v xcodebuild >/dev/null 2>&1; then
+    echo "✓ Xcode $(xcodebuild -version | head -1)"
+  else
+    echo "! Xcode not found. iOS runs/builds will be unavailable."
+  fi
+else
+  echo "! Non-macOS host detected. iOS runs/builds require macOS + Xcode."
+fi
 
 echo ""
-echo "======================================"
-echo "SETUP COMPLETE!"
-echo "======================================"
+echo "[3/4] Bootstrapping checked-in project..."
+
+cd "$PROJECT_DIR"
+
+if [[ "$INSTALL_DEPS" -eq 1 ]]; then
+  npm install
+  echo "✓ npm dependencies installed in-place under NATIVE/"
+else
+  echo "✓ Skipped npm install (--no-install)"
+fi
+
 echo ""
-echo "Project created at: $NATIVE_DIR"
+echo "[4/4] Summary"
+echo "✓ No sibling ANDROID_NATIVE folder was created."
+echo "✓ All work stays inside the checked-in NATIVE/ project."
 echo ""
 echo "Next steps:"
-echo "  1. cd $NATIVE_DIR"
-echo "  2. Update src/services/api.ts with your API URL"
-echo "  3. npx react-native run-android"
-echo ""
-echo "To build release APK:"
-echo "  cd $NATIVE_DIR/android"
-echo "  ./gradlew assembleRelease"
-echo ""
+echo "  cd $PROJECT_DIR"
+echo "  npm test"
+echo "  npm run lint"
+echo "  npm run build:android"
+echo "  npm run pod:install   # macOS + Xcode only"
+echo "  npm run build:ios     # macOS + Xcode only"

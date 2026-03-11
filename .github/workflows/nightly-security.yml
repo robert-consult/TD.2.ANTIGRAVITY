@@ -1,0 +1,51 @@
+name: Nightly Security
+
+on:
+  schedule:
+    - cron: "19 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  nightly-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: NPM audit
+        run: npm audit --audit-level=high
+
+      - name: Capture stale dependency report
+        run: npm outdated --long > npm-outdated.txt || true
+
+      - name: Trivy repo scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,config
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-repo.sarif
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-repo.sarif
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-security-reports
+          path: |
+            npm-outdated.txt
+            trivy-repo.sarif

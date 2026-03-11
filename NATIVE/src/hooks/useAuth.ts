@@ -1,10 +1,12 @@
 /**
- * TradeQuip Android - Auth Hook
+ * TradeQuip Native - Auth Hook
  * Aligned with webapp use-auth.tsx
  */
 
 import { create } from 'zustand';
 import { authApi } from '../services/api';
+import { clearCsrfTokenCache } from '../services/csrf';
+import pushNotificationService from '../services/pushNotifications';
 import { wsService } from '../services/websocket';
 
 // User interface matching webapp User type
@@ -121,11 +123,16 @@ export const useAuth = create<AuthState>((set, get) => ({
     logout: async () => {
         set({ isLoading: true });
         try {
+            await pushNotificationService.unregisterToken().catch((error) => {
+                console.warn('Push token unregister error:', error);
+            });
             await authApi.logout();
         } catch (error) {
             console.warn('Logout API error:', error);
         } finally {
             // Always clear local state
+            pushNotificationService.clearStoredToken();
+            clearCsrfTokenCache();
             wsService.disable();
             set({
                 user: null,
@@ -147,6 +154,7 @@ export const useAuth = create<AuthState>((set, get) => ({
             });
             wsService.enable();
         } catch {
+            clearCsrfTokenCache();
             wsService.disable();
             set({
                 user: null,

@@ -80,6 +80,10 @@ router.get("/api/auth/current-user", async (req: Request, res: Response) => {
       return res.status(401).json({ message: "User not found" });
     }
 
+    const rememberMeConfig = await getRememberMeConfig();
+    req.session.cookie.maxAge = rememberMeConfig.sessionCookieMaxAgeHours * 60 * 60 * 1000;
+    req.session.touch();
+
     const loadLegalReacceptState = async (userId: number) => {
       let legalReacceptRequired = false;
       let legalReacceptBlocked = false;

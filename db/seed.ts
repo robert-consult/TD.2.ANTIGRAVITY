@@ -16,7 +16,10 @@ async function seed() {
   })();
   
   // Ensure singleton config rows exist (id=1) with defaults
-  await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
+  await db
+    .insert(systemConfig)
+    .values({ id: 1, marketDataActiveProviderKey: "twelvedata", marketDataFallbackProviderKeysCsv: "" })
+    .onConflictDoNothing();
   await db.insert(globalSettings).values({ id: 1 }).onConflictDoNothing();
   if (process.env.SEED_RELAX_MARKET_HOURS === "1") {
     // E2E/CI must be deterministic regardless of the real-world day/time.

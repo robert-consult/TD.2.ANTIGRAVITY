@@ -156,7 +156,10 @@ export async function updateI18nConfig(
   const supportedLocales = normalizeLocales(next.supportedLocales, next.defaultLocale);
   const now = Math.floor(Date.now() / 1000);
 
-  await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
+  await db
+    .insert(systemConfig)
+    .values({ id: 1, marketDataActiveProviderKey: "twelvedata", marketDataFallbackProviderKeysCsv: "" })
+    .onConflictDoNothing();
   await db
     .update(systemConfig)
     .set({

@@ -45,6 +45,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>tradehub.example.com</string>
+	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TradeQuip uses location for regulatory compliance and fraud prevention.</string>
 	<key>NSLocalNetworkUsageDescription</key>

@@ -1,21 +1,26 @@
-name: CI
+name: PR CI
 
 on:
   pull_request:
     paths-ignore:
       - "REPORTS AND REVIEWS/**"
+      - "PRODUCTION READINESS/**"
       - "**/*.md"
   push:
     branches:
       - main
     paths-ignore:
       - "REPORTS AND REVIEWS/**"
+      - "PRODUCTION READINESS/**"
       - "**/*.md"
+
+permissions:
+  contents: read
 
 jobs:
   app-ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,4 +29,29 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run check
+      - run: npx vitest run server/marketdata/providerManager.test.ts server/feeds/forgeUtils.test.ts server/feeds/simulationPolicy.test.ts server/routes/quoteSubscriptions.utils.test.ts server/routes/auth/login.session.test.ts
       - run: npm run build
+
+  manifest-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.0
+      - name: Render Kustomize bundles
+        run: |
+          mkdir -p .tmp/kustomize
+          kubectl kustomize k8s/overlays/staging > .tmp/kustomize/staging-app.yaml
+          kubectl kustomize k8s/overlays/prod > .tmp/kustomize/prod-app.yaml
+          kubectl kustomize gitops/kustomize/ops/staging > .tmp/kustomize/staging-ops.yaml
+          kubectl kustomize gitops/kustomize/ops/prod > .tmp/kustomize/prod-ops.yaml
+          kubectl kustomize gitops/argocd > .tmp/kustomize/argocd-apps.yaml
+      - name: Client-side manifest validation
+        run: |
+          kubectl apply --dry-run=client --validate=false -f .tmp/kustomize/staging-app.yaml
+          kubectl apply --dry-run=client --validate=false -f .tmp/kustomize/prod-app.yaml
+          kubectl apply --dry-run=client --validate=false -f .tmp/kustomize/staging-ops.yaml
+          kubectl apply --dry-run=client --validate=false -f .tmp/kustomize/prod-ops.yaml
+          kubectl apply --dry-run=client --validate=false -f .tmp/kustomize/argocd-apps.yaml

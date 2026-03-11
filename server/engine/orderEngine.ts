@@ -64,6 +64,11 @@ type Quote = {
 let running = false;
 let lastPendingExpirySweepSec = 0;
 
+export function resetOrderEngineForTests(): void {
+  running = false;
+  lastPendingExpirySweepSec = 0;
+}
+
 function n(v: any): number | null {
   return toFiniteNumber(v);
 }

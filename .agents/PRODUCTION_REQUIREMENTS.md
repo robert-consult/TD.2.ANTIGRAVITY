@@ -362,6 +362,42 @@ Failure Mode if Missing:
   - Verify clients receive `global-settings:updated` and apply sanitized settings without reload.
 - Failure Mode if Missing: slow-network reopen remains blocked on first chunk fetch, or unsafe admin values trigger request/reconnect amplification that can degrade API/WS stability at scale.
 
+### PRD-IOS-001
+- ID: `PRD-IOS-001`
+- Date (UTC): `2026-03-10`
+- Scope: `Wrapper/native iOS build toolchain`
+- Requirement: All checked-in iOS wrapper and React Native iOS commands must run only on macOS hosts with Apple Xcode, `xcodebuild`, `xcrun`, and iPhoneOS SDKs available; non-Darwin hosts must fail fast with explicit guidance instead of entering partial Capacitor/CocoaPods/Xcode flows.
+- Enforcement: `MOBILE/scripts/run-ios.sh`, `NATIVE/scripts/pod-install.sh`, `NATIVE/scripts/build-ios.sh`, root `package.json` mobile script delegation, and React Native iOS Podfile compatibility in `NATIVE/ios/Podfile`.
+- Validation:
+  - On Linux/WSL, run `cd MOBILE && npm run run:ios`, `cd NATIVE && npm run pod:install`, and `cd NATIVE && npm run build:ios`; each command must exit immediately with a clear macOS/Xcode requirement message.
+  - On macOS, verify `xcodebuild -version` is present and satisfies the React Native minimum Xcode requirement, then run `cd NATIVE && npm run pod:install` and `cd NATIVE && npm run build:ios`.
+  - On macOS, run `cd MOBILE && npm run run:ios` and verify Capacitor launches the iOS target without JSON parsing or preflight-toolchain ambiguity.
+- Failure Mode if Missing: Linux/WSL operators hit opaque downstream tool errors, partial Pod installs, and misleading iOS readiness signals instead of clear deployment boundaries.
+
+### PRD-MOBILE-001
+- ID: `PRD-MOBILE-001`
+- Date (UTC): `2026-03-10`
+- Scope: `Mobile/native release signing and Firebase operator material`
+- Requirement: Android keystores, `key.properties`, `google-services.json`, and `GoogleService-Info.plist` used for wrapper/native release builds must come from operator-managed release credentials and must not rely on repository placeholders or legacy tracked files as authoritative production secrets.
+- Enforcement: `PROJECT_STRUCTURE.md` security notes, `MOBILE/README.md`, `MOBILE/docs/APP_SIGNING_GUIDE.md`, `MOBILE/docs/PUSH_NOTIFICATION_SETUP.md`, `NATIVE/android/ANDROID_TASK.md`, and `NATIVE/ios/IOS_TASK.md`.
+- Validation:
+  - Before a release build, replace placeholder Firebase files with environment-correct operator configs and verify package IDs/bundle IDs match the target app.
+  - Verify Android signing uses the intended operator keystore and alias rather than any checked-in legacy artifact.
+  - Verify iOS release signing and push provisioning are configured in Xcode/App Store Connect with operator-managed credentials.
+- Failure Mode if Missing: mobile release builds can ship with invalid push configuration, the wrong signing identity, or repository-resident secrets that break rotation and compromise release hygiene.
+
+### PRD-MOBILE-002
+- ID: `PRD-MOBILE-002`
+- Date (UTC): `2026-03-10`
+- Scope: `Wrapper Android release-secret enforcement without harming local testing`
+- Requirement: Android wrapper release builds may remain locally smoke-buildable without operator Firebase material, but deployment/CI release builds must set `TRADEQUIP_REQUIRE_GOOGLE_SERVICES_FOR_RELEASE=1` (or Gradle property `tradequipRequireGoogleServicesForRelease=1`) so missing `google-services.json` fails before deployment.
+- Enforcement: `MOBILE/android/app/build.gradle`, release pipeline/operator build environment, and deployment runbooks.
+- Validation:
+  - Run `cd MOBILE && bash scripts/with-jdk.sh ./android/gradlew -p android assembleRelease` with the flag unset and verify local release smoke builds still work.
+  - Run the same command with `TRADEQUIP_REQUIRE_GOOGLE_SERVICES_FOR_RELEASE=1` and no `google-services.json`; verify the build fails with an explicit message.
+  - Run deployment release build with the flag enabled and a valid operator-managed `google-services.json`; verify the build succeeds.
+- Failure Mode if Missing: local testing gets unnecessarily blocked or, conversely, deployment can emit release artifacts with missing push configuration.
+
 ### PRD-PERF-004
 - ID: `PRD-PERF-004`
 - Date (UTC): `2026-02-16`
@@ -1274,3 +1310,39 @@ Failure Mode if Missing:
   - `git log --all --name-only -- admin_data_exports` returns no tracked artifact paths after rewrite.
   - Verify downstream clones are reset/re-cloned to rewritten history.
 - Failure Mode if Missing: sensitive export artifacts remain permanently accessible in Git history.
+
+### PRD-MDATA-001
+- ID: `PRD-MDATA-001`
+- Date (UTC): `2026-03-09`
+- Scope: `Production market-data provider selection`
+- Requirement: Production runtime must select the active market-data provider from persisted provider configuration (`system_config.marketDataActiveProviderKey` and fallback keys) with `MARKET_DATA_PROVIDER_ALLOW_ENV_FALLBACK=0`; implicit env-only fallback must not decide the production provider.
+- Enforcement: `server/marketdata/providerManager.ts`, `k8s/01-configmap.yaml`, `k8s/base/01-configmap.yaml`, `k8s/overlays/*/patch-configmap.yaml`, and singleton config defaults in `db/seed.ts`, `server/i18n/config.ts`, `server/partner/inquiryRouting.ts`, `server/routes/admin.ts`, `server/routes/adminScout/candidates.ts`.
+- Validation:
+  - Start the app in production mode with `MARKET_DATA_PROVIDER_ALLOW_ENV_FALLBACK=0`.
+  - Confirm diagnostics route reports the configured active provider.
+  - Remove `FORGE_KEY` and verify live provider selection still resolves `twelvedata` from persisted config.
+- Failure Mode if Missing: production quote routing can silently drift based on env state and bypass admin/system-config provider control.
+
+### PRD-GITOPS-001
+- ID: `PRD-GITOPS-001`
+- Date (UTC): `2026-03-09`
+- Scope: `GitOps image promotion source of truth`
+- Requirement: Production and staging image promotion must happen by updating the overlay image reference in git, not by editing live Deployment images directly.
+- Enforcement: `scripts/ops/updateKustomizeImage.ts`, `.github/workflows/promote-overlay.yml`, `k8s/overlays/*/kustomization.yaml`, `gitops/argocd/*`.
+- Validation:
+  - Run `npx tsx scripts/ops/updateKustomizeImage.ts --overlay staging --image ghcr.io/<org>/tradequip:git-<sha>`.
+  - Confirm only the overlay `newName/newTag` changes.
+  - Render the overlay with `kubectl kustomize` and verify the target image matches the promoted tag.
+- Failure Mode if Missing: deployed image state can diverge from git, breaking rollback and auditability.
+
+### PRD-SECRETS-001
+- ID: `PRD-SECRETS-001`
+- Date (UTC): `2026-03-09`
+- Scope: `GitOps secret encryption before sync`
+- Requirement: Any GitOps-managed app or ops secret manifest must be encrypted with SOPS before Argo CD sync; placeholder plaintext manifests are bootstrap templates only.
+- Enforcement: `.sops.template.yaml`, `scripts/ops/bootstrap_sops_age.sh`, `scripts/ops/generateProductionSecrets.ts`, app overlay secret templates in `k8s/overlays/*`, and Grafana secret templates in `gitops/kustomize/ops/*`.
+- Validation:
+  - Generate secrets with `npm run ops:secrets:generate`.
+  - Bootstrap local SOPS config with `npm run ops:sops:bootstrap`.
+  - Encrypt each `*.sops.yaml` file and confirm no `REPLACE_*` placeholders remain.
+- Failure Mode if Missing: production credentials are either absent at deploy time or stored unencrypted in git/GitOps paths.

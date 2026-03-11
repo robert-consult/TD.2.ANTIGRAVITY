@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Native Deep Audit 2 — TradeQuip</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --green: #2ea043;
+            --green-bg: #0d2818;
+            --green-border: #1a7f37;
+            --red: #f85149;
+            --red-bg: #3b1117;
+            --red-border: #da3633;
+            --orange: #d29922;
+            --orange-bg: #2d1f00;
+            --orange-border: #9e6a03;
+            --blue: #58a6ff;
+            --blue-bg: #0d2240;
+            --blue-border: #1f6feb;
+            --accent: #58a6ff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: .6rem;
+            margin-bottom: .4rem;
+            color: #fff;
+        }
+
+        h2 {
+            font-size: 1.3rem;
+            margin-top: 2rem;
+            margin-bottom: .8rem;
+            color: #fff;
+        }
+
+        h3 {
+            font-size: 1.05rem;
+            margin-top: 1rem;
+            margin-bottom: .4rem;
+            color: var(--muted);
+        }
+
+        p {
+            margin-bottom: .8rem;
+        }
+
+        ul {
+            margin: .4rem 0 .8rem 1.2rem;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 1.8rem 0;
+        }
+
+        code {
+            background: #282e36;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: .88em;
+            color: #79c0ff;
+        }
+
+        pre {
+            background: #161b22;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: .8rem 1rem;
+            overflow-x: auto;
+            font-size: .85em;
+            margin-bottom: 1rem;
+            color: #c9d1d9;
+        }
+
+        strong {
+            color: #fff;
+        }
+
+        .alert {
+            border-radius: 8px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid;
+        }
+
+        .alert-title {
+            font-weight: 700;
+            font-size: .95rem;
+            margin-bottom: .3rem;
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+        }
+
+        .alert-body {
+            font-size: .92rem;
+        }
+
+        .alert-body code {
+            font-size: .84em;
+        }
+
+        .alert-green {
+            background: var(--green-bg);
+            border-color: var(--green-border);
+        }
+
+        .alert-green .alert-title {
+            color: var(--green);
+        }
+
+        .alert-red {
+            background: var(--red-bg);
+            border-color: var(--red-border);
+        }
+
+        .alert-red .alert-title {
+            color: var(--red);
+        }
+
+        .alert-orange {
+            background: var(--orange-bg);
+            border-color: var(--orange-border);
+        }
+
+        .alert-orange .alert-title {
+            color: var(--orange);
+        }
+
+        .alert-blue {
+            background: var(--blue-bg);
+            border-color: var(--blue-border);
+        }
+
+        .alert-blue .alert-title {
+            color: var(--blue);
+        }
+
+        .meta {
+            color: var(--muted);
+            font-size: .85rem;
+            margin-bottom: 2rem;
+        }
+
+        .update-banner {
+            background: var(--green-bg);
+            border: 1px solid var(--green-border);
+            border-radius: 8px;
+            padding: .8rem 1.2rem;
+            margin-bottom: 1.5rem;
+            color: var(--green);
+            font-weight: 600;
+            font-size: .92rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.5rem;
+            font-size: .9rem;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: .55rem .7rem;
+            border: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--surface);
+            color: #fff;
+            font-weight: 600;
+        }
+
+        td {
+            color: var(--text);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 12px;
+            font-size: .78em;
+            font-weight: 600;
+        }
+
+        .badge-red {
+            background: var(--red-bg);
+            color: var(--red);
+            border: 1px solid var(--red-border);
+        }
+
+        .badge-orange {
+            background: var(--orange-bg);
+            color: var(--orange);
+            border: 1px solid var(--orange-border);
+        }
+
+        .badge-blue {
+            background: var(--blue-bg);
+            color: var(--blue);
+            border: 1px solid var(--blue-border);
+        }
+
+        .badge-green {
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid var(--green-border);
+        }
+
+        .resolved {
+            opacity: 0.7;
+        }
+
+        .resolved .alert-title {
+            text-decoration: line-through;
+        }
+
+        .strikethrough {
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+
+        <h1>Mobile Native Deep Audit 2</h1>
+        <p class="meta">TradeQuip — TD.2.ANTIGRAVITY &nbsp;|&nbsp; Granular Code-Level Investigation &nbsp;|&nbsp;
+            2026-03-10</p>
+
+        <div class="update-banner">
+            ✅ Update 2026-03-10: Findings #4, #7, #9, and #11 have been RESOLVED. 4 of 12 findings fixed.
+        </div>
+
+        <h2>Executive Summary</h2>
+        <p>
+            This second-pass audit inspects <strong>every source file</strong> in
+            <code>MOBILE/</code>, <code>NATIVE/</code>, and all cross-repo bridge points in
+            <code>client/</code> and <code>server/</code>. <strong>12 granular findings</strong> were
+            identified: 3 critical security issues, 4 architectural warnings, and 5 informational items.
+            <strong>4 findings have since been resolved.</strong>
+        </p>
+        <hr>
+
+        <!-- ===================== CRITICAL ===================== -->
+        <h2>Critical Findings</h2>
+
+        <div class="alert alert-red">
+            <div class="alert-title">🔴 #1 — Plaintext Signing Credentials in Repository</div>
+            <div class="alert-body">
+                <p><strong>File:</strong> <code>MOBILE/android/key.properties</code></p>
+                <p>Release keystore password (<code>tradequip2026</code>), key password, key alias, and the actual
+                    <code>.keystore</code> file are all tracked by Git in plaintext.</p>
+                <p><strong>Impact:</strong> Complete signing identity compromise.</p>
+                <p><strong>Fix:</strong> Add to <code>.gitignore</code>. Rotate keystore. Use CI secrets for release
+                    signing. <em>(Deferred to end of development.)</em></p>
+            </div>
+        </div>
+
+        <div class="alert alert-red">
+            <div class="alert-title">🔴 #2 — Direct Cross-Subtree Import in MobileWrapperBridge</div>
+            <div class="alert-body">
+                <p><strong>File:</strong> <code>client/src/components/MobileWrapperBridge.tsx</code></p>
+                <pre>import { ... } from "../../../MOBILE/src/mobile/utils";</pre>
+                <p>Hard coupling between <code>client/</code> and <code>MOBILE/</code> via relative path.</p>
+                <p><strong>Fix:</strong> Extract to <code>shared/mobile-bridge/</code> workspace package.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-red">
+            <div class="alert-title">🔴 #3 — NATIVE Dev Mode HTTP Breaks WebCrypto</div>
+            <div class="alert-body">
+                <p><strong>File:</strong> <code>NATIVE/src/services/runtimeConfig.ts</code></p>
+                <pre>const DEV_APP_URL = Platform.OS === 'android'
+    ? 'http://10.0.2.2:5000'
+    : 'http://localhost:5000';</pre>
+                <p>WebCrypto requires a secure context; HTTP dev URLs break auth on real devices.</p>
+                <p><strong>Status:</strong> Rejected by gold-standard triage — current RN runtime model does not require
+                    WebCrypto for the native auth path. Re-evaluate only if a reproduced bug justifies it.</p>
+            </div>
+        </div>
+        <hr>
+
+        <!-- ===================== RESOLVED ===================== -->
+        <h2>Resolved Findings</h2>
+
+        <div class="alert alert-green">
+            <div class="alert-title">✅ #4 — Duplicate CSRF Fetch Logic — RESOLVED</div>
+            <div class="alert-body">
+                <p>Consolidated into <code>MOBILE/src/mobile/utils/csrf.ts</code> which imports
+                    <code>CSRF_HEADER_NAME</code> and <code>CSRF_TOKEN_ENDPOINT</code> from
+                    <code>@shared/security/csrf</code>. Both <code>session-manager.ts</code> and
+                    <code>push-notifications.ts</code> now import from <code>./csrf</code>.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-green">
+            <div class="alert-title">✅ #7 — No ProGuard on Release Builds — RESOLVED</div>
+            <div class="alert-body">
+                <p><code>MOBILE/android/app/build.gradle</code> now has <code>minifyEnabled true</code> and
+                    <code>shrinkResources true</code> in the release build type. Debug builds remain unaffected.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-green">
+            <div class="alert-title">✅ #9 — Incorrect Comment in useAuth — RESOLVED</div>
+            <div class="alert-body">
+                <p>Comment updated from "TradeQuip Android - Auth Hook" to "TradeQuip Native - Auth Hook" in
+                    <code>NATIVE/src/hooks/useAuth.ts</code>.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-green">
+            <div class="alert-title">✅ #11 — Silent Push Disable Without Firebase Config — RESOLVED</div>
+            <div class="alert-body">
+                <p><code>MOBILE/android/app/build.gradle</code> now emits a warning on release builds when
+                    <code>google-services.json</code> is missing, and hard-fails if
+                    <code>TRADEQUIP_REQUIRE_GOOGLE_SERVICES_FOR_RELEASE=1</code> is set. Debug builds remain
+                    non-blocking.</p>
+            </div>
+        </div>
+        <hr>
+
+        <!-- ===================== REMAINING WARNINGS ===================== -->
+        <h2>Remaining Warnings</h2>
+
+        <div class="alert alert-orange">
+            <div class="alert-title">🟠 #5 — init-native.sh Outputs to Wrong Directory</div>
+            <div class="alert-body">
+                <p><strong>File:</strong> <code>NATIVE/init-native.sh</code></p>
+                <p>Creates <code>ANDROID_NATIVE/</code> one level up, conflicting with the established
+                    <code>NATIVE/</code> structure. Superseded by repo-local bootstrap fix already in place.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-orange">
+            <div class="alert-title">🟠 #6 — Missing iOS Deep Link / Universal Link Configuration</div>
+            <div class="alert-body">
+                <p>Neither <code>MOBILE/ios/</code> nor <code>NATIVE/ios/</code> contains:</p>
+                <ul>
+                    <li>Associated Domains entitlement</li>
+                    <li>URL scheme registration for <code>tradequip://</code> in <code>Info.plist</code></li>
+                    <li><code>apple-app-site-association</code> hosting reference</li>
+                </ul>
+                <p>Android deep linking is configured; iOS deep linking will silently fail.</p>
+            </div>
+        </div>
+        <hr>
+
+        <!-- ===================== REMAINING INFO ===================== -->
+        <h2>Remaining Informational</h2>
+
+        <div class="alert alert-blue">
+            <div class="alert-title">🔵 #8 — WebSocket Singleton Initialized at Module Load</div>
+            <div class="alert-body">
+                <p><code>NATIVE/src/services/websocket.ts</code> resolves the WS URL at import time. Dynamic config or
+                    environment switching would require a restart.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-blue">
+            <div class="alert-title">🔵 #10 — Minimal Push Notification Tests</div>
+            <div class="alert-body">
+                <p><code>NATIVE/__tests__/pushNotifications.test.ts</code> is only 934 bytes. The complex push lifecycle
+                    deserves more coverage.</p>
+            </div>
+        </div>
+
+        <div class="alert alert-blue">
+            <div class="alert-title">🔵 #12 — Dead env() Calls in Safe Area Utility</div>
+            <div class="alert-body">
+                <p><code>MOBILE/src/mobile/utils/mobile-utils.ts</code> — <code>getPropertyValue("env(...)")</code> is
+                    always empty. Optional cleanup; the helper is currently unused.</p>
+            </div>
+        </div>
+        <hr>
+
+        <!-- ===================== CROSS-REPO ===================== -->
+        <h2>Cross-Repo Flow Matrix</h2>
+        <table>
+            <tr>
+                <th>Flow</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Status</th>
+            </tr>
+            <tr>
+                <td>Wrapper bridge activation</td>
+                <td><code>client/MobileWrapperBridge.tsx</code></td>
+                <td><code>MOBILE/src/mobile/utils</code></td>
+                <td><span class="badge badge-orange">⚠️ Direct import</span></td>
+            </tr>
+            <tr>
+                <td>Deep-link parsing</td>
+                <td><code>MOBILE/utils/deep-linking.ts</code></td>
+                <td><code>client/lib/appNavigation.ts</code></td>
+                <td><span class="badge badge-green">✅ Correct</span></td>
+            </tr>
+            <tr>
+                <td>Push device registration</td>
+                <td><code>MOBILE/utils/push-notifications.ts</code></td>
+                <td><code>server/routes/pushDevices.ts</code></td>
+                <td><span class="badge badge-green">✅ Correct</span></td>
+            </tr>
+            <tr>
+                <td>Push device DB ops</td>
+                <td><code>server/routes/pushDevices.ts</code></td>
+                <td><code>server/services/pushDevices.ts</code></td>
+                <td><span class="badge badge-green">✅ Zod + Audit</span></td>
+            </tr>
+            <tr>
+                <td>CSRF (NATIVE)</td>
+                <td><code>NATIVE/src/services/csrf.ts</code></td>
+                <td><code>@shared/security/csrf</code></td>
+                <td><span class="badge badge-green">✅ Shared</span></td>
+            </tr>
+            <tr>
+                <td>CSRF (MOBILE wrapper)</td>
+                <td><code>MOBILE/src/mobile/utils/csrf.ts</code></td>
+                <td><code>@shared/security/csrf</code></td>
+                <td><span class="badge badge-green">✅ Now shared</span></td>
+            </tr>
+            <tr>
+                <td>WebSocket protocol</td>
+                <td><code>NATIVE/services/websocket.ts</code></td>
+                <td><code>@shared/ws/protocol</code></td>
+                <td><span class="badge badge-green">✅ Shared</span></td>
+            </tr>
+            <tr>
+                <td>Auth state management</td>
+                <td><code>NATIVE/hooks/useAuth.ts</code></td>
+                <td><code>NATIVE/services/api.ts</code></td>
+                <td><span class="badge badge-green">✅ Correct</span></td>
+            </tr>
+            <tr>
+                <td>Dashboard URL state</td>
+                <td><code>client/lib/dashboardUrlState.ts</code></td>
+                <td><code>client/lib/appNavigation.ts</code></td>
+                <td><span class="badge badge-green">✅ Correct</span></td>
+            </tr>
+        </table>
+        <hr>
+
+        <!-- ===================== SEVERITY MATRIX ===================== -->
+        <h2>Severity Matrix</h2>
+        <table>
+            <tr>
+                <th>#</th>
+                <th>Finding</th>
+                <th>Severity</th>
+                <th>Effort</th>
+            </tr>
+            <tr>
+                <td>1</td>
+                <td>Plaintext signing credentials in repo</td>
+                <td><span class="badge badge-red">Critical</span></td>
+                <td>Low</td>
+            </tr>
+            <tr>
+                <td>2</td>
+                <td>Direct cross-subtree import</td>
+                <td><span class="badge badge-red">Critical</span></td>
+                <td>Medium</td>
+            </tr>
+            <tr>
+                <td>3</td>
+                <td>HTTP dev mode breaks WebCrypto</td>
+                <td><span class="badge badge-red">Critical</span></td>
+                <td>Low</td>
+            </tr>
+            <tr style="opacity:.6">
+                <td>4</td>
+                <td class="strikethrough">Duplicate CSRF fetch logic</td>
+                <td><span class="badge badge-green">✅ Resolved</span></td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td>5</td>
+                <td>init-native.sh outputs to wrong dir</td>
+                <td><span class="badge badge-orange">Warning</span></td>
+                <td>Low</td>
+            </tr>
+            <tr>
+                <td>6</td>
+                <td>Missing iOS deep link config</td>
+                <td><span class="badge badge-orange">Warning</span></td>
+                <td>Medium</td>
+            </tr>
+            <tr style="opacity:.6">
+                <td>7</td>
+                <td class="strikethrough">No ProGuard on release builds</td>
+                <td><span class="badge badge-green">✅ Resolved</span></td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td>8</td>
+                <td>WS singleton at module load</td>
+                <td><span class="badge badge-blue">Info</span></td>
+                <td>Low</td>
+            </tr>
+            <tr style="opacity:.6">
+                <td>9</td>
+                <td class="strikethrough">Incorrect comment in useAuth</td>
+                <td><span class="badge badge-green">✅ Resolved</span></td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td>10</td>
+                <td>Minimal push notification tests</td>
+                <td><span class="badge badge-blue">Info</span></td>
+                <td>Medium</td>
+            </tr>
+            <tr style="opacity:.6">
+                <td>11</td>
+                <td class="strikethrough">Silent push disable without firebase config</td>
+                <td><span class="badge badge-green">✅ Resolved</span></td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td>12</td>
+                <td>Dead env() calls in safe area util</td>
+                <td><span class="badge badge-blue">Info</span></td>
+                <td>Trivial</td>
+            </tr>
+        </table>
+
+    </div>
+</body>
+
+</html>

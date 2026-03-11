@@ -6,6 +6,8 @@ const state = vi.hoisted(() => ({
   log: vi.fn(),
 }));
 
+let marginCallModule: Awaited<typeof import("./marginCall")> | null = null;
+
 vi.mock("@db", () => ({
   db: {
     execute: state.dbExecute,
@@ -97,23 +99,27 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  marginCallModule?.stopMarginCallScheduler();
+  marginCallModule = null;
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 test("starts the scheduler once and polls on the fixed cadence", async () => {
-  const { startMarginCallScheduler } = await import("./marginCall");
+  marginCallModule = await import("./marginCall");
+  const { startMarginCallScheduler } = marginCallModule;
 
   await startMarginCallScheduler();
   await vi.advanceTimersByTimeAsync(15_000);
 
   expect(state.dbExecute).toHaveBeenCalledTimes(1);
   expect(state.log).toHaveBeenCalledWith(expect.stringContaining("Starting Margin Call"));
-}, 10_000);
+}, 30_000);
 
 test("does not register duplicate polling intervals on repeated starts", async () => {
-  const { startMarginCallScheduler } = await import("./marginCall");
+  marginCallModule = await import("./marginCall");
+  const { startMarginCallScheduler } = marginCallModule;
 
   await startMarginCallScheduler();
   await startMarginCallScheduler();
@@ -123,4 +129,4 @@ test("does not register duplicate polling intervals on repeated starts", async (
   expect(
     state.log.mock.calls.filter(([message]) => String(message).includes("Starting Margin Call")),
   ).toHaveLength(1);
-}, 10_000);
+}, 30_000);

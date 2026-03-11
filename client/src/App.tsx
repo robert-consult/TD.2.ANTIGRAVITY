@@ -8,6 +8,7 @@ import { installAxiosIdentityHeaders } from "./lib/axiosIdentity";
 import { installGlobalCsrfFetch } from "./lib/csrf";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { useI18n } from "@/i18n";
+import { MobileWrapperBridge } from "@/components/MobileWrapperBridge";
 import { lazyWithPing } from "@/lib/lazyWithPing";
 import {
   getQueryPersistence,
@@ -99,6 +100,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <I18nProvider>
+          <MobileWrapperBridge />
           <AppRoutes />
           <Toaster />
         </I18nProvider>

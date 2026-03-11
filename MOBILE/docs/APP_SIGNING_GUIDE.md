@@ -1,5 +1,7 @@
 # Android App Signing Guide
 
+> Android-only guide. iOS wrapper signing is handled separately in Xcode on macOS. Do not treat any tracked `key.properties` or keystore file as authoritative production signing material; release credentials must come from operator-managed sources.
+
 ## Overview
 
 App signing is required for Play Store distribution. This guide covers both debug and release signing.

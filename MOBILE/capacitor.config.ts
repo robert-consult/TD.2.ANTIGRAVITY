@@ -4,18 +4,38 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * Capacitor configuration for TradeQuip Mobile App
  * 
  * This uses REMOTE URL MODE to wrap the web application.
- * Set CAPACITOR_SERVER_URL environment variable to your backend URL.
+ * Set CAPACITOR_SERVER_URL to override the runtime origin.
+ * Production defaults to https://tradehub.example.com so wrapper builds stay in remote-URL mode.
  * 
  * Examples:
  *   - Android Emulator/Device (recommended): http://localhost:5000 (after `adb reverse tcp:5000 tcp:5000`)
  *   - Android Emulator/Device (trusted HTTPS tunnel): https://<random>.trycloudflare.com
- *   - Production: https://your-domain.com
+ *   - Production: https://tradehub.example.com
  *
  * Note: This app relies on WebCrypto (`crypto.subtle`) for identity/bot-proof. WebCrypto requires a secure
  * context, so `http://10.0.2.2:5000` / `http://192.168.x.x:5000` will break login on Android WebView.
  */
 
-const serverUrl = String(process.env.CAPACITOR_SERVER_URL || "").trim();
+const serverUrl = String(
+  process.env.CAPACITOR_SERVER_URL ||
+  process.env.APP_URL ||
+  (process.env.NODE_ENV === "production" ? "https://tradehub.example.com" : ""),
+).trim();
+const serverHost = (() => {
+  if (!serverUrl) return "";
+  try {
+    return new URL(serverUrl).host;
+  } catch {
+    return "";
+  }
+})();
+const allowNavigationHosts = Array.from(
+  new Set([
+    "tradehub.example.com",
+    "staging.tradehub.example.com",
+    serverHost,
+  ].filter(Boolean)),
+);
 
 const config: CapacitorConfig = {
   appId: "com.tradequip.app",
@@ -29,6 +49,8 @@ const config: CapacitorConfig = {
         url: serverUrl,
         cleartext: serverUrl.startsWith("http://"),
         androidScheme: serverUrl.startsWith("https://") ? "https" : "http",
+        iosScheme: serverUrl.startsWith("https://") ? "https" : "http",
+        allowNavigation: allowNavigationHosts,
       },
     }
     : {}),
@@ -38,6 +60,10 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
     captureInput: true,
     webContentsDebuggingEnabled: process.env.NODE_ENV !== "production",
+  },
+
+  ios: {
+    contentInset: "automatic",
   },
 
   // Plugin configuration

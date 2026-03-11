@@ -5,9 +5,17 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import {
+    WS_MSG_ACCOUNT_SNAPSHOT,
+    WS_MSG_ACCOUNT_UPDATE,
+    WS_MSG_ACCOUNT_UPDATED,
+    WS_MSG_TRADES_UPDATE,
+    WS_MSG_TRADES_UPDATED,
+} from '@shared/ws/protocol';
 import { accountApi } from '../services/api';
 import { wsService } from '../services/websocket';
 import { useAuth } from './useAuth';
+import { useWsConnectionState } from './useWsConnectionState';
 
 export interface AccountSummary {
     balance: number;
@@ -25,6 +33,7 @@ export interface AccountSummary {
 export function useAccountSummary() {
     const queryClient = useQueryClient();
     const { isAuthenticated } = useAuth();
+    const isLive = useWsConnectionState();
 
     // Subscribe to account updates via WebSocket (requires authenticated WS session)
     useEffect(() => {
@@ -45,9 +54,9 @@ export function useAccountSummary() {
             if (!message || typeof message !== 'object') return;
 
             if (
-                message.type === 'account:snapshot' ||
-                message.type === 'account:update' ||
-                message.type === 'account:updated'
+                message.type === WS_MSG_ACCOUNT_SNAPSHOT ||
+                message.type === WS_MSG_ACCOUNT_UPDATE ||
+                message.type === WS_MSG_ACCOUNT_UPDATED
             ) {
                 const summary = (message as any)?.payload?.summary;
                 if (summary && typeof summary === 'object') {
@@ -57,7 +66,7 @@ export function useAccountSummary() {
                 }
             }
 
-            if (message.type === 'trades:updated' || message.type === 'trades:update') {
+            if (message.type === WS_MSG_TRADES_UPDATED || message.type === WS_MSG_TRADES_UPDATE) {
                 queryClient.invalidateQueries({ queryKey: ['account', 'summary'] });
             }
         });
@@ -79,8 +88,13 @@ export function useAccountSummary() {
         queryFn: accountApi.getSummary,
         enabled: isAuthenticated,
         staleTime: 2000,
-        refetchInterval: wsService.isConnected() ? false : 7000,
+        refetchInterval: isLive ? false : 7000,
     });
+
+    useEffect(() => {
+        if (!isAuthenticated || isLive) return;
+        refetch().catch(() => undefined);
+    }, [isAuthenticated, isLive, refetch]);
 
     // Computed values
     const portfolioValue = summary?.equity || 0;

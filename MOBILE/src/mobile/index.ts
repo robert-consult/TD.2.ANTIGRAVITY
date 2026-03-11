@@ -1,14 +1,8 @@
 /**
- * Mobile components index
- * Export all mobile-specific components
+ * MOBILE/ is a Capacitor shell around the web app, not a parallel feature app.
+ * Keep this barrel focused on native bridge helpers that support the wrapper.
+ * User-facing trading/account UI remains sourced from client/.
  */
 
-export { MobileBottomNavigation } from "./components/MobileNavigation";
-export { MobileDashboard } from "./components/MobileDashboard";
-export { MobileProfileSettings } from "./components/MobileProfileSettings";
-export { MobileTradeScreen } from "./components/MobileTradeScreen";
-
-export type { MobileNavigationProps } from "./components/MobileNavigation";
-export type { MobileDashboardProps } from "./components/MobileDashboard";
-export type { MobileProfileSettingsProps } from "./components/MobileProfileSettings";
-export type { MobileTradeScreenProps } from "./components/MobileTradeScreen";
+export * from "./hooks";
+export * from "./utils";

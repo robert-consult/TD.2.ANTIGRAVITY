@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-api
+  namespace: tradehub
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-worker-canary
+  namespace: tradehub
+spec:
+  replicas: 0
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tradehub-api
+  namespace: tradehub
+spec:
+  minReplicas: 1
+  maxReplicas: 4

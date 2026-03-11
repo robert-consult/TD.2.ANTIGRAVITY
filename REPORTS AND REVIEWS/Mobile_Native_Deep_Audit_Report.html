@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deep Audit &amp; Critique — Mobile Wrapper &amp; Native Implementations</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #2ea043;
+      --green-bg: #0d2818;
+      --green-border: #1a7f37;
+      --red: #f85149;
+      --red-bg: #3b1117;
+      --red-border: #da3633;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 {
+      font-size: 1.8rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: .6rem;
+      margin-bottom: 1.5rem;
+      color: #fff;
+    }
+    h2 {
+      font-size: 1.3rem;
+      margin-top: 2rem;
+      margin-bottom: .8rem;
+      color: #fff;
+    }
+    p { margin-bottom: .8rem; }
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1.8rem 0;
+    }
+    code {
+      background: #282e36;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: .9em;
+      color: #79c0ff;
+    }
+    strong { color: #fff; }
+
+    /* Alert boxes */
+    .alert {
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+      border-left: 4px solid;
+    }
+    .alert-title {
+      font-weight: 700;
+      font-size: .95rem;
+      margin-bottom: .3rem;
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+    }
+    .alert-body { font-size: .93rem; }
+
+    /* Green (well executed) */
+    .alert-green {
+      background: var(--green-bg);
+      border-color: var(--green-border);
+    }
+    .alert-green .alert-title { color: var(--green); }
+    .alert-green .alert-title::before { content: "✅ "; }
+
+    /* Red (needs attention / threat) */
+    .alert-red {
+      background: var(--red-bg);
+      border-color: var(--red-border);
+    }
+    .alert-red .alert-title { color: var(--red); }
+    .alert-red .alert-title::before { content: "🔴 "; }
+
+    .meta {
+      color: var(--muted);
+      font-size: .85rem;
+      margin-bottom: 2rem;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Deep Audit &amp; Critique:<br>Mobile Wrapper &amp; Native Implementations</h1>
+  <p class="meta">TradeQuip — TD.2.ANTIGRAVITY &nbsp;|&nbsp; Generated 2026-03-10</p>
+
+  <!-- Section 1 -->
+  <h2>1. Overview of Uncommitted Changes</h2>
+  <p>
+    The uncommitted changes (~280 files) represent a massive architectural shift to clearly
+    demarcate the mobile ecosystem into two parallel tracks: <strong>MOBILE</strong> (Capacitor Wrapper)
+    and <strong>NATIVE</strong> (React Native). Legacy parallel web UIs incorrectly housed in the mobile
+    app have been stripped out and replaced with strict, remote-URL-driven Capacitor setups and
+    distinct React Native foundations.
+  </p>
+  <hr>
+
+  <!-- Section 2 -->
+  <h2>2. MOBILE (Capacitor Wrapper) Audit</h2>
+  <div class="alert alert-green">
+    <div class="alert-title">Well Executed</div>
+    <div class="alert-body">
+      The wrapper is impeccably structured. <code>MOBILE/android/</code> and <code>MOBILE/ios/</code>
+      physically isolate the platform shells, preventing cross-contamination.
+    </div>
+  </div>
+  <div class="alert alert-green">
+    <div class="alert-title">Well Executed</div>
+    <div class="alert-body">
+      The wrapper strictly adheres to <strong>Remote URL Mode</strong>.
+      <code>capacitor.config.ts</code> confirms that the app points to
+      <code>https://tradehub.example.com</code> in production. It fetches UI seamlessly from the
+      web back-end, requiring minimal wrapper updates.
+    </div>
+  </div>
+  <hr>
+
+  <!-- Section 3 -->
+  <h2>3. NATIVE (React Native App) Audit</h2>
+  <div class="alert alert-green">
+    <div class="alert-title">Well Executed</div>
+    <div class="alert-body">
+      <code>NATIVE/android/</code> and <code>NATIVE/ios/</code> are cleanly separated. Core logic
+      lives in <code>NATIVE/src/</code>, demonstrating strong maintainability. The app is properly
+      set up for native rendering with correctly scaffolded deep-link wiring and local caches.
+    </div>
+  </div>
+  <div class="alert alert-green">
+    <div class="alert-title">Well Executed</div>
+    <div class="alert-body">
+      <strong>Xcode &amp; Android Studio Compatibility:</strong> The <code>android/</code> directory
+      with Gradle configs can be directly imported into Android Studio. The iOS <code>ios/</code>
+      shell includes all required Podfiles and <code>.xcworkspace</code>, meaning transitioning to
+      macOS requires zero rewriting — just <code>pod install</code> and open Xcode.
+    </div>
+  </div>
+  <hr>
+
+  <!-- Section 4 -->
+  <h2>4. Deployability and Testing</h2>
+  <div class="alert alert-green">
+    <div class="alert-title">Well Executed</div>
+    <div class="alert-body">
+      Both <code>MOBILE</code> and <code>NATIVE</code> ship with dedicated <code>scripts/</code>.
+      iOS scripts fail fast on non-Darwin systems, preventing obscure errors.
+      <code>NATIVE/__tests__/</code> contains comprehensive suites for WebSockets, CSRF, and
+      Push Notifications.
+    </div>
+  </div>
+  <div class="alert alert-red">
+    <div class="alert-title">Needs Attention</div>
+    <div class="alert-body">
+      <code>NATIVE/init-native.sh</code> creates a folder named <code>ANDROID_NATIVE</code> one level
+      up from the current directory, which could cause organizational drift over time if used as an
+      ongoing utility rather than a one-time script.
+    </div>
+  </div>
+  <hr>
+
+  <!-- Section 5 -->
+  <h2>5. Documentation Review</h2>
+  <div class="alert alert-green">
+    <div class="alert-title">Well Executed</div>
+    <div class="alert-body">
+      <code>MOBILE/AGENTS.md</code> and <code>NATIVE/AGENTS.md</code> set unambiguous rules of
+      engagement. The documentation brilliantly draws the line between <code>MOBILE/</code> vs.
+      <code>NATIVE/</code> and outlines strict security compliance (secrets, SSL/TLS, WebCrypto).
+    </div>
+  </div>
+  <hr>
+
+  <!-- Section 6 -->
+  <h2>6. Threat Vectors, Vulnerabilities, and Failure Points</h2>
+
+  <div class="alert alert-red">
+    <div class="alert-title">Wrapper Offline Vulnerability</div>
+    <div class="alert-body">
+      Since <code>MOBILE/</code> operates in Remote URL mode, any network unavailability or DNS failure
+      will result in a barren WebView or connection error screen. The wrapper won't degrade gracefully
+      offline without a robust Service Worker on the webapp side.
+    </div>
+  </div>
+
+  <div class="alert alert-red">
+    <div class="alert-title">Certificate Pinning</div>
+    <div class="alert-body">
+      Current certificate pinning uses placeholders. If an agent forgets to swap these for ops-managed
+      pins during production promotion, the app is open to <strong>Man-In-The-Middle (MITM) attacks</strong>.
+    </div>
+  </div>
+
+  <div class="alert alert-red">
+    <div class="alert-title">WebCrypto Context</div>
+    <div class="alert-body">
+      <code>http://</code> local environments on native devices break WebCrypto. Developers bypassing
+      HTTPS tunnels for local testing might commit broken auth flows if not using
+      <code>trycloudflare-tunnel.sh</code> strictly.
+    </div>
+  </div>
+
+  <div class="alert alert-red">
+    <div class="alert-title">React Native Bundle Secrets</div>
+    <div class="alert-body">
+      If environmental variables hold secrets, the <code>NATIVE</code> app is vulnerable to reverse
+      engineering of the released APK/IPA. <code>AGENTS.md</code> warns against this, but strict
+      linting must enforce it.
+    </div>
+  </div>
+  <hr>
+
+  <!-- Conclusion -->
+  <h2>Conclusion</h2>
+  <div class="alert alert-green">
+    <div class="alert-title">Overall Assessment</div>
+    <div class="alert-body">
+      The implementation is gold standard. The boundary between the Capacitor wrapper and the React
+      Native app is definitive. Folder structures cleanly segregate iOS and Android. Deployability is
+      locked down with smart fallback and OS-guarding scripts.
+    </div>
+  </div>
+  <div class="alert alert-red">
+    <div class="alert-title">Action Required</div>
+    <div class="alert-body">
+      Addressing the identified threat vectors above is required prior to commercial rollout to
+      finalize production readiness.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

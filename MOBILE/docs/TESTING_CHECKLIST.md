@@ -1,5 +1,20 @@
 # Mobile Testing Checklist
 
+Wrapper target platforms: Android and iOS. Run the same session, transport, deep-link, and push checks on both shells before marking a cycle complete.
+
+Host note:
+- Android automation/build checks can run from this Linux host.
+- iOS wrapper launch/device checks require macOS + Xcode.
+
+## Automated Gates
+
+- [ ] `npm run check`
+- [ ] `npm run build`
+- [ ] `cd MOBILE && npm run sync`
+- [ ] `cd MOBILE && npm run doctor`
+- [ ] `cd MOBILE && npm audit --audit-level=high`
+- [ ] `npm run e2e`
+
 ## Session Handling Tests
 
 ### Test 1: Login Persistence
@@ -75,26 +90,32 @@
 - [ ] Try navigating to external URL
 - [ ] Expected: External URLs blocked or open in system browser
 
+### Test 13: Push Registration And Revocation
+- [ ] Login on wrapper device
+- [ ] Confirm `/api/push/register` stores one wrapper device record
+- [ ] Logout and confirm `/api/push/unregister` revokes the stored token
+- [ ] Expected: no stale wrapper push token remains bound to the logged-out session
+
 ---
 
 ## Performance Tests
 
-### Test 13: Cold Start Time
+### Test 14: Cold Start Time
 - [ ] Force stop app
 - [ ] Launch and time until interactive
 - [ ] Expected: < 3 seconds on mid-range device
 
-### Test 14: Memory Usage
+### Test 15: Memory Usage
 - [ ] Open app, navigate through all tabs
 - [ ] Check memory usage in Android Profiler
 - [ ] Expected: < 150MB RAM usage
 
-### Test 15: Battery Impact
+### Test 16: Battery Impact
 - [ ] Leave app in foreground for 30 minutes
 - [ ] Check battery usage in settings
 - [ ] Expected: Minimal battery drain (WebSocket efficient)
 
-### Test 16: Network Efficiency
+### Test 17: Network Efficiency
 - [ ] Monitor network traffic for 5 minutes
 - [ ] Verify no excessive polling
 - [ ] Expected: WebSocket for real-time, minimal HTTP requests
@@ -103,17 +124,22 @@
 
 ## Device Compatibility
 
-### Test 17: Screen Sizes
+### Test 18: Screen Sizes
 - [ ] Test on phone (< 6")
 - [ ] Test on tablet (7"+)
 - [ ] Expected: UI adapts appropriately
 
-### Test 18: Android Versions
-- [ ] Test on Android 10 (API 29)
-- [ ] Test on Android 14 (API 34)
-- [ ] Expected: Works on Android 10+
+### Test 19: Platform Versions
+- [ ] Test on Android 10+ and Android 14+
+- [ ] Test on current iOS simulator and a physical iPhone build
+- [ ] Expected: Wrapper lifecycle, auth, and deep links behave consistently on both platforms
 
-### Test 19: Dark Mode
+### Test 20: Offline And Resume
+- [ ] Drop network while on quotes/trade/account screens
+- [ ] Restore network and resume the app
+- [ ] Expected: wrapper refreshes auth state and live data without duplicate reconnect storms
+
+### Test 21: Dark Mode
 - [ ] Enable system dark mode
 - [ ] Expected: App respects system theme (or has own dark theme)
 
@@ -125,10 +151,10 @@
 |----------|------|------|-------|
 | Session | /4 | | |
 | Trading | /4 | | |
-| Security | /4 | | |
+| Security | /5 | | |
 | Performance | /4 | | |
-| Compatibility | /3 | | |
-| **Total** | **/19** | | |
+| Compatibility | /4 | | |
+| **Total** | **/21** | | |
 
 Tested by: ________________
 Date: ________________

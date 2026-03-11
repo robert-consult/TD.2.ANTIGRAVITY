@@ -38,6 +38,7 @@ import { quoteSubscriptionsRouter } from "./routes/quoteSubscriptions";
 import { jurisdictionSessionGuard } from "./middleware/jurisdictionSessionGuard";
 import { mailboxRouter } from "./routes/mailbox";
 import { notificationsRouter } from "./routes/notifications";
+import { pushDevicesRouter } from "./routes/pushDevices";
 import { adminChallengesRouter, adminPartnersRouter, adminScoutRouter } from "./routes/adminScout";
 import { partnerAuthRouter, partnerPortalRouter } from "./routes/partnerPortal";
 import { traderTalentPublicRouter, traderTalentRouter } from "./routes/traderTalent";
@@ -168,6 +169,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/quote-subscriptions", quoteSubscriptionsRouter);
   app.use("/api/mailbox", mailboxRouter);
   app.use("/api/notifications", notificationsRouter);
+  app.use("/api/push", pushDevicesRouter);
   app.use("/api/admin/scout", adminScoutRouter);
   app.use("/api/admin/challenges", adminChallengesRouter);
   app.use("/api/admin/partners", adminPartnersRouter);

@@ -3,7 +3,7 @@
  * Aligned with webapp API structure for secure communication
  */
 
-import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { MMKV } from 'react-native-mmkv';
 import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
@@ -28,19 +28,70 @@ import {
     leadingZeroBitsOfHex,
 } from '@shared/security/botChallenge';
 import type { BotChallengePayload } from '@shared/security/botChallenge';
+import {
+    attachCsrfHeader,
+    clearCsrfTokenCache,
+    isCsrfFailurePayload,
+    refreshCsrfToken,
+} from './csrf';
+import { emitLegalReacceptRequired } from './legalSignals';
+import { getApiBaseUrl } from './runtimeConfig';
 
 const storage = new MMKV();
-
-// Base URL - set via environment or config
-const DEV_API_BASE_URL =
-    Platform.OS === 'android'
-        // Android emulator → host machine. For physical devices prefer `adb reverse tcp:5000 tcp:5000` and use localhost.
-        ? 'http://10.0.2.2:5000'
-        : 'http://localhost:5000';
-
-const API_BASE_URL = __DEV__ ? DEV_API_BASE_URL : 'https://your-production-domain.com';
+const API_BASE_URL = getApiBaseUrl();
 
 let fingerprintPromise: Promise<string> | null = null;
+
+type RetriableRequestConfig = InternalAxiosRequestConfig & {
+    _botRetry?: boolean;
+    _csrfRetry?: boolean;
+};
+
+export class ApiError extends Error {
+    status: number;
+    code?: string;
+    data?: unknown;
+    response?: { status: number; data: unknown };
+
+    constructor(message: string, status: number, data?: unknown) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.code = String((data as any)?.code ?? (data as any)?.errorCode ?? '').trim() || undefined;
+        this.data = data;
+        this.response = {
+            status,
+            data,
+        };
+    }
+}
+
+function resolveErrorMessage(data: unknown, fallback: string): string {
+    const message = String((data as any)?.message ?? '').trim();
+    if (message) return message;
+    return fallback;
+}
+
+function normalizeAxiosError(error: unknown): ApiError {
+    if (error instanceof ApiError) return error;
+
+    const axiosError = error as AxiosError;
+    const status = Number(axiosError?.response?.status ?? 0) || 0;
+    const data = axiosError?.response?.data;
+    const fallback = String(axiosError?.message || 'Request failed');
+    const apiError = new ApiError(resolveErrorMessage(data, fallback), status, data);
+
+    if (status === 0 && axiosError?.code) {
+        apiError.code = axiosError.code;
+    }
+
+    return apiError;
+}
+
+function isLegalReacceptPayload(payload: unknown): boolean {
+    const code = String((payload as any)?.code ?? (payload as any)?.message ?? '').trim().toUpperCase();
+    return code === 'LEGAL_REACCEPT_REQUIRED';
+}
 
 /**
  * Get device identity headers matching webapp identity.ts
@@ -308,35 +359,70 @@ function createApiInstance(): AxiosInstance {
     // Request interceptor - add identity headers
     api.interceptors.request.use(
         async (config: InternalAxiosRequestConfig) => {
+            const nextConfig = config as RetriableRequestConfig;
             // Add identity headers
             const identityHeaders = await getIdentityHeaders();
-            Object.entries(identityHeaders).forEach(([key, value]) => {
-                config.headers[key] = value;
+            const nextHeaders = await attachCsrfHeader(
+                API_BASE_URL,
+                nextConfig.url,
+                nextConfig.method,
+                Object.entries(identityHeaders).reduce<Record<string, string>>((acc, [key, value]) => {
+                    acc[key] = value;
+                    return acc;
+                }, {}),
+            );
+
+            Object.entries(nextHeaders).forEach(([key, value]) => {
+                nextConfig.headers[key] = value;
             });
 
-            return config;
+            return nextConfig;
         },
-        (error) => Promise.reject(error)
+        (error) => Promise.reject(normalizeAxiosError(error))
     );
 
-    // Response interceptor - handle 401 and bot challenges
+    // Response interceptor - handle CSRF, legal reaccept, and bot challenges
     api.interceptors.response.use(
         (response: AxiosResponse) => response,
         async (error) => {
-            const originalRequest = error.config;
+            const originalRequest = (error?.config ?? {}) as RetriableRequestConfig;
+            const payload = error?.response?.data;
+
+            if (error?.response?.status === 403 && isCsrfFailurePayload(payload) && !originalRequest._csrfRetry) {
+                originalRequest._csrfRetry = true;
+                await refreshCsrfToken(API_BASE_URL);
+                const identityHeaders = await getIdentityHeaders();
+                const retryHeaders = await attachCsrfHeader(
+                    API_BASE_URL,
+                    originalRequest.url,
+                    originalRequest.method,
+                    Object.entries(identityHeaders).reduce<Record<string, string>>((acc, [key, value]) => {
+                        acc[key] = value;
+                        return acc;
+                    }, {}),
+                    { forceRefresh: true },
+                );
+                Object.entries(retryHeaders).forEach(([key, value]) => {
+                    originalRequest.headers[key] = value;
+                });
+                return api(originalRequest);
+            }
+
+            if (isLegalReacceptPayload(payload)) {
+                emitLegalReacceptRequired(payload);
+            }
 
             // Handle 428 Bot Challenge (matching webapp botProof.ts)
-            if (error.response?.status === 428) {
-                const payload = error.response.data;
+            if (error?.response?.status === 428 && !originalRequest._botRetry) {
                 if (payload?.code === BOT_CHALLENGE_REQUIRED_CODE && payload?.challenge) {
+                    originalRequest._botRetry = true;
                     const proof = await solveBotChallenge(payload.challenge);
                     originalRequest.headers[IDENTITY_HEADER_BOT_PROOF] = proof;
-                    originalRequest._retry = true;
                     return api(originalRequest);
                 }
             }
 
-            return Promise.reject(error);
+            return Promise.reject(normalizeAxiosError(error));
         }
     );
 
@@ -417,6 +503,7 @@ export const authApi = {
      * POST /api/auth/logout
      */
     logout: async () => {
+        clearCsrfTokenCache();
         await api.post('/api/auth/logout');
     },
 
@@ -556,6 +643,53 @@ export const accountApi = {
 };
 
 // ============================================
+// PROFILE ENDPOINTS
+// ============================================
+export const profileApi = {
+    getMfaStatus: async () => {
+        const response = await api.get('/api/profile/mfa/status');
+        return response.data;
+    },
+
+    getPreferences: async () => {
+        const response = await api.get('/api/profile/preferences');
+        return response.data;
+    },
+
+    updatePreferences: async (data: { timezone?: string; language?: string; country?: string }) => {
+        const response = await api.put('/api/profile/preferences', data);
+        return response.data;
+    },
+
+    getLoginHistory: async () => {
+        const response = await api.get('/api/profile/login-history');
+        return response.data;
+    },
+
+    getPayoutProfile: async () => {
+        const response = await api.get('/api/profile/payout');
+        return response.data;
+    },
+
+    updatePayoutCurrency: async (currency: string) => {
+        const response = await api.put('/api/profile/payout/currency', { currency });
+        return response.data;
+    },
+
+    deactivateAccount: async (reason?: string) => {
+        const response = await api.post('/api/profile/account/deactivate', {
+            reason,
+        });
+        return response.data;
+    },
+
+    deleteAccount: async (payload: { reason: string; password: string }) => {
+        const response = await api.post('/api/profile/account/delete', payload);
+        return response.data;
+    },
+};
+
+// ============================================
 // LEADERBOARD ENDPOINTS
 // ============================================
 export const leaderboardApi = {
@@ -661,6 +795,102 @@ export const griftApi = {
      */
     ping: async () => {
         const response = await api.post('/api/grift/ping', {});
+        return response.data;
+    },
+};
+
+// ============================================
+// MAILBOX ENDPOINTS
+// ============================================
+export const mailboxApi = {
+    getConfig: async () => {
+        const response = await api.get('/api/mailbox/config');
+        return response.data;
+    },
+
+    getE2eeKey: async () => {
+        const response = await api.get('/api/mailbox/e2ee/key');
+        return response.data;
+    },
+
+    updateE2eeKey: async (payload: {
+        publicKeyPem: string;
+        keyAlgorithm?: string;
+        fingerprint?: string;
+    }) => {
+        const response = await api.put('/api/mailbox/e2ee/key', payload);
+        return response.data;
+    },
+
+    listThreads: async (limit = 30, offset = 0) => {
+        const response = await api.get('/api/mailbox', {
+            params: {
+                limit,
+                offset,
+            },
+        });
+        return response.data;
+    },
+
+    getThread: async (threadId: number, limit = 120) => {
+        const response = await api.get(`/api/mailbox/${threadId}`, {
+            params: {
+                limit,
+            },
+        });
+        return response.data;
+    },
+
+    reply: async (
+        threadId: number,
+        payload: {
+            body: string;
+            contentFormat?: 'PLAINTEXT' | 'MARKDOWN';
+            e2eeEnvelope?: string;
+            e2eeSenderKeyFingerprint?: string;
+            bodyDigestSha256?: string;
+        },
+    ) => {
+        const response = await api.post(`/api/mailbox/${threadId}/reply`, payload);
+        return response.data;
+    },
+};
+
+// ============================================
+// PUSH DEVICE ENDPOINTS
+// ============================================
+export const pushApi = {
+    listDevices: async () => {
+        const response = await api.get('/api/push');
+        return response.data;
+    },
+
+    registerDevice: async (payload: {
+        token: string;
+        appVariant: 'native' | 'wrapper';
+        platform: 'android' | 'ios' | 'web';
+        environment: 'development' | 'staging' | 'production';
+        pushProvider?: 'FCM' | 'APNS';
+        deviceId?: string;
+        deviceInstallId?: string;
+        deviceFingerprint?: string;
+        appVersion?: string;
+        buildNumber?: string;
+        locale?: string;
+        timezone?: string;
+        metadata?: Record<string, unknown>;
+    }) => {
+        const response = await api.post('/api/push/register', payload);
+        return response.data;
+    },
+
+    unregisterDevice: async (payload: { token?: string; all?: boolean }) => {
+        const response = await api.post('/api/push/unregister', payload);
+        return response.data;
+    },
+
+    revokeDeviceById: async (deviceId: number) => {
+        const response = await api.delete(`/api/push/${deviceId}`);
         return response.data;
     },
 };

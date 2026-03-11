@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-ingestor
+  namespace: tradehub
+  labels:
+    app: tradehub-ingestor
+    role: ingestor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-ingestor
+  template:
+    metadata:
+      labels:
+        app: tradehub-ingestor
+        role: ingestor
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ingestor
+          image: registry.equitywaves.com/tradehub/app:local-20260113-001036
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_ROLE
+              value: "ingestor"
+          envFrom:
+            - configMapRef:
+                name: tradehub-config
+            - secretRef:
+                name: tradehub-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: migration-imports
+              mountPath: /app/migration_imports
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: migration-imports
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30

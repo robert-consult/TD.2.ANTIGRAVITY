@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-namespace.yaml
+  - 01-configmap.yaml
+  - 03-postgres.yaml
+  - 04-pgbouncer.yaml
+  - 05-valkey.yaml
+  - 10-api-deployment.yaml
+  - 11-ingestor-deployment.yaml
+  - 12-worker-deployment.yaml
+  - 13-worker-canary-deployment.yaml
+  - 20-service.yaml
+  - 30-ingress.yaml
+  - 31-network-policies.yaml
+  - 40-hpa.yaml
+  - 50-pdb.yaml
+  - 60-monitoring.yaml
+  - 70-petascale-infra.yaml

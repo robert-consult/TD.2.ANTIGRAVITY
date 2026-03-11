@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+def requireGoogleServicesForRelease =
+    ((project.findProperty("tradequipRequireGoogleServicesForRelease") ?: System.getenv("TRADEQUIP_REQUIRE_GOOGLE_SERVICES_FOR_RELEASE") ?: "0").toString() == "1")
+def servicesJSON = file('google-services.json')
+def hasGoogleServices = servicesJSON.exists() && servicesJSON.length() > 0
+
 // Load signing config from key.properties
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
@@ -43,7 +49,8 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             // Use signing config for release builds
             if (keystorePropertiesFile.exists()) {
@@ -83,10 +90,14 @@ dependencies {
 apply from: 'capacitor.build.gradle'
 
 try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
+    if (hasGoogleServices) {
         apply plugin: 'com.google.gms.google-services'
+    } else if (isReleaseTask) {
+        logger.warn("WARNING: google-services.json not found — release APK will build without push notification support")
+        if (requireGoogleServicesForRelease) {
+            throw new GradleException("google-services.json is required for release when TRADEQUIP_REQUIRE_GOOGLE_SERVICES_FOR_RELEASE=1")
+        }
     }
 } catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+    throw e
 }

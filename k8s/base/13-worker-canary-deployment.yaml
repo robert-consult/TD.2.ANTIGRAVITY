@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-worker-canary
+  namespace: tradehub
+  labels:
+    app: tradehub-worker-canary
+    role: worker-canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-worker-canary
+  template:
+    metadata:
+      labels:
+        app: tradehub-worker-canary
+        role: worker-canary
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker-canary
+          image: registry.equitywaves.com/tradehub/app:local-20260113-001036
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_ROLE
+              value: "worker"
+            # Canary runs with lower queue concurrency to cap blast radius.
+            - name: ADMIN_DATA_EXPORT_QUEUE_CONCURRENCY
+              value: "1"
+            - name: ADMIN_DATA_EXPORT_LOCAL_DIR
+              value: "/tmp/admin-data-exports"
+          envFrom:
+            - configMapRef:
+                name: tradehub-config
+            - secretRef:
+                name: tradehub-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: migration-imports
+              mountPath: /app/migration_imports
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: migration-imports
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30

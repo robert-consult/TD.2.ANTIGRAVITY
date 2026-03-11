@@ -1,12 +1,15 @@
 /**
  * TradeQuip Native - Push Notification Service
- * Handles iOS push notification registration and handling
+ * Handles Android/iOS registration and syncs the active token to the backend.
  */
 
 import { Platform } from 'react-native';
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { MMKV } from 'react-native-mmkv';
+import DeviceInfo from 'react-native-device-info';
+import { pushApi } from './api';
+import { getPushEnvironment } from './runtimeConfig';
 
 const storage = new MMKV();
 const FCM_TOKEN_KEY = 'fcm_token';
@@ -16,46 +19,28 @@ type NotificationHandler = (notification: FirebaseMessagingTypes.RemoteMessage) 
 class PushNotificationService {
     private onNotificationHandler: NotificationHandler | null = null;
     private onNotificationOpenedHandler: NotificationHandler | null = null;
+    private initialized: boolean = false;
 
-    /**
-     * Request notification permissions (iOS)
-     */
     async requestPermission(): Promise<boolean> {
         if (Platform.OS === 'ios') {
             const authStatus = await messaging().requestPermission();
-            const enabled =
+            return (
                 authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-                authStatus === messaging.AuthorizationStatus.PROVISIONAL;
-
-            if (enabled) {
-                console.log('[Push] Authorization status:', authStatus);
-            }
-            return enabled;
+                authStatus === messaging.AuthorizationStatus.PROVISIONAL
+            );
         }
-        return true; // Android permissions handled differently
+        return true;
     }
 
-    /**
-     * Get FCM token for push notifications
-     */
     async getToken(): Promise<string | null> {
         try {
-            // Check if permission granted
             const hasPermission = await this.requestPermission();
-            if (!hasPermission) {
-                console.log('[Push] Permission not granted');
-                return null;
-            }
+            if (!hasPermission) return null;
 
-            // Get the token
             const token = await messaging().getToken();
-
-            // Store locally
             if (token) {
                 storage.set(FCM_TOKEN_KEY, token);
-                console.log('[Push] FCM Token obtained');
             }
-
             return token;
         } catch (error) {
             console.error('[Push] Error getting token:', error);
@@ -63,45 +48,76 @@ class PushNotificationService {
         }
     }
 
-    /**
-     * Get stored FCM token
-     */
     getStoredToken(): string | null {
         return storage.getString(FCM_TOKEN_KEY) || null;
     }
 
-    /**
-     * Register token refresh listener
-     */
+    clearStoredToken(): void {
+        storage.delete(FCM_TOKEN_KEY);
+    }
+
+    async syncTokenWithServer(token: string): Promise<void> {
+        if (!token) return;
+        await pushApi.registerDevice({
+            token,
+            appVariant: 'native',
+            platform: Platform.OS === 'ios' ? 'ios' : 'android',
+            environment: getPushEnvironment(),
+            pushProvider: 'FCM',
+            appVersion: DeviceInfo.getVersion(),
+            locale: Intl.DateTimeFormat().resolvedOptions().locale,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            metadata: {
+                deviceModel: DeviceInfo.getModel(),
+                deviceId: DeviceInfo.getDeviceId(),
+                systemVersion: DeviceInfo.getSystemVersion(),
+            },
+        });
+    }
+
+    async unregisterToken(token?: string | null): Promise<void> {
+        const resolved = token || this.getStoredToken();
+        if (!resolved) return;
+        try {
+            await pushApi.unregisterDevice({ token: resolved });
+        } finally {
+            if (this.getStoredToken() === resolved) {
+                this.clearStoredToken();
+            }
+        }
+    }
+
     onTokenRefresh(callback: (token: string) => void): () => void {
         return messaging().onTokenRefresh(token => {
             storage.set(FCM_TOKEN_KEY, token);
+            this.syncTokenWithServer(token).catch((error) => {
+                console.warn('[Push] token refresh sync failed', error);
+            });
             callback(token);
         });
     }
 
-    /**
-     * Set foreground notification handler
-     */
     setOnNotification(handler: NotificationHandler): void {
         this.onNotificationHandler = handler;
     }
 
-    /**
-     * Set notification opened handler
-     */
     setOnNotificationOpened(handler: NotificationHandler): void {
         this.onNotificationOpenedHandler = handler;
     }
 
-    /**
-     * Initialize push notifications
-     */
     async initialize(): Promise<void> {
-        // Request permission
-        await this.requestPermission();
+        if (this.initialized) {
+            const token = this.getStoredToken() || await this.getToken();
+            if (token) {
+                await this.syncTokenWithServer(token);
+            }
+            return;
+        }
 
-        // Create notification channel for Android
+        this.initialized = true;
+        const hasPermission = await this.requestPermission();
+        if (!hasPermission) return;
+
         if (Platform.OS === 'android') {
             await notifee.createChannel({
                 id: 'tradequip-default',
@@ -110,7 +126,6 @@ class PushNotificationService {
                 sound: 'default',
                 vibration: true,
             });
-
             await notifee.createChannel({
                 id: 'tradequip-trades',
                 name: 'Trade Alerts',
@@ -118,7 +133,6 @@ class PushNotificationService {
                 sound: 'default',
                 vibration: true,
             });
-
             await notifee.createChannel({
                 id: 'tradequip-price',
                 name: 'Price Alerts',
@@ -127,11 +141,12 @@ class PushNotificationService {
             });
         }
 
-        // Handle foreground messages
-        messaging().onMessage(async remoteMessage => {
-            console.log('[Push] Foreground message:', remoteMessage);
+        const token = await this.getToken();
+        if (token) {
+            await this.syncTokenWithServer(token);
+        }
 
-            // Display local notification
+        messaging().onMessage(async remoteMessage => {
             if (remoteMessage.notification) {
                 await notifee.displayNotification({
                     title: remoteMessage.notification.title,
@@ -145,65 +160,45 @@ class PushNotificationService {
                     },
                 });
             }
-
             this.onNotificationHandler?.(remoteMessage);
         });
 
-        // Handle notification opened app from background
         messaging().onNotificationOpenedApp(remoteMessage => {
-            console.log('[Push] Notification opened app:', remoteMessage);
             this.onNotificationOpenedHandler?.(remoteMessage);
         });
 
-        // Check if app was opened from a notification (cold start)
         const initialNotification = await messaging().getInitialNotification();
         if (initialNotification) {
-            console.log('[Push] App opened from notification:', initialNotification);
             this.onNotificationOpenedHandler?.(initialNotification);
         }
 
-        // Handle background/quit notification events
-        notifee.onForegroundEvent(({ type, detail }) => {
+        notifee.onForegroundEvent(({ type }) => {
             if (type === EventType.PRESS) {
-                console.log('[Push] Notification pressed:', detail);
+                // no-op: Navigation handling is delegated through setOnNotificationOpened.
             }
         });
     }
 
-    /**
-     * Subscribe to a topic
-     */
     async subscribeToTopic(topic: string): Promise<void> {
         try {
             await messaging().subscribeToTopic(topic);
-            console.log(`[Push] Subscribed to topic: ${topic}`);
         } catch (error) {
             console.error(`[Push] Error subscribing to topic ${topic}:`, error);
         }
     }
 
-    /**
-     * Unsubscribe from a topic
-     */
     async unsubscribeFromTopic(topic: string): Promise<void> {
         try {
             await messaging().unsubscribeFromTopic(topic);
-            console.log(`[Push] Unsubscribed from topic: ${topic}`);
         } catch (error) {
             console.error(`[Push] Error unsubscribing from topic ${topic}:`, error);
         }
     }
 
-    /**
-     * Get notification settings
-     */
     async getNotificationSettings(): Promise<FirebaseMessagingTypes.AuthorizationStatus> {
         return messaging().hasPermission();
     }
 
-    /**
-     * Check if notifications are enabled
-     */
     async areNotificationsEnabled(): Promise<boolean> {
         const status = await this.getNotificationSettings();
         return status === messaging.AuthorizationStatus.AUTHORIZED ||

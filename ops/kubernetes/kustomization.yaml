@@ -1,6 +1,93 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: tradehub
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: tradehub-dashboards
+    files:
+      - assets/dashboards/app-red-metrics.json
+      - assets/dashboards/bare-metal-health.json
+      - assets/dashboards/cache-session-health.json
+      - assets/dashboards/clickhouse-olap.json
+      - assets/dashboards/export-analytics-pipeline.json
+      - assets/dashboards/kubernetes-health.json
+      - assets/dashboards/minio-storage.json
+      - assets/dashboards/ops-overview.json
+      - assets/dashboards/security-events.json
+  - name: pigsty-pgsql-dashboards
+    files:
+      - assets/dashboards/pigsty-pgsql/pgcat-database.json
+      - assets/dashboards/pigsty-pgsql/pgcat-instance.json
+      - assets/dashboards/pigsty-pgsql/pgcat-locks.json
+      - assets/dashboards/pigsty-pgsql/pgcat-query.json
+      - assets/dashboards/pigsty-pgsql/pgcat-schema.json
+      - assets/dashboards/pigsty-pgsql/pgcat-table.json
+      - assets/dashboards/pigsty-pgsql/pgrds-cluster.json
+      - assets/dashboards/pigsty-pgsql/pgrds-instance.json
+      - assets/dashboards/pigsty-pgsql/pgsql-activity.json
+      - assets/dashboards/pigsty-pgsql/pgsql-alert.json
+      - assets/dashboards/pigsty-pgsql/pgsql-cluster.json
+      - assets/dashboards/pigsty-pgsql/pgsql-database.json
+      - assets/dashboards/pigsty-pgsql/pgsql-databases.json
+      - assets/dashboards/pigsty-pgsql/pgsql-exporter.json
+      - assets/dashboards/pigsty-pgsql/pgsql-instance.json
+      - assets/dashboards/pigsty-pgsql/pgsql-overview.json
+      - assets/dashboards/pigsty-pgsql/pgsql-patroni.json
+      - assets/dashboards/pigsty-pgsql/pgsql-persist.json
+      - assets/dashboards/pigsty-pgsql/pgsql-pgbouncer.json
+      - assets/dashboards/pigsty-pgsql/pgsql-pitr.json
+      - assets/dashboards/pigsty-pgsql/pgsql-proxy.json
+      - assets/dashboards/pigsty-pgsql/pgsql-query.json
+      - assets/dashboards/pigsty-pgsql/pgsql-replication.json
+      - assets/dashboards/pigsty-pgsql/pgsql-service.json
+      - assets/dashboards/pigsty-pgsql/pgsql-session.json
+      - assets/dashboards/pigsty-pgsql/pgsql-shard.json
+      - assets/dashboards/pigsty-pgsql/pgsql-table.json
+      - assets/dashboards/pigsty-pgsql/pgsql-tables.json
+      - assets/dashboards/pigsty-pgsql/pgsql-xacts.json
+  - name: pigsty-minio-dashboards
+    files:
+      - assets/dashboards/pigsty-minio/minio-instance.json
+      - assets/dashboards/pigsty-minio/minio-overview.json
+  - name: pigsty-node-dashboards
+    files:
+      - assets/dashboards/pigsty-node/claude-code.json
+      - assets/dashboards/pigsty-node/node-alert.json
+      - assets/dashboards/pigsty-node/node-cluster.json
+      - assets/dashboards/pigsty-node/node-disk.json
+      - assets/dashboards/pigsty-node/node-haproxy.json
+      - assets/dashboards/pigsty-node/node-instance.json
+      - assets/dashboards/pigsty-node/node-juice.json
+      - assets/dashboards/pigsty-node/node-overview.json
+      - assets/dashboards/pigsty-node/node-vector.json
+      - assets/dashboards/pigsty-node/node-vip.json
+  - name: pigsty-infra-dashboards
+    files:
+      - assets/dashboards/pigsty-infra/alertmanager-instance.json
+      - assets/dashboards/pigsty-infra/etcd-overview.json
+      - assets/dashboards/pigsty-infra/grafana-instance.json
+      - assets/dashboards/pigsty-infra/infra-overview.json
+      - assets/dashboards/pigsty-infra/inventory-cmdb.json
+      - assets/dashboards/pigsty-infra/logs-instance.json
+      - assets/dashboards/pigsty-infra/nginx-instance.json
+      - assets/dashboards/pigsty-infra/vlogs-instance.json
+      - assets/dashboards/pigsty-infra/vmalert-instance.json
+      - assets/dashboards/pigsty-infra/vmetrics-instance.json
+      - assets/dashboards/pigsty-infra/vtraces-instance.json
+  - name: pigsty-redis-dashboards
+    files:
+      - assets/dashboards/pigsty-redis/redis-cluster.json
+      - assets/dashboards/pigsty-redis/redis-instance.json
+      - assets/dashboards/pigsty-redis/redis-overview.json
+  - name: tradehub-minio-monitor-app
+    files:
+      - assets/minio-monitor/app.py
+  - name: tradehub-minio-monitor-static
+    files:
+      - assets/minio-monitor/static/index.html
+      - assets/minio-monitor/static/app.js
+      - assets/minio-monitor/static/styles.css
 resources:
   - prometheus-ops-config.yaml
   - grafana-provisioning.yaml
@@ -15,3 +102,4 @@ resources:
   - headlamp-ingress.yaml
   - bull-board-ingress.yaml
   - minio-monitor-deployment.yaml
+  - 75-internal-tls.yaml

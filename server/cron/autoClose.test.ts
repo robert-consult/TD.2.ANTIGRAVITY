@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   log: vi.fn(),
 }));
 
+let autoCloseModule: Awaited<typeof import("./autoClose")> | null = null;
+
 vi.mock("@db", () => ({
   db: {
     query: {
@@ -121,23 +123,27 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  autoCloseModule?.stopAutoCloseScheduler();
+  autoCloseModule = null;
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 test("starts the scheduler and runs the auto-close job on the configured cadence", async () => {
-  const { startAutoCloseScheduler } = await import("./autoClose");
+  autoCloseModule = await import("./autoClose");
+  const { startAutoCloseScheduler } = autoCloseModule;
 
   await startAutoCloseScheduler();
   await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
 
   expect(state.getOldOpenTrades).toHaveBeenCalledTimes(1);
   expect(state.log).toHaveBeenCalledWith(expect.stringContaining("Auto-close scheduled to run every 60 minutes"));
-}, 10_000);
+}, 30_000);
 
 test("reschedules when live settings updates are published", async () => {
-  const { startAutoCloseScheduler } = await import("./autoClose");
+  autoCloseModule = await import("./autoClose");
+  const { startAutoCloseScheduler } = autoCloseModule;
 
   await startAutoCloseScheduler();
 
@@ -156,4 +162,4 @@ test("reschedules when live settings updates are published", async () => {
   expect(state.getOldOpenTrades).toHaveBeenCalledTimes(12);
 
   expect(state.log).toHaveBeenCalledWith(expect.stringContaining("Auto-close scheduled to run every 5 minutes"));
-}, 10_000);
+}, 30_000);

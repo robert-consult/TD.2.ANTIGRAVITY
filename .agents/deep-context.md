@@ -13,7 +13,7 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 - Structure guide: `PROJECT_STRUCTURE.md`
 - Security invariants: `AUDIT_REPORT.md`, `REAUDIT_REPORT.md`, `AUDIT_COMPLIANCE_STATUS.md`
 - Compliance runbooks: `JURISDICTION_CONTROLS_VERIFICATION_RUNBOOK.md`, `CODEX_COUNTRY_TIMEZONE_CONTROLS.md`
-- Mobile wrapper: `CAPACITOR.md`, `MOBILE/README.md`, `NATIVE/README.md`
+- Mobile wrapper: `CAPACITOR.md`, `MOBILE/README.md`, `NATIVE/README.md`, `MOBILE/AGENTS.md`, `NATIVE/AGENTS.md`
 
 ## Domain entrypoints (by problem type)
 
@@ -87,8 +87,12 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 - UI conventions: `design_guidelines.md`
 
 ### Mobile apps
-- Capacitor wrapper (remote URL mode): `MOBILE/`, `MOBILE/src/mobile/`
-- React Native app: `NATIVE/src/`
+- Capacitor wrapper (remote URL mode): `MOBILE/`, `MOBILE/src/mobile/AGENTS.md`, `client/src/components/MobileWrapperBridge.tsx`, `client/src/lib/dashboardUrlState.ts`, `client/src/lib/appNavigation.ts`
+- Wrapper Android shell: `MOBILE/android/AGENTS.md`, `MOBILE/android/app/src/main/AndroidManifest.xml`, `MOBILE/android/app/src/main/res/xml/network_security_config.xml`
+- Wrapper iOS shell: `MOBILE/ios/AGENTS.md`, `MOBILE/ios/App/App/AppDelegate.swift`, `MOBILE/ios/App/App/Info.plist`, `MOBILE/ios/App/App/App.entitlements`
+- React Native app: `NATIVE/src/AGENTS.md`, `NATIVE/src/services/api.ts`, `NATIVE/src/services/csrf.ts`, `NATIVE/src/services/runtimeConfig.ts`, `NATIVE/src/services/websocket.ts`
+- Native Android shell: `NATIVE/android/AGENTS.md`, `NATIVE/android/app/src/main/AndroidManifest.xml`, `NATIVE/android/app/src/main/java/com/tradequipnative/MainActivity.kt`
+- Native iOS shell: `NATIVE/ios/AGENTS.md`, `NATIVE/ios/Podfile`, `NATIVE/ios/TradeQuipNative/AppDelegate.mm`, `NATIVE/ios/TradeQuipNative/Info.plist`
 
 ### Infra / deployment
 - Docker infra (local Postgres/Valkey): `docker-compose.infra.yml`

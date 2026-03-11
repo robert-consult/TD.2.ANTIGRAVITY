@@ -1088,7 +1088,11 @@ adminScoutRouter.put("/config", async (req, res) => {
 
     const [existing] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     if (!existing) {
-      await db.insert(systemConfig).values({ id: 1 });
+      await db.insert(systemConfig).values({
+        id: 1,
+        marketDataActiveProviderKey: "twelvedata",
+        marketDataFallbackProviderKeysCsv: "",
+      });
     }
 
     const ts = nowSec();
@@ -1136,4 +1140,3 @@ adminScoutRouter.put("/config", async (req, res) => {
     return res.status(500).json({ message: "FAILED_TO_UPDATE_SCOUT_CONFIG" });
   }
 });
-

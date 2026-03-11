@@ -1,0 +1,131 @@
+{
+    "title": "TradeHub — Cache & Session Health (Valkey)",
+    "uid": "th-cache-health",
+    "editable": true,
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "refresh": "15s",
+    "panels": [
+        {
+            "title": "Cache Hit Rate %",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) * 100"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "min": 0,
+                    "max": 100,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "value": 0,
+                                "color": "red"
+                            },
+                            {
+                                "value": 50,
+                                "color": "orange"
+                            },
+                            {
+                                "value": 80,
+                                "color": "green"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "title": "Memory Usage",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "redis_used_memory_bytes",
+                    "legendFormat": "used"
+                },
+                {
+                    "expr": "redis_maxmemory",
+                    "legendFormat": "max"
+                }
+            ]
+        },
+        {
+            "title": "Evicted Keys",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "rate(redis_evicted_keys_total[5m])",
+                    "legendFormat": "evictions/s"
+                }
+            ]
+        },
+        {
+            "title": "Connected Clients",
+            "type": "stat",
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "redis_connected_clients"
+                }
+            ]
+        },
+        {
+            "title": "Blocked Clients",
+            "type": "stat",
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "redis_blocked_clients"
+                }
+            ]
+        },
+        {
+            "title": "Commands/s",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 16,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(redis_commands_processed_total[5m])",
+                    "legendFormat": "ops/s"
+                }
+            ]
+        }
+    ]
+}

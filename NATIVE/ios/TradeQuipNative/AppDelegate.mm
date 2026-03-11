@@ -4,6 +4,10 @@
 #import <Firebase.h>
 #import <UserNotifications/UserNotifications.h>
 
+@interface AppDelegate ()
+@property (nonatomic, strong) UIVisualEffectView *privacyShieldView;
+@end
+
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
@@ -25,6 +29,26 @@
   self.initialProps = @{};
 
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
+}
+
+- (void)applicationWillResignActive:(UIApplication *)application
+{
+  [self installPrivacyShield];
+}
+
+- (void)applicationDidEnterBackground:(UIApplication *)application
+{
+  [self installPrivacyShield];
+}
+
+- (void)applicationWillEnterForeground:(UIApplication *)application
+{
+  [self removePrivacyShield];
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application
+{
+  [self removePrivacyShield];
 }
 
 - (NSURL *)sourceURLForBridge:(RCTBridge *)bridge
@@ -79,6 +103,27 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
   NSLog(@"Notification tapped: %@", userInfo);
   
   completionHandler();
+}
+
+- (void)installPrivacyShield
+{
+  if (self.privacyShieldView != nil || self.window == nil) {
+    return;
+  }
+
+  UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
+  UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:effect];
+  blurView.frame = self.window.bounds;
+  blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  blurView.userInteractionEnabled = NO;
+  [self.window addSubview:blurView];
+  self.privacyShieldView = blurView;
+}
+
+- (void)removePrivacyShield
+{
+  [self.privacyShieldView removeFromSuperview];
+  self.privacyShieldView = nil;
 }
 
 @end

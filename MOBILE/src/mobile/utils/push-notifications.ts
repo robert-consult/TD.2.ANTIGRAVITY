@@ -1,182 +1,332 @@
 /**
- * Push Notification Service
- * Handles Firebase Cloud Messaging (FCM) for TradeQuip mobile app
+ * Push notification helpers for the Capacitor wrapper.
+ * The wrapper stores its active token locally so logout/session flows can revoke it safely.
  */
 
 import { PushNotifications } from "@capacitor/push-notifications";
-import { isNativeApp } from "./mobile-utils";
+import type { PluginListenerHandle } from "@capacitor/core";
+import { getPlatform, isNativeApp } from "./mobile-utils";
+import { fetchWithCsrf } from "./csrf";
+import {
+  DEVICE_INSTALL_ID_STORAGE_KEY,
+  LEGACY_DEVICE_ID_STORAGE_KEY,
+} from "@shared/identity/headers";
+import { generateIdentityId } from "@shared/identity/device";
+
+declare const __TQ_BUILD_HASH__: string;
+
+const PUSH_TOKEN_STORAGE_KEY = "tradequip.wrapper.push-token";
+const PUSH_REGISTRATION_TIMEOUT_MS = 15_000;
+
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function getOrCreateStorageValue(key: string): string {
+  const existing = safeGetItem(key);
+  if (existing) return existing;
+  const created = generateIdentityId();
+  safeSetItem(key, created);
+  return created;
+}
+
+function resolvePushEnvironment(): "development" | "staging" | "production" {
+  const mode = String(import.meta.env.MODE || "").trim().toLowerCase();
+  if (import.meta.env.PROD) return "production";
+  if (mode === "staging") return "staging";
+  return "development";
+}
+
+function getAppVersion(): string {
+  const value = String(import.meta.env.VITE_APP_VERSION || "").trim();
+  if (value) return value;
+  return __TQ_BUILD_HASH__;
+}
+
+function getBuildNumber(): string {
+  const value = String(import.meta.env.VITE_BUILD_NUMBER || "").trim();
+  if (value) return value;
+  return __TQ_BUILD_HASH__;
+}
+
+function getLocale(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || navigator.language || "en-US";
+  } catch {
+    return navigator.language || "en-US";
+  }
+}
+
+function getTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+async function removeListener(listenerPromise: Promise<PluginListenerHandle> | null): Promise<void> {
+  if (!listenerPromise) return;
+  try {
+    const listener = await listenerPromise;
+    await listener.remove();
+  } catch {
+    // Ignore cleanup failures.
+  }
+}
 
 export interface PushNotificationToken {
-    value: string;
+  value: string;
 }
 
 export interface PushNotificationData {
-    id: string;
-    title?: string;
-    body?: string;
-    data: Record<string, string>;
+  id: string;
+  title?: string;
+  body?: string;
+  data: Record<string, string>;
 }
 
-/**
- * Register device for push notifications
- * Returns the FCM token on success
- */
+export function getStoredPushToken(): string | null {
+  return safeGetItem(PUSH_TOKEN_STORAGE_KEY);
+}
+
+function storePushToken(token: string): void {
+  safeSetItem(PUSH_TOKEN_STORAGE_KEY, token);
+}
+
+function clearStoredPushToken(): void {
+  safeRemoveItem(PUSH_TOKEN_STORAGE_KEY);
+}
+
 export async function registerPushNotifications(): Promise<string | null> {
-    if (!isNativeApp()) {
-        console.log("Push notifications only available on native platforms");
-        return null;
+  if (!isNativeApp()) {
+    return null;
+  }
+
+  try {
+    let permissionStatus = await PushNotifications.checkPermissions();
+    if (permissionStatus.receive === "prompt") {
+      permissionStatus = await PushNotifications.requestPermissions();
+    }
+    if (permissionStatus.receive !== "granted") {
+      console.warn("Push notification permission denied");
+      return null;
     }
 
-    try {
-        // Request permission
-        let permStatus = await PushNotifications.checkPermissions();
+    return await new Promise((resolve) => {
+      let settled = false;
+      let registrationListener: Promise<PluginListenerHandle> | null = null;
+      let errorListener: Promise<PluginListenerHandle> | null = null;
 
-        if (permStatus.receive === "prompt") {
-            permStatus = await PushNotifications.requestPermissions();
+      const settle = (token: string | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        void removeListener(registrationListener);
+        void removeListener(errorListener);
+        if (token) {
+          storePushToken(token);
         }
+        resolve(token);
+      };
 
-        if (permStatus.receive !== "granted") {
-            console.warn("Push notification permission denied");
-            return null;
-        }
+      registrationListener = PushNotifications.addListener("registration", (token: PushNotificationToken) => {
+        settle(token.value);
+      });
 
-        // Register with FCM
-        await PushNotifications.register();
+      errorListener = PushNotifications.addListener("registrationError", (error: unknown) => {
+        console.error("Push registration error:", error);
+        settle(getStoredPushToken());
+      });
 
-        // Get the token
-        return new Promise((resolve) => {
-            PushNotifications.addListener("registration", (token: PushNotificationToken) => {
-                console.log("Push registration success, token:", token.value);
-                resolve(token.value);
-            });
+      const timeoutId = window.setTimeout(() => {
+        console.warn("Push registration timed out");
+        settle(getStoredPushToken());
+      }, PUSH_REGISTRATION_TIMEOUT_MS);
 
-            PushNotifications.addListener("registrationError", (error: any) => {
-                console.error("Push registration error:", error);
-                resolve(null);
-            });
-        });
-    } catch (error) {
+      void PushNotifications.register().catch((error) => {
         console.error("Failed to register push notifications:", error);
-        return null;
-    }
+        settle(getStoredPushToken());
+      });
+    });
+  } catch (error) {
+    console.error("Failed to register push notifications:", error);
+    return getStoredPushToken();
+  }
 }
 
-/**
- * Send FCM token to backend for storage
- */
 export async function sendTokenToServer(token: string): Promise<boolean> {
-    try {
-        const response = await fetch("/api/push/register", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            credentials: "include",
-            body: JSON.stringify({ token, platform: "android" }),
-        });
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    return false;
+  }
 
-        return response.ok;
-    } catch (error) {
-        console.error("Failed to send push token to server:", error);
-        return false;
+  try {
+    const response = await fetchWithCsrf("/api/push/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        token: normalizedToken,
+        appVariant: "wrapper",
+        platform: getPlatform(),
+        environment: resolvePushEnvironment(),
+        pushProvider: "FCM",
+        deviceId: getOrCreateStorageValue(LEGACY_DEVICE_ID_STORAGE_KEY),
+        deviceInstallId: getOrCreateStorageValue(DEVICE_INSTALL_ID_STORAGE_KEY),
+        appVersion: getAppVersion(),
+        buildNumber: getBuildNumber(),
+        locale: getLocale(),
+        timezone: getTimezone(),
+        metadata: {
+          userAgent: navigator.userAgent,
+          nativePlatform: getPlatform(),
+          wrapperMode: "remote-url",
+        },
+      }),
+    });
+
+    if (response.ok) {
+      storePushToken(normalizedToken);
     }
+    return response.ok;
+  } catch (error) {
+    console.error("Failed to send push token to server:", error);
+    return false;
+  }
 }
 
-/**
- * Initialize push notification listeners
- */
+export async function unregisterPushToken(token: string): Promise<boolean> {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    return true;
+  }
+
+  try {
+    const response = await fetchWithCsrf("/api/push/unregister", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ token: normalizedToken }),
+    });
+    if (response.ok && getStoredPushToken() === normalizedToken) {
+      clearStoredPushToken();
+    }
+    return response.ok;
+  } catch (error) {
+    console.error("Failed to unregister push token:", error);
+    return false;
+  }
+}
+
+export async function unregisterStoredPushToken(): Promise<boolean> {
+  const token = getStoredPushToken();
+  if (!token) {
+    return true;
+  }
+  return unregisterPushToken(token);
+}
+
 export function initPushNotificationListeners(handlers: {
-    onNotificationReceived?: (notification: PushNotificationData) => void;
-    onNotificationTapped?: (notification: PushNotificationData) => void;
+  onNotificationReceived?: (notification: PushNotificationData) => void;
+  onNotificationTapped?: (notification: PushNotificationData) => void;
 }): () => void {
-    if (!isNativeApp()) {
-        return () => { };
+  if (!isNativeApp()) {
+    return () => {};
+  }
+
+  const listeners: Promise<PluginListenerHandle>[] = [];
+
+  listeners.push(
+    PushNotifications.addListener("pushNotificationReceived", (notification) => {
+      handlers.onNotificationReceived?.({
+        id: notification.id,
+        title: notification.title,
+        body: notification.body,
+        data: notification.data,
+      });
+    }),
+  );
+
+  listeners.push(
+    PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+      handlers.onNotificationTapped?.({
+        id: action.notification.id,
+        title: action.notification.title,
+        body: action.notification.body,
+        data: action.notification.data,
+      });
+    }),
+  );
+
+  return () => {
+    for (const listener of listeners) {
+      void listener.then((handle) => handle.remove()).catch(() => undefined);
     }
-
-    const listeners: Promise<any>[] = [];
-
-    // Handle notification received while app is in foreground
-    listeners.push(
-        PushNotifications.addListener("pushNotificationReceived", (notification) => {
-            console.log("Push notification received:", notification);
-            handlers.onNotificationReceived?.({
-                id: notification.id,
-                title: notification.title,
-                body: notification.body,
-                data: notification.data,
-            });
-        })
-    );
-
-    // Handle notification tapped (app opened from notification)
-    listeners.push(
-        PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-            console.log("Push notification tapped:", action);
-            handlers.onNotificationTapped?.({
-                id: action.notification.id,
-                title: action.notification.title,
-                body: action.notification.body,
-                data: action.notification.data,
-            });
-        })
-    );
-
-    // Return cleanup function
-    return () => {
-        listeners.forEach((listener) => {
-            listener.then((l) => l.remove());
-        });
-    };
+  };
 }
 
-/**
- * Check if push notifications are enabled
- */
 export async function arePushNotificationsEnabled(): Promise<boolean> {
-    if (!isNativeApp()) {
-        return false;
-    }
+  if (!isNativeApp()) {
+    return false;
+  }
 
-    try {
-        const status = await PushNotifications.checkPermissions();
-        return status.receive === "granted";
-    } catch {
-        return false;
-    }
+  try {
+    const status = await PushNotifications.checkPermissions();
+    return status.receive === "granted";
+  } catch {
+    return false;
+  }
 }
 
-/**
- * Get list of delivered notifications (Android only)
- */
 export async function getDeliveredNotifications(): Promise<PushNotificationData[]> {
-    if (!isNativeApp()) {
-        return [];
-    }
+  if (!isNativeApp()) {
+    return [];
+  }
 
-    try {
-        const result = await PushNotifications.getDeliveredNotifications();
-        return result.notifications.map((n) => ({
-            id: n.id,
-            title: n.title,
-            body: n.body,
-            data: n.data,
-        }));
-    } catch {
-        return [];
-    }
+  try {
+    const result = await PushNotifications.getDeliveredNotifications();
+    return result.notifications.map((notification) => ({
+      id: notification.id,
+      title: notification.title,
+      body: notification.body,
+      data: notification.data,
+    }));
+  } catch {
+    return [];
+  }
 }
 
-/**
- * Remove all delivered notifications
- */
 export async function clearAllNotifications(): Promise<void> {
-    if (!isNativeApp()) {
-        return;
-    }
+  if (!isNativeApp()) {
+    return;
+  }
 
-    try {
-        await PushNotifications.removeAllDeliveredNotifications();
-    } catch (error) {
-        console.error("Failed to clear notifications:", error);
-    }
+  try {
+    await PushNotifications.removeAllDeliveredNotifications();
+  } catch (error) {
+    console.error("Failed to clear notifications:", error);
+  }
 }

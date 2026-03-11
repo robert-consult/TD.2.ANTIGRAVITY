@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tradehub-prod-app
+  namespace: argocd
+spec:
+  project: tradehub
+  source:
+    repoURL: https://github.com/REPLACE_GITHUB_ORG/TD.2.ANTIGRAVITY.git
+    targetRevision: main
+    path: k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tradehub
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

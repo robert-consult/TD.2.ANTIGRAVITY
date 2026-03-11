@@ -1,0 +1,65 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-headlamp-ingress
+  namespace: tradehub
+spec:
+  tls:
+    - hosts:
+        - tradehub.example.com
+      secretName: tradehub-prod-tls
+  rules:
+    - host: tradehub.example.com
+      http:
+        paths:
+          - path: /headlamp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: tradehub-headlamp
+                port:
+                  number: 4466
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-bull-board-ingress
+  namespace: tradehub
+spec:
+  tls:
+    - hosts:
+        - tradehub.example.com
+      secretName: tradehub-prod-tls
+  rules:
+    - host: tradehub.example.com
+      http:
+        paths:
+          - path: /api/admin/data-exports/queues
+            pathType: Prefix
+            backend:
+              service:
+                name: tradehub-api
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-minio-monitor-ingress
+  namespace: tradehub
+spec:
+  tls:
+    - hosts:
+        - tradehub.example.com
+      secretName: tradehub-prod-tls
+  rules:
+    - host: tradehub.example.com
+      http:
+        paths:
+          - path: /minio-monitor(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: tradehub-minio-monitor-ui
+                port:
+                  number: 8000

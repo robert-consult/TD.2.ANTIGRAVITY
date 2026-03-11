@@ -1,183 +1,67 @@
-# Security Audit Guide for Mobile Environment
+# Security Audit Guide For The Wrapper
 
-## Overview
+## Scope
 
-This document outlines security considerations and audit procedures for the TradeQuip Capacitor mobile app.
+This guide reflects the current `MOBILE/` architecture: Android and iOS shells around the live web app, with bridge utilities in `MOBILE/src/mobile/`.
 
----
+## Implemented Controls
 
-## 1. WebView Security
+### WebView / Host Control
+- Remote-URL mode keeps wrapper traffic same-origin with the server.
+- Deep links are parsed and allowlisted before navigation.
+- External or malformed routes are rejected or handed off safely.
+- The live bridge is activated from `client/src/components/MobileWrapperBridge.tsx`, not from deleted wrapper-local UI screens.
 
-### Configuration Checklist
-- [x] `allowMixedContent: false` - Prevents loading HTTP content in HTTPS pages
-- [x] `webContentsDebuggingEnabled: false` in production - Prevents remote debugging
-- [x] Network security config with SSL pinning placeholder
+### Transport
+- Android uses `network_security_config.xml` with debug-only local exceptions.
+- iOS uses ATS/associated-domain configuration scoped to the canonical host.
+- Production certificate pins remain a release-time input; placeholder pin config is not release-ready.
 
-### Verification Steps
+### Session / CSRF
+- Session-bound wrapper mutations fetch CSRF from `/api/csrf`.
+- Session state is refreshed through `/api/auth/current-user`.
+- Push token registration and revocation are authenticated and session-scoped through `/api/push/*`.
+
+### Runtime Hardening
+- Screenshot/snapshot mitigation is present in Android and iOS shells.
+- Non-macOS iOS workflows fail fast instead of entering partial Xcode/CocoaPods flows.
+
+## Validation Commands
+
 ```bash
-# Check WebView settings in build
-grep -r "allowMixedContent" android/app/
-grep -r "webContentsDebuggingEnabled" MOBILE/
+npm run check
+npm run build
+cd MOBILE && npm run sync
+cd MOBILE && npm run doctor
+cd MOBILE && npm audit --audit-level=high
 ```
 
----
+## Audit Focus Areas
 
-## 2. Network Security
+### High Priority
+- [ ] Production certificate pin values supplied from operator-managed release inputs
+- [ ] Wrapper host allowlist remains restricted to approved domains/schemes
+- [ ] Checked-in signing/Firebase files are not used as final release credentials
+- [ ] Logout revokes wrapper push tokens and clears sensitive session state
 
-### SSL/TLS Configuration
-- [x] `network_security_config.xml` created
-- [x] Cleartext traffic disabled by default
-- [x] Debug overrides for local development only
-- [ ] Production SSL pins added (requires certificate hashes)
+### Medium Priority
+- [ ] Deep-link normalization only targets supported app routes
+- [ ] Local development exceptions stay limited to debug workflows
+- [ ] External navigation cannot be coerced into arbitrary in-app origins
 
-### Adding SSL Pins (Production)
-```bash
-# Get certificate SHA-256 hash
-echo | openssl s_client -connect tradequip.app:443 2>/dev/null | \
-  openssl x509 -pubkey -noout | \
-  openssl pkey -pubin -outform der | \
-  openssl dgst -sha256 -binary | \
-  openssl enc -base64
-```
+### Lower Priority / Future Hardening
+- [ ] Root/jailbreak detection if required by release policy
+- [ ] Overlay/tapjacking detection if required by threat model
 
-Then add to `network_security_config.xml`:
-```xml
-<pin-set expiration="2027-01-01">
-    <pin digest="SHA-256">YOUR_HASH_HERE</pin>
-</pin-set>
-```
+## Storage Expectations
 
----
+| Data Type | Expected Location | Notes |
+|-----------|-------------------|-------|
+| Session cookies | WebView cookie store | Server-managed, HttpOnly/Secure |
+| Push token | Local storage + server registry | Cleared on logout/revocation |
+| Device/install IDs | Local storage | Used for identity/push metadata |
+| Passwords | Never stored locally | Server auth only |
 
-## 3. Session Security
+## Summary
 
-### Cookie Configuration
-Server must set cookies with:
-- `HttpOnly` - Prevents JavaScript access
-- `Secure` - HTTPS only
-- `SameSite=Lax` or `Strict` - CSRF protection
-- `Path=/` - Applies to all routes
-
-### Verification
-```javascript
-// In browser devtools (debug build)
-document.cookie  // Should be empty if HttpOnly is set correctly
-```
-
----
-
-## 4. Data Storage
-
-### Sensitive Data Handling
-| Data Type | Storage Location | Security |
-|-----------|------------------|----------|
-| Session cookies | WebView cookie store | HttpOnly, Secure |
-| FCM token | Server database | User-scoped |
-| Preferences | Not stored locally | Server-synced |
-| Passwords | Never stored | Server auth only |
-
-### What NOT to Store
-- ❌ Passwords or credentials
-- ❌ API keys or secrets
-- ❌ Session tokens in SharedPreferences
-- ❌ Personal identifying information locally
-
----
-
-## 5. Deep Link Security
-
-### Validation Implemented
-- [x] URL scheme validation
-- [x] Path pattern matching
-- [x] Query parameter sanitization
-- [x] No JavaScript URL execution
-
-### Attack Vectors Mitigated
-- Intent hijacking: Limited to defined routes only
-- URL injection: Strict pattern matching
-- XSS via deep links: No eval/innerHTML usage
-
----
-
-## 6. Build Security
-
-### Release Build Hardening
-- [x] ProGuard/R8 minification enabled
-- [x] Debug logging removed in production
-- [x] Keystore separate from source control
-- [ ] Code obfuscation rules reviewed
-
-### Sensitive Files (Do NOT commit)
-```gitignore
-# MOBILE/.gitignore
-android/key.properties
-android/*.keystore
-android/*.jks
-google-services.json
-```
-
----
-
-## 7. Third-Party Dependencies
-
-### Dependency Audit
-```bash
-cd MOBILE
-npm audit
-```
-
-### Current Status
-- Capacitor 7.x: Current, maintained
-- Push plugins: Official Capacitor plugins
-- No unnecessary third-party JavaScript
-
----
-
-## 8. Runtime Security
-
-### Protection Measures
-- [ ] Root/jailbreak detection (optional, implement if needed)
-- [x] Debug detection (webContentsDebugging disabled)
-- [ ] Screen capture prevention (consider for sensitive data)
-- [ ] Overlay attack prevention (Android)
-
-### Root Detection (Optional Implementation)
-```typescript
-// Implement in mobile-utils.ts if needed
-export async function isDeviceRooted(): Promise<boolean> {
-  // Check for common root indicators
-  // Return true if potentially compromised
-}
-```
-
----
-
-## 9. Compliance Considerations
-
-### GDPR/Privacy
-- [ ] Privacy policy URL in Play Store listing
-- [ ] Data collection disclosure
-- [ ] Right to deletion implemented (via deactivate account)
-
-### Financial App Regulations
-- [ ] Appropriate disclaimers for trading
-- [ ] Risk warnings visible
-- [ ] Terms of service acceptance tracked
-
----
-
-## Security Audit Summary
-
-| Area | Status | Priority |
-|------|--------|----------|
-| WebView config | ✅ Secure | High |
-| Network/TLS | ⏳ Pins needed | Critical |
-| Session handling | ✅ Secure | High |
-| Data storage | ✅ Minimal | Medium |
-| Deep linking | ✅ Validated | Medium |
-| Build hardening | ✅ Configured | High |
-| Dependencies | ✅ Current | Medium |
-| Runtime security | ⏳ Optional | Low |
-| Compliance | ⏳ Review needed | High |
-
-**Recommendation**: Add SSL certificate pins before production release.
+The wrapper codebase is hardened for same-origin session transport, route allowlisting, and basic device shielding. The remaining release-critical gap is operator-supplied production material: certificate pins, signing identities, and final Firebase/APNs configuration.

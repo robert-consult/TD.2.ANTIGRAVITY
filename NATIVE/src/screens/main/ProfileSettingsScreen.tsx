@@ -23,8 +23,9 @@ import { useNavigation } from '@react-navigation/native';
 import { colors, typography, spacing } from '../../theme';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/cards/GlassCard';
-import api from '../../services/api';
+import { accountApi, profileApi } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
+import { FALLBACK_SUPPORTED_LOCALES } from '../../i18n/store';
 
 type Section = 'profile' | 'security' | 'preferences';
 
@@ -58,6 +59,11 @@ export const ProfileSettingsScreen: React.FC = () => {
         stopLossHit: true,
         dailySummary: false,
     });
+    const [timezone, setTimezone] = useState('UTC');
+    const [language, setLanguage] = useState('en');
+    const [country, setCountry] = useState<string | null>(null);
+    const [countryLocked, setCountryLocked] = useState(false);
+    const [timezoneEditable, setTimezoneEditable] = useState(true);
 
     useEffect(() => {
         if (user) {
@@ -70,17 +76,29 @@ export const ProfileSettingsScreen: React.FC = () => {
     // MFA Status
     const { data: mfaStatus } = useQuery({
         queryKey: ['mfa-status'],
-        queryFn: async () => {
-            const res = await api.get('/api/profile/mfa/status');
-            return res.data;
-        },
+        queryFn: profileApi.getMfaStatus,
+        enabled: Boolean(user),
     });
+
+    const { data: preferences } = useQuery({
+        queryKey: ['profile-preferences'],
+        queryFn: profileApi.getPreferences,
+        enabled: Boolean(user),
+    });
+
+    useEffect(() => {
+        if (!preferences) return;
+        setTimezone(String(preferences.timezone || 'UTC'));
+        setLanguage(String(preferences.language || 'en'));
+        setCountry(preferences.country ? String(preferences.country) : null);
+        setCountryLocked(Boolean(preferences.countryLocked));
+        setTimezoneEditable(Boolean(preferences.timezoneEditable ?? true));
+    }, [preferences]);
 
     // Profile update mutation
     const profileMutation = useMutation({
         mutationFn: async (data: { username: string; name: string; phone: string }) => {
-            const res = await api.post('/api/profile/update', data);
-            return res.data;
+            return accountApi.updateProfile(data);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['current-user'] });
@@ -93,8 +111,7 @@ export const ProfileSettingsScreen: React.FC = () => {
     // Password change mutation
     const passwordMutation = useMutation({
         mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
-            const res = await api.post('/api/profile/change-password', data);
-            return res.data;
+            return accountApi.changePassword(data);
         },
         onSuccess: () => {
             setCurrentPassword('');
@@ -103,6 +120,22 @@ export const ProfileSettingsScreen: React.FC = () => {
             Alert.alert('Success', 'Password changed');
         },
         onError: (e: any) => Alert.alert('Error', e?.message || 'Failed to change password'),
+    });
+
+    const preferencesMutation = useMutation({
+        mutationFn: async () => {
+            return profileApi.updatePreferences({
+                timezone,
+                language,
+                country: country || undefined,
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['profile-preferences'] });
+            checkAuth();
+            Alert.alert('Success', 'Preferences updated');
+        },
+        onError: (e: any) => Alert.alert('Error', e?.message || 'Failed to update preferences'),
     });
 
     const handleProfileSave = () => {
@@ -134,6 +167,18 @@ export const ProfileSettingsScreen: React.FC = () => {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Logout', style: 'destructive', onPress: () => logout() },
         ]);
+    };
+
+    const handlePreferencesSave = () => {
+        if (!language.trim()) {
+            Alert.alert('Error', 'Language is required');
+            return;
+        }
+        if (!timezone.trim()) {
+            Alert.alert('Error', 'Timezone is required');
+            return;
+        }
+        preferencesMutation.mutate();
     };
 
     const renderProfileSection = () => (
@@ -262,6 +307,50 @@ export const ProfileSettingsScreen: React.FC = () => {
     const renderPreferencesSection = () => (
         <View style={styles.section}>
             <GlassCard style={styles.card}>
+                <Text style={styles.cardTitle}>Regional Preferences</Text>
+
+                <Text style={styles.inputLabel}>Country / Jurisdiction</Text>
+                <View style={styles.readOnlyField}>
+                    <Icon name="globe" size={16} color={colors.textMuted} />
+                    <Text style={styles.readOnlyText}>{country || 'Not specified'}</Text>
+                    {countryLocked && <Text style={styles.lockedBadge}>Locked</Text>}
+                </View>
+
+                <Text style={styles.inputLabel}>Timezone</Text>
+                <TextInput
+                    style={[styles.input, !timezoneEditable && styles.inputDisabled]}
+                    value={timezone}
+                    onChangeText={setTimezone}
+                    placeholder="Timezone (for example: America/Chicago)"
+                    placeholderTextColor={colors.textMuted}
+                    editable={timezoneEditable}
+                    autoCapitalize="none"
+                />
+                <Text style={styles.hintText}>
+                    {timezoneEditable
+                        ? 'Timezone is editable when enabled by admin policy.'
+                        : 'Timezone is locked by admin policy.'}
+                </Text>
+
+                <Text style={styles.inputLabel}>Language</Text>
+                <TextInput
+                    style={styles.input}
+                    value={language}
+                    onChangeText={setLanguage}
+                    placeholder={`Language (${FALLBACK_SUPPORTED_LOCALES.join(', ')})`}
+                    placeholderTextColor={colors.textMuted}
+                    autoCapitalize="none"
+                />
+
+                <Button
+                    title={preferencesMutation.isPending ? 'Saving...' : 'Save Preferences'}
+                    onPress={handlePreferencesSave}
+                    disabled={preferencesMutation.isPending}
+                    style={styles.saveButton}
+                />
+            </GlassCard>
+
+            <GlassCard style={styles.card}>
                 <Text style={styles.cardTitle}>Notifications</Text>
 
                 <View style={styles.switchRow}>
@@ -384,10 +473,13 @@ const styles = StyleSheet.create({
     cardTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
     inputLabel: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.xs, marginTop: spacing.sm },
     input: { backgroundColor: colors.glassBg, borderRadius: 12, padding: spacing.md, ...typography.body, color: colors.textPrimary, borderWidth: 1, borderColor: colors.glassBorder },
+    inputDisabled: { opacity: 0.6 },
     passwordContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.glassBg, borderRadius: 12, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.glassBorder },
     passwordInput: { flex: 1, ...typography.body, color: colors.textPrimary, paddingVertical: spacing.md },
     readOnlyField: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.glassBg, borderRadius: 12, padding: spacing.md, gap: spacing.sm, borderWidth: 1, borderColor: colors.glassBorder },
     readOnlyText: { ...typography.body, color: colors.textSecondary, flex: 1 },
+    lockedBadge: { ...typography.caption, color: colors.warning, fontWeight: '600' },
+    hintText: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs },
     saveButton: { marginTop: spacing.lg },
     mfaStatus: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     mfaInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

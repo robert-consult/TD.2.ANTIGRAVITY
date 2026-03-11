@@ -302,6 +302,19 @@ let started = false;
 let startPromise: Promise<void> | null = null;
 let unsubscribeLiveBus: (() => void) | null = null;
 
+export function stopAutoCloseScheduler(): void {
+  if (currentIntervalId) {
+    clearInterval(currentIntervalId);
+    currentIntervalId = null;
+  }
+  if (unsubscribeLiveBus) {
+    unsubscribeLiveBus();
+    unsubscribeLiveBus = null;
+  }
+  started = false;
+  startPromise = null;
+}
+
 export async function scheduleAutoClose() {
   if (!started) {
     log("[Auto-close] schedule requested but scheduler not started; skipping");

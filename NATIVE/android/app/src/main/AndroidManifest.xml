@@ -52,12 +52,12 @@
             <data android:scheme="tradequip" />
         </intent-filter>
         
-        <!-- App Links: https://tradequip.app -->
+        <!-- App Links: https://tradehub.example.com -->
         <intent-filter android:autoVerify="true">
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />
             <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" android:host="tradequip.app" />
+            <data android:scheme="https" android:host="tradehub.example.com" />
         </intent-filter>
       </activity>
       

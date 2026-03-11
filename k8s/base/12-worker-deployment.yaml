@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-worker
+  namespace: tradehub
+  labels:
+    app: tradehub-worker
+    role: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-worker
+  template:
+    metadata:
+      labels:
+        app: tradehub-worker
+        role: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: registry.equitywaves.com/tradehub/app:local-20260113-001036
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_ROLE
+              value: "worker"
+          envFrom:
+            - configMapRef:
+                name: tradehub-config
+            - secretRef:
+                name: tradehub-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: migration-imports
+              mountPath: /app/migration_imports
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: migration-imports
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30

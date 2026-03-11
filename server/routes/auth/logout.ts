@@ -55,6 +55,7 @@ import { onLoginSuccess } from "../../grift/griftEngine";
 import { hashEmailVerificationToken } from "../../security/emailVerificationToken";
 import { appendIdentityAudit } from "../../services/identityAudit";
 import { sendWelcomeMailboxMessage } from "../../services/messaging";
+import { revokeAllPushDevicesForUser } from "../../services/pushDevices";
 import { ensureRequestAuthenticated } from "../../middleware/auth";
 import { computeEmailGracePeriod } from "../../utils/computeEmailGracePeriod";
 import { maybeRecalcAccountForCurrentUser } from "../../services/currentUserRecalc";
@@ -86,6 +87,7 @@ router.post("/api/auth/logout", async (req: Request, res: Response) => {
     try {
       if (rememberMeConfig.logoutClearAllDeviceTokens) {
         await revokeAllRememberMeTokensForUser(userId);
+        await revokeAllPushDevicesForUser(userId);
         await recordLoginAttempt({
           userId,
           email: req.session.email || "",

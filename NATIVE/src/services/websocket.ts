@@ -1,9 +1,8 @@
 /**
- * TradeQuip Android - WebSocket Service
- * Aligned with webapp use-websocket.tsx for live updates
+ * TradeQuip Native - WebSocket Service
+ * Aligned with webapp use-websocket.tsx for live updates.
  */
 
-import { Platform } from 'react-native';
 import {
     WS_MSG_ACCOUNT_SUBSCRIBE,
     WS_MSG_ACCOUNT_UNSUBSCRIBE,
@@ -12,8 +11,8 @@ import {
     WS_MSG_QUOTES_UNSUBSCRIBE,
     WS_MSG_TRADES_SUBSCRIBE,
     WS_MSG_TRADES_UNSUBSCRIBE,
-    resolveWsUrl,
 } from '@shared/ws/protocol';
+import { getWsBaseUrl } from './runtimeConfig';
 
 type MessageHandler = (message: any) => void;
 type ConnectionHandler = () => void;
@@ -35,6 +34,10 @@ class WebSocketService {
     private onConnectHandlers: Set<ConnectionHandler> = new Set();
     private onDisconnectHandlers: Set<ConnectionHandler> = new Set();
     private enabled: boolean = false;
+    private connecting: boolean = false;
+    private wantsTrades: boolean = false;
+    private wantsAccount: boolean = false;
+    private quoteSymbols: string[] | null = null;
 
     constructor(config: WebSocketServiceConfig) {
         this.url = config.baseUrl;
@@ -42,40 +45,52 @@ class WebSocketService {
         this.maxReconnectAttempts = config.maxReconnectAttempts || 10;
     }
 
-    /**
-     * Compute reconnect delay with exponential backoff
-     */
     private computeReconnectDelay(): number {
-        const baseDelay = this.reconnectInterval;
-        const attempt = this.reconnectAttempts;
-        // Exponential backoff: base * 2^attempt, capped at 30 seconds
-        const delay = Math.min(baseDelay * Math.pow(2, attempt), 30000);
-        // Add jitter (0-1000ms)
+        const delay = Math.min(this.reconnectInterval * Math.pow(2, this.reconnectAttempts), 30000);
         return delay + Math.random() * 1000;
     }
 
-    /**
-     * Connect to WebSocket
-     */
+    private replaySubscriptions(): void {
+        if (this.wantsTrades) {
+            this.send({ type: WS_MSG_TRADES_SUBSCRIBE });
+        }
+        if (this.wantsAccount) {
+            this.send({ type: WS_MSG_ACCOUNT_SUBSCRIBE });
+        }
+        if (this.quoteSymbols) {
+            this.send({
+                type: WS_MSG_QUOTES_SUBSCRIBE,
+                symbols: this.quoteSymbols.length > 0 ? this.quoteSymbols : undefined,
+            });
+        }
+    }
+
     connect(): void {
         if (!this.enabled) return;
+        if (this.connecting) return;
+        if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+            return;
+        }
         this.clearReconnectTimer();
 
-        const wsUrl = this.url;
-        console.log('[WS] Connecting to:', wsUrl);
-
         try {
-            this.ws = new WebSocket(wsUrl);
+            this.connecting = true;
+            const socket = new WebSocket(this.url);
+            this.ws = socket;
 
-            this.ws.onopen = () => {
-                console.log('[WS] Connected');
+            socket.onopen = () => {
+                if (this.ws !== socket) {
+                    socket.close();
+                    return;
+                }
+                this.connecting = false;
                 this.reconnectAttempts = 0;
-                this.onConnectHandlers.forEach((handler) => handler());
-                // Optional handshake for scope discovery (safe even when unauthenticated)
                 this.send({ type: WS_MSG_AUTH_HELLO });
+                this.replaySubscriptions();
+                this.onConnectHandlers.forEach((handler) => handler());
             };
 
-            this.ws.onmessage = (event) => {
+            socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     this.messageHandlers.forEach((handler) => handler(data));
@@ -84,24 +99,26 @@ class WebSocketService {
                 }
             };
 
-            this.ws.onclose = (event) => {
+            socket.onclose = (event) => {
+                if (this.ws === socket) {
+                    this.ws = null;
+                }
+                this.connecting = false;
                 console.log('[WS] Disconnected:', event.code, event.reason);
                 this.onDisconnectHandlers.forEach((handler) => handler());
                 this.scheduleReconnect();
             };
 
-            this.ws.onerror = (error) => {
+            socket.onerror = (error) => {
                 console.error('[WS] Error:', error);
             };
         } catch (error) {
+            this.connecting = false;
             console.error('[WS] Connection error:', error);
             this.scheduleReconnect();
         }
     }
 
-    /**
-     * Schedule reconnection attempt
-     */
     private scheduleReconnect(): void {
         if (!this.enabled) return;
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -111,18 +128,11 @@ class WebSocketService {
 
         this.reconnectAttempts++;
         const delay = this.computeReconnectDelay();
-        console.log(`[WS] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
-
         this.reconnectTimer = setTimeout(() => {
-            if (this.enabled) {
-                this.connect();
-            }
+            if (this.enabled) this.connect();
         }, delay);
     }
 
-    /**
-     * Clear reconnect timer
-     */
     private clearReconnectTimer(): void {
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
@@ -130,37 +140,32 @@ class WebSocketService {
         }
     }
 
-    /**
-     * Enable WebSocket connection
-     */
     enable(): void {
+        if (this.enabled) {
+            if (!this.isConnected()) {
+                this.connect();
+            }
+            return;
+        }
         this.enabled = true;
         this.connect();
     }
 
-    /**
-     * Disable WebSocket connection
-     */
     disable(): void {
         this.enabled = false;
         this.clearReconnectTimer();
         this.reconnectAttempts = 0;
+        this.connecting = false;
         if (this.ws) {
             this.ws.close();
             this.ws = null;
         }
     }
 
-    /**
-     * Check if connected
-     */
     isConnected(): boolean {
         return this.ws?.readyState === WebSocket.OPEN;
     }
 
-    /**
-     * Send message
-     */
     send(data: any): boolean {
         if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(data));
@@ -169,9 +174,6 @@ class WebSocketService {
         return false;
     }
 
-    /**
-     * Subscribe to messages
-     */
     onMessage(handler: MessageHandler): () => void {
         this.messageHandlers.add(handler);
         return () => {
@@ -179,9 +181,6 @@ class WebSocketService {
         };
     }
 
-    /**
-     * Subscribe to connection events
-     */
     onConnect(handler: ConnectionHandler): () => void {
         this.onConnectHandlers.add(handler);
         return () => {
@@ -189,9 +188,6 @@ class WebSocketService {
         };
     }
 
-    /**
-     * Subscribe to disconnection events
-     */
     onDisconnect(handler: ConnectionHandler): () => void {
         this.onDisconnectHandlers.add(handler);
         return () => {
@@ -199,60 +195,46 @@ class WebSocketService {
         };
     }
 
-    /**
-     * Subscribe to specific trade updates
-     */
     subscribeTrades(): void {
+        this.wantsTrades = true;
         this.send({ type: WS_MSG_TRADES_SUBSCRIBE });
     }
 
-    /**
-     * Unsubscribe from trade updates
-     */
     unsubscribeTrades(): void {
+        this.wantsTrades = false;
         this.send({ type: WS_MSG_TRADES_UNSUBSCRIBE });
     }
 
-    /**
-     * Subscribe to account summary updates (requires authenticated WS session)
-     */
     subscribeAccount(): void {
+        this.wantsAccount = true;
         this.send({ type: WS_MSG_ACCOUNT_SUBSCRIBE });
     }
 
-    /**
-     * Unsubscribe from account updates
-     */
     unsubscribeAccount(): void {
+        this.wantsAccount = false;
         this.send({ type: WS_MSG_ACCOUNT_UNSUBSCRIBE });
     }
 
-    /**
-     * Subscribe to quote updates
-     */
     subscribeQuotes(symbols?: string[]): void {
-        this.send({ type: WS_MSG_QUOTES_SUBSCRIBE, symbols });
+        this.quoteSymbols = Array.isArray(symbols)
+            ? symbols
+                .map((symbol) => String(symbol || '').trim().toUpperCase())
+                .filter(Boolean)
+            : [];
+        this.send({
+            type: WS_MSG_QUOTES_SUBSCRIBE,
+            symbols: this.quoteSymbols.length > 0 ? this.quoteSymbols : undefined,
+        });
     }
 
-    /**
-     * Unsubscribe from quote updates
-     */
     unsubscribeQuotes(): void {
+        this.quoteSymbols = null;
         this.send({ type: WS_MSG_QUOTES_UNSUBSCRIBE });
     }
 }
 
-// Create singleton instance
-const DEV_WS_BASE_URL =
-    Platform.OS === 'android'
-        // Android emulator → host machine. For physical devices prefer `adb reverse tcp:5000 tcp:5000` and use localhost.
-        ? 'ws://10.0.2.2:5000/ws'
-        : 'ws://localhost:5000/ws';
-
-const WS_BASE_URL = resolveWsUrl(__DEV__ ? DEV_WS_BASE_URL : 'https://your-production-domain.com');
-
 export const wsService = new WebSocketService({
-    baseUrl: WS_BASE_URL,
+    baseUrl: getWsBaseUrl(),
     reconnectInterval: 3000,
     maxReconnectAttempts: 10,
 });

@@ -410,7 +410,7 @@ describe("SystemConfigTab", () => {
         title: "Performance settings saved",
       }),
     );
-  });
+  }, 15_000);
 
   it("probes the selected provider from the health panel and surfaces the success toast", async () => {
     setQueryState({

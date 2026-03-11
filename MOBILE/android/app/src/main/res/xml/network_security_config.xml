@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Android Network Security Configuration
-  Enables secure communication with the TradeQuip backend
+  Enables secure communication with the canonical TradeQuip backend.
 -->
 <network-security-config>
     <!-- Production configuration: only allow HTTPS -->
@@ -20,12 +20,12 @@
     </debug-overrides>
 
     <!-- 
-      Domain-specific configuration for TradeQuip backend
+      Domain-specific configuration for production/staging backends.
       Add SSL pinning for production security
     -->
     <domain-config>
-        <domain includeSubdomains="true">tradequip.app</domain>
-        <domain includeSubdomains="true">api.tradequip.app</domain>
+        <domain includeSubdomains="true">tradehub.example.com</domain>
+        <domain includeSubdomains="true">staging.tradehub.example.com</domain>
         
         <!-- Trust only system CAs for these domains -->
         <trust-anchors>
@@ -34,7 +34,7 @@
         
         <!--
           SSL Pinning (uncomment and add your certificate hashes for production)
-          Generate hash with: openssl s_client -connect tradequip.app:443 | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
+          Generate hash with: openssl s_client -connect tradehub.example.com:443 | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
         -->
         <!--
         <pin-set expiration="2027-01-01">

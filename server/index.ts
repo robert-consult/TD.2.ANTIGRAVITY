@@ -182,7 +182,11 @@ function validateEnvVars() {
   console.log("  - TWILIO_AUTH_TOKEN:", process.env.TWILIO_AUTH_TOKEN ? "configured" : "MISSING");
   console.log("  - TWILIO_MESSAGING_SERVICE_SID:", process.env.TWILIO_MESSAGING_SERVICE_SID ? "configured" : "MISSING");
   console.log("  - TWILIO_FROM_NUMBER:", process.env.TWILIO_FROM_NUMBER ? "configured" : "MISSING");
-  console.log("  - 1Forge API Key:", process.env.FORGE_KEY ? "configured" : "MISSING");
+  const marketDataSecretRefs = ["TWELVE_DATA_API_KEY", "FORGE_KEY"].filter((key) => Boolean(process.env[key]));
+  console.log(
+    "  - Market data provider env refs:",
+    marketDataSecretRefs.length ? marketDataSecretRefs.join(", ") : "MISSING",
+  );
   console.log("  - DB_DIALECT:", dbDialect);
   console.log("  - DATABASE_URL:", process.env.DATABASE_URL ? "configured" : "MISSING");
 
@@ -488,6 +492,11 @@ app.use((req, res, next) => {
         const status = await checkConfiguredProviderSecrets();
         const missing = status.missingEnvByProviderKey ?? {};
         const missingKeys = Object.keys(missing);
+        if (!status.activeKey) {
+          console.warn(
+            `[MarketData] system_config.marketDataActiveProviderKey is unset; runtime candidate order=${status.candidateKeys.join(", ") || "none"}`,
+          );
+        }
         if (missingKeys.length) {
           console.warn("[MarketData] Configured provider secrets missing from process.env:");
           for (const providerKey of missingKeys) {

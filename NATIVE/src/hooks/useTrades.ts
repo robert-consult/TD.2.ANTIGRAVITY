@@ -5,9 +5,14 @@
 
 import { useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+    WS_MSG_TRADES_UPDATE,
+    WS_MSG_TRADES_UPDATED,
+} from '@shared/ws/protocol';
 import { tradingApi } from '../services/api';
 import { wsService } from '../services/websocket';
 import { useAuth } from './useAuth';
+import { useWsConnectionState } from './useWsConnectionState';
 
 // Trade interface matching webapp
 export interface Trade {
@@ -52,6 +57,7 @@ export function useTrades() {
     const queryClient = useQueryClient();
     const { user, isAuthenticated } = useAuth();
     const userId = user?.id;
+    const isLive = useWsConnectionState();
 
     // Subscribe to trade updates via WebSocket
     useEffect(() => {
@@ -66,7 +72,7 @@ export function useTrades() {
         const unsubMessage = wsService.onMessage((message) => {
             if (!message || typeof message !== 'object') return;
 
-            if (message.type === 'trades:updated' || message.type === 'trades:update') {
+            if (message.type === WS_MSG_TRADES_UPDATED || message.type === WS_MSG_TRADES_UPDATE) {
                 const messageUserId = message.userId;
                 if (!messageUserId || messageUserId === userId) {
                     // Invalidate trade queries to trigger refetch
@@ -100,7 +106,7 @@ export function useTrades() {
         queryFn: tradingApi.getTrades,
         enabled: isAuthenticated,
         staleTime: 5000,
-        refetchInterval: wsService.isConnected() ? false : 7000,
+        refetchInterval: isLive ? false : 7000,
     });
 
     // Get open trades (positions)
@@ -114,7 +120,7 @@ export function useTrades() {
         queryFn: tradingApi.getOpenTrades,
         enabled: isAuthenticated,
         staleTime: 2000,
-        refetchInterval: wsService.isConnected() ? false : 5000,
+        refetchInterval: isLive ? false : 5000,
     });
 
     // Get pending orders
@@ -128,8 +134,15 @@ export function useTrades() {
         queryFn: tradingApi.getPendingOrders,
         enabled: isAuthenticated,
         staleTime: 5000,
-        refetchInterval: wsService.isConnected() ? false : 7000,
+        refetchInterval: isLive ? false : 7000,
     });
+
+    useEffect(() => {
+        if (!isAuthenticated || isLive) return;
+        refetchTrades().catch(() => undefined);
+        refetchOpenTrades().catch(() => undefined);
+        refetchPending().catch(() => undefined);
+    }, [isAuthenticated, isLive, refetchOpenTrades, refetchPending, refetchTrades]);
 
     // Create trade mutation
     const createTradeMutation = useMutation({

@@ -12,6 +12,7 @@ export default defineConfig({
         css: false,
         include: [
             'client/src/**/*.{test,spec}.{js,jsx,ts,tsx}',
+            'MOBILE/src/**/*.{test,spec}.{js,jsx,ts,tsx}',
             'server/**/*.{test,spec}.{js,ts}',
             'db/**/*.{test,spec}.{js,ts}'
         ],

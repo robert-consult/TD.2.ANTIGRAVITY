@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - project-tradehub.yaml
+  - staging/tradehub-app.yaml
+  - staging/tradehub-ops.yaml
+  - prod/tradehub-app.yaml
+  - prod/tradehub-ops.yaml

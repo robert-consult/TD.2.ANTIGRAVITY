@@ -1,0 +1,80 @@
+{
+    "title": "TradeHub — MinIO Object Storage",
+    "uid": "th-minio",
+    "editable": true,
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "refresh": "30s",
+    "panels": [
+        {
+            "title": "Disk Free Forecast (24h)",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "minio_cluster_disk_free_bytes",
+                    "legendFormat": "free now"
+                },
+                {
+                    "expr": "predict_linear(minio_cluster_disk_free_bytes[6h], 86400)",
+                    "legendFormat": "forecast 24h"
+                }
+            ]
+        },
+        {
+            "title": "Bucket Size",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "minio_bucket_usage_total_bytes",
+                    "legendFormat": "{{bucket}}"
+                }
+            ]
+        },
+        {
+            "title": "S3 Request Rate",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(minio_s3_requests_total[5m])",
+                    "legendFormat": "{{api}}"
+                }
+            ]
+        },
+        {
+            "title": "S3 Errors",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "rate(minio_s3_errors_total[5m])",
+                    "legendFormat": "{{api}} errors/s"
+                }
+            ]
+        }
+    ]
+}

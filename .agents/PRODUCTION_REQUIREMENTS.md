@@ -264,6 +264,18 @@ Failure Mode if Missing:
   - Corrupt cache entries and confirm safe fallback to network without state bleed.
 - Failure Mode if Missing: cross-account data leakage on shared devices and stale sensitive account data exposure after logout.
 
+### PRD-AUTH-005
+- ID: `PRD-AUTH-005`
+- Date (UTC): `2026-03-11`
+- Scope: `Public auth deep-link contract for app and standalone website`
+- Requirement: The only supported public auth entrypoints are `/login`, `/login?tab=login`, and `/login?tab=register`; standalone website properties must consume those app entrypoints only through external URLs and must not import app code or share runtime state.
+- Enforcement: `client/src/App.tsx`, `client/src/pages/LoginPage.tsx`, `WEBSITE/client/src/lib/app-config.ts`, and `scripts/auditWebsiteIsolation.ts`.
+- Validation:
+  - Run `npm run check`, `npm run build`, and `npm run audit:website-isolation` from the repo root.
+  - Run `cd WEBSITE && npm ci && npm run check && npm run build`.
+  - Verify `/login`, `/login?tab=login`, and `/login?tab=register` open the correct auth tab and authenticated users hitting `/login?tab=*` are redirected to `/`.
+- Failure Mode if Missing: public login/signup links drift or break, registration deep links become non-deterministic, and app/website code boundaries can erode into hidden interdependency.
+
 ### PRD-SEC-005
 - ID: `PRD-SEC-005`
 - Date (UTC): `2026-02-15`

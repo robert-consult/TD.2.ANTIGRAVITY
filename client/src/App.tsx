@@ -37,17 +37,18 @@ function AppRoutes() {
   useI18n();
   const { isAuthenticated, loading } = useAuth();
   const [location, navigate] = useLocation();
+  const currentPath = location.split("?")[0] ?? location;
 
   useEffect(() => {
-    const isPublicRoute = location === "/login" || location === "/verify-email";
+    const isPublicRoute = currentPath === "/login" || currentPath === "/verify-email";
     if (!loading && !isAuthenticated && !isPublicRoute) {
       navigate("/login");
     }
 
-    if (!loading && isAuthenticated && location === "/login") {
+    if (!loading && isAuthenticated && currentPath === "/login") {
       navigate("/");
     }
-  }, [isAuthenticated, loading, location, navigate]);
+  }, [currentPath, isAuthenticated, loading, navigate]);
 
   if (loading) {
     return <FullScreenLoading />;

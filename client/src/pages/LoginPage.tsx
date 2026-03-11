@@ -49,6 +49,17 @@ const registerSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 type RegisterFormValues = z.infer<typeof registerSchema>;
+type AuthTab = "login" | "register";
+
+function normalizeAuthTab(raw: string | null | undefined): AuthTab {
+  return raw === "register" ? "register" : "login";
+}
+
+function resolveAuthTabFromLocation(): AuthTab {
+  if (typeof window === "undefined") return "login";
+  const url = new URL(window.location.href);
+  return normalizeAuthTab(url.searchParams.get("tab"));
+}
 
 type LegalDocResponse = {
   success: boolean;
@@ -64,7 +75,7 @@ type LegalDocResponse = {
 };
 
 export default function LoginPage() {
-  const [activeTab, setActiveTab] = useState<string>("login");
+  const [activeTab, setActiveTab] = useState<AuthTab>(() => resolveAuthTabFromLocation());
   const [signupCountry, setSignupCountry] = useState('');
   const [isCountryAvailable, setIsCountryAvailable] = useState(false);
   const { login, register } = useAuth();
@@ -193,6 +204,32 @@ export default function LoginPage() {
   const handleCountryChange = useCallback((country: string, available: boolean) => {
     setSignupCountry(country);
     setIsCountryAvailable(available);
+  }, []);
+
+  const syncAuthTabUrl = useCallback((nextTab: AuthTab) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.pathname !== "/login") return;
+    url.searchParams.set("tab", nextTab);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const handleAuthTabChange = useCallback((nextTab: string) => {
+    const normalized = normalizeAuthTab(nextTab);
+    setActiveTab(normalized);
+    syncAuthTabUrl(normalized);
+  }, [syncAuthTabUrl]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncFromLocation = () => {
+      setActiveTab(resolveAuthTabFromLocation());
+    };
+    window.addEventListener("popstate", syncFromLocation);
+    syncFromLocation();
+    return () => {
+      window.removeEventListener("popstate", syncFromLocation);
+    };
   }, []);
 
   const loginForm = useForm<LoginFormValues>({
@@ -517,7 +554,7 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="login" value={activeTab} onValueChange={setActiveTab}>
+          <Tabs defaultValue="login" value={activeTab} onValueChange={handleAuthTabChange}>
             <TabsList className="grid w-full grid-cols-2 mb-4">
               <TabsTrigger value="login">Login</TabsTrigger>
               <TabsTrigger value="register">Register</TabsTrigger>
@@ -967,14 +1004,14 @@ export default function LoginPage() {
             {activeTab === "login" ? (
               <p>
                 Don't have an account?{" "}
-                <Button variant="link" className="p-0" onClick={() => setActiveTab("register")}>
+                <Button variant="link" className="p-0" onClick={() => handleAuthTabChange("register")}>
                   Register
                 </Button>
               </p>
             ) : (
               <p>
                 Already have an account?{" "}
-                <Button variant="link" className="p-0" onClick={() => setActiveTab("login")}>
+                <Button variant="link" className="p-0" onClick={() => handleAuthTabChange("login")}>
                   Login
                 </Button>
               </p>

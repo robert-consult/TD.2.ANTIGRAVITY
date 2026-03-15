@@ -1,0 +1,235 @@
+{
+  "generatedOn": "2026-03-15T06:40:39.312Z",
+  "totals": {
+    "tracks": 10,
+    "educationTracks": 9,
+    "lessons": 35,
+    "quizItems": 105
+  },
+  "core": [
+    {
+      "moduleSlug": "module-1-introduction-to-trading",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 1: Introduction to Trading",
+      "cardSummary": "Build the vocabulary, product map, and basic risk math needed to understand what you are trading and what a move means.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-1-introduction-to-trading",
+      "lessonCount": 4
+    },
+    {
+      "moduleSlug": "module-2-market-structure-basics",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 2: Market Structure Basics",
+      "cardSummary": "Learn how trends, key levels, and session liquidity shape the conditions around a trade before risk is placed.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-2-market-structure-basics",
+      "lessonCount": 3
+    },
+    {
+      "moduleSlug": "module-3-chart-platform-workflows",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 3: Chart and Platform Workflows",
+      "cardSummary": "Build clean chart routines, keep watchlists focused, and connect market context to a repeatable execution workflow.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-3-chart-platform-workflows",
+      "lessonCount": 3
+    },
+    {
+      "moduleSlug": "module-4-risk-and-position-sizing",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 4: Risk and Position Sizing",
+      "cardSummary": "Translate conviction into controlled size, explicit ruin avoidance, and risk-reward thinking that protects downside first.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-4-risk-and-position-sizing",
+      "lessonCount": 3
+    },
+    {
+      "moduleSlug": "module-5-technical-analysis-process",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 5: Technical Analysis Process",
+      "cardSummary": "Use structure, momentum, order flow, and checklist discipline as a process instead of a bag of disconnected indicators.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-5-technical-analysis-process",
+      "lessonCount": 3
+    },
+    {
+      "moduleSlug": "module-6-macro-and-event-awareness",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 6: Macro and Event Awareness",
+      "cardSummary": "Track rate policy, economic releases, and cross-asset relationships so event risk becomes visible before volatility arrives.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner",
+        "Freshness Reviewed March 12, 2026",
+        "Re-review by June 12, 2026"
+      ],
+      "baseRoute": "/education/module-6-macro-and-event-awareness",
+      "lessonCount": 3
+    },
+    {
+      "moduleSlug": "module-7-performance-review-routine",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core",
+      "publicTitle": "Module 7: Performance Review Routine",
+      "cardSummary": "Review trades like a risk manager by combining journaling, payoff analysis, drawdown discipline, and structured self-tests.",
+      "status": "reviewed",
+      "flags": [
+        "Core Curriculum",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-7-performance-review-routine",
+      "lessonCount": 4
+    }
+  ],
+  "optionalExtensions": [
+    {
+      "moduleSlug": "module-8-behavioral-finance",
+      "trackType": "optionalExtension",
+      "catalogGroup": "optionalExtensions",
+      "publicTitle": "Module 8: Behavioral Finance",
+      "cardSummary": "Use concrete behavioral scenarios to understand decision-making under uncertainty, bias, loss aversion, and emotional regulation.",
+      "status": "reviewed",
+      "flags": [
+        "Optional Extension",
+        "Beginner"
+      ],
+      "baseRoute": "/education/module-8-behavioral-finance",
+      "lessonCount": 4
+    },
+    {
+      "moduleSlug": "module-9-crypto-and-defi",
+      "trackType": "optionalExtension",
+      "catalogGroup": "optionalExtensions",
+      "publicTitle": "Module 9: Crypto and DeFi",
+      "cardSummary": "A beginner-friendly crypto and DeFi extension that explains mechanisms while keeping fraud, custody, and irreversibility risks explicit.",
+      "status": "draft-ready",
+      "flags": [
+        "Optional Extension",
+        "Beginner",
+        "Crypto/DeFi",
+        "Elevated Risk",
+        "Compliance Review Pending",
+        "Re-review by June 12, 2026"
+      ],
+      "baseRoute": "/education/module-9-crypto-and-defi",
+      "lessonCount": 4
+    }
+  ],
+  "platformGuide": {
+    "moduleSlug": "module-10-how-to-use-app",
+    "trackType": "platformGuide",
+    "catalogGroup": "platformGuide",
+    "publicTitle": "Module 10: How to Use the App",
+    "cardSummary": "A verified beginner guide to the authenticated TradeQuip app using exact current user-facing labels and screenshot placeholders.",
+    "status": "draft-ready",
+    "flags": [
+      "Platform Guide",
+      "Screenshots Pending",
+      "UI verified March 12, 2026",
+      "Re-verify by June 12, 2026"
+    ],
+    "baseRoute": "/platform-guide",
+    "lessonCount": 4
+  },
+  "legacyModules": [
+    {
+      "slug": "module-1-introduction-to-trading",
+      "title": "Module 1: Introduction to Trading",
+      "description": "Build the vocabulary, product map, and basic risk math needed to understand what you are trading and what a move means.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-1-introduction-to-trading"
+    },
+    {
+      "slug": "module-2-market-structure-basics",
+      "title": "Module 2: Market Structure Basics",
+      "description": "Learn how trends, key levels, and session liquidity shape the conditions around a trade before risk is placed.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-2-market-structure-basics"
+    },
+    {
+      "slug": "module-3-chart-platform-workflows",
+      "title": "Module 3: Chart and Platform Workflows",
+      "description": "Build clean chart routines, keep watchlists focused, and connect market context to a repeatable execution workflow.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-3-chart-platform-workflows"
+    },
+    {
+      "slug": "module-4-risk-and-position-sizing",
+      "title": "Module 4: Risk and Position Sizing",
+      "description": "Translate conviction into controlled size, explicit ruin avoidance, and risk-reward thinking that protects downside first.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-4-risk-and-position-sizing"
+    },
+    {
+      "slug": "module-5-technical-analysis-process",
+      "title": "Module 5: Technical Analysis Process",
+      "description": "Use structure, momentum, order flow, and checklist discipline as a process instead of a bag of disconnected indicators.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-5-technical-analysis-process"
+    },
+    {
+      "slug": "module-6-macro-and-event-awareness",
+      "title": "Module 6: Macro and Event Awareness",
+      "description": "Track rate policy, economic releases, and cross-asset relationships so event risk becomes visible before volatility arrives.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-6-macro-and-event-awareness"
+    },
+    {
+      "slug": "module-7-performance-review-routine",
+      "title": "Module 7: Performance Review Routine",
+      "description": "Review trades like a risk manager by combining journaling, payoff analysis, drawdown discipline, and structured self-tests.",
+      "category": "Core Curriculum",
+      "level": "Beginner",
+      "url": "/education/module-7-performance-review-routine"
+    },
+    {
+      "slug": "module-8-behavioral-finance",
+      "title": "Module 8: Behavioral Finance",
+      "description": "Use concrete behavioral scenarios to understand decision-making under uncertainty, bias, loss aversion, and emotional regulation.",
+      "category": "Optional Extension",
+      "level": "Beginner",
+      "url": "/education/module-8-behavioral-finance"
+    },
+    {
+      "slug": "module-9-crypto-and-defi",
+      "title": "Module 9: Crypto and DeFi",
+      "description": "A beginner-friendly crypto and DeFi extension that explains mechanisms while keeping fraud, custody, and irreversibility risks explicit.",
+      "category": "Optional Extension",
+      "level": "Beginner",
+      "url": "/education/module-9-crypto-and-defi"
+    }
+  ]
+}

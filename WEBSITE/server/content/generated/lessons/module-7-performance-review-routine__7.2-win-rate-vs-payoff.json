@@ -1,0 +1,232 @@
+{
+  "moduleSlug": "module-7-performance-review-routine",
+  "moduleTitle": "Module 7: Performance Review Routine",
+  "moduleBaseRoute": "/education/module-7-performance-review-routine",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "7.2-win-rate-vs-payoff",
+  "title": "7.2 Win Rate Versus Payoff",
+  "summary": "Beginners often chase one number:",
+  "bodyHtml": "<h1 id=\"user-content-72-win-rate-versus-payoff\">7.2 Win Rate Versus Payoff</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Beginners often chase one number:</p>\n<p><code>win rate</code></p>\n<p>They want to be right as often as possible.</p>\n<p>But trading performance is not only about how often you win.\nIt is also about:</p>\n<ul>\n<li>how big your winners are;</li>\n<li>how big your losers are.</li>\n</ul>\n<p>A trader can win often and still lose money overall.\nA trader can win less often and still be profitable.</p>\n<p>That is why win rate has to be reviewed together with payoff.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain win rate and payoff in plain language;</li>\n<li>understand why a high win rate can still hide a weak process;</li>\n<li>review average wins and average losses together instead of chasing accuracy alone.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-two-numbers-that-must-work-together\">Two Numbers That Must Work Together</h2>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Win rate</strong></td>\n<td>The percentage of trades that end as winners</td>\n<td>Shows how often your trade ideas work</td>\n</tr>\n<tr>\n<td><strong>Average win</strong></td>\n<td>The typical size of your winners</td>\n<td>Shows what you make when you are right</td>\n</tr>\n<tr>\n<td><strong>Average loss</strong></td>\n<td>The typical size of your losers</td>\n<td>Shows what you lose when you are wrong</td>\n</tr>\n<tr>\n<td><strong>Payoff ratio</strong></td>\n<td>Average win compared with average loss</td>\n<td>Shows whether winners are large enough to cover losers</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table explaining win rate, average win, average loss, and payoff ratio in simple language.)</em></p>\n<p>Win rate answers:</p>\n<p><code>how often did I win?</code></p>\n<p>Payoff answers:</p>\n<p><code>when I win, is it big enough compared with what I lose?</code></p>\n<p>You need both answers.</p>\n<hr>\n<h2 id=\"user-content-a-simple-example\">A Simple Example</h2>\n<p>Look at these two traders:</p>\n<table>\n<thead>\n<tr>\n<th>Trader</th>\n<th>Win rate</th>\n<th>Average win</th>\n<th>Average loss</th>\n<th>Result over 10 trades</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Trader A</strong></td>\n<td>80%</td>\n<td><code>USD 10</code></td>\n<td><code>USD 100</code></td>\n<td>8 small wins from quick FX or index trades = <code>USD 80</code>; 2 large losses from weak oil or gold management = <code>USD 200</code>; net = <code>-USD 120</code></td>\n</tr>\n<tr>\n<td><strong>Trader B</strong></td>\n<td>40%</td>\n<td><code>USD 300</code></td>\n<td><code>USD 100</code></td>\n<td>4 larger wins from patient index, gold, or FX trades = <code>USD 1,200</code>; 6 capped losses = <code>USD 600</code>; net = <code>USD 600</code></td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row table showing that a trader with an 80 percent win rate can still lose money, while a trader with a 40 percent win rate can still make money if winners are larger than losers.)</em></p>\n<p>Trader A feels more accurate.\nTrader B has the healthier performance math.</p>\n<p>That is the central lesson.</p>\n<hr>\n<h2 id=\"user-content-why-this-goes-wrong-for-beginners\">Why This Goes Wrong for Beginners</h2>\n<p>The SEC has highlighted the <strong>disposition effect</strong> as a behavior that can hurt investment performance.</p>\n<p>In plain language, that means:</p>\n<ul>\n<li>holding losers too long;</li>\n<li>selling winners too soon.</li>\n</ul>\n<p>That behavior creates a dangerous pattern:</p>\n<ul>\n<li>average losses grow;</li>\n<li>average wins shrink;</li>\n<li>the payoff ratio weakens.</li>\n</ul>\n<p>A trader may still say:</p>\n<p><code>but I win a lot</code></p>\n<p>That does not fix the math.</p>\n<hr>\n<h2 id=\"user-content-one-simple-review-formula\">One Simple Review Formula</h2>\n<p>You do not need advanced statistics to start reviewing properly.</p>\n<p>One simple expectancy formula is:</p>\n<p><code>expectancy per trade = (win rate x average win) - (loss rate x average loss)</code></p>\n<p>You can use it after a sample of trades to ask:</p>\n<ul>\n<li>Is my system making more when right than it loses when wrong?</li>\n<li>Are my losses too large?</li>\n<li>Are my wins too small because I exit too early?</li>\n</ul>\n<p>The formula does not remove uncertainty.\nIt helps you measure whether the process is viable.</p>\n<hr>\n<h2 id=\"user-content-what-to-review-each-week-or-month\">What to Review Each Week or Month</h2>\n<ol>\n<li>Count total trades.</li>\n<li>Count winners and losers.</li>\n<li>Calculate win rate.</li>\n<li>Calculate average win and average loss.</li>\n<li>Compare them honestly.</li>\n<li>Ask what behavior is damaging the numbers.</li>\n</ol>\n<p>This is where journaling matters.\nIf the numbers are weak, the journal should tell you why.</p>\n<p>It should also tell you where.</p>\n<p>Maybe the weak payoff came from:</p>\n<ul>\n<li>cutting gold winners too early;</li>\n<li>letting Brent losses run too long;</li>\n<li>taking low-quality FX trades late in the session;</li>\n<li>forcing stock-index entries during event risk.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-treating-win-rate-as-the-whole-story\">Mistake 1: Treating Win Rate as the Whole Story</h3>\n<p>Accuracy alone does not tell you whether the process makes money.</p>\n<h3 id=\"user-content-mistake-2-selling-winners-too-quickly\">Mistake 2: Selling Winners Too Quickly</h3>\n<p>This can make the average win too small.</p>\n<h3 id=\"user-content-mistake-3-letting-losses-grow\">Mistake 3: Letting Losses Grow</h3>\n<p>This can make the average loss too large.</p>\n<h3 id=\"user-content-mistake-4-reviewing-to-protect-the-ego\">Mistake 4: Reviewing to Protect the Ego</h3>\n<p>The goal is diagnosis, not feeling smart.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain win rate, average win, average loss, and payoff in plain language;",
+    "identify when a high win rate still hides poor performance math;",
+    "use simple expectancy review to diagnose behavior problems."
+  ],
+  "quizItems": [
+    {
+      "id": "7.2-win-rate-vs-payoff-q1",
+      "prompt": "Why is win rate incomplete by itself?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because it says nothing about average win and average loss size"
+        },
+        {
+          "label": "B",
+          "text": "Because it only matters in futures"
+        },
+        {
+          "label": "C",
+          "text": "Because it removes all drawdowns"
+        },
+        {
+          "label": "D",
+          "text": "Because it replaces expectancy"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because it says nothing about average win and average loss size"
+      },
+      "explanation": "The lesson explains that accuracy without payoff still leaves out whether the process actually earns enough on winners.",
+      "lessonAnchor": "Two numbers that must work together"
+    },
+    {
+      "id": "7.2-win-rate-vs-payoff-q2",
+      "prompt": "What review question should follow a high win rate?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Are my average losses too large relative to my average wins?"
+        },
+        {
+          "label": "B",
+          "text": "Can I increase leverage immediately?"
+        },
+        {
+          "label": "C",
+          "text": "Can I skip the journal now?"
+        },
+        {
+          "label": "D",
+          "text": "Does a high win rate remove slippage?"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Are my average losses too large relative to my average wins?"
+      },
+      "explanation": "The lesson teaches that payoff can still ruin performance even when accuracy looks good.",
+      "lessonAnchor": "What to review each week or month"
+    },
+    {
+      "id": "7.2-win-rate-vs-payoff-q3",
+      "prompt": "Which mindset best fits this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Protect ego first"
+        },
+        {
+          "label": "B",
+          "text": "Measure process quality honestly"
+        },
+        {
+          "label": "C",
+          "text": "Count only winning trades"
+        },
+        {
+          "label": "D",
+          "text": "Hide losing trades from review"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Measure process quality honestly"
+      },
+      "explanation": "The lesson frames review as diagnosis, not self-protection.",
+      "lessonAnchor": "Common beginner mistakes"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; performance examples illustrate expectancy logic and do not guarantee future results"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless live platform metrics are added to the lesson."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, The 2% Rule",
+      "url": "https://www.cmegroup.com/education/courses/trade-and-risk-management/the-2-percent-rule.html"
+    },
+    {
+      "label": "CME Group, Trade and Risk Management",
+      "url": "https://www.cmegroup.com/education/courses/trade-and-risk-management"
+    },
+    {
+      "label": "Investor.gov, Behavioral Patterns of U.S. Investors",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-72"
+    },
+    {
+      "label": "FINRA, Evaluating Performance",
+      "url": "https://www.finra.org/investors/investing/investing-basics/evaluating-performance"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "7.1-journaling-like-risk-manager",
+    "title": "7.1 Journaling Like a Risk Manager",
+    "href": "/education/module-7-performance-review-routine/7.1-journaling-like-risk-manager"
+  },
+  "nextLesson": {
+    "lessonSlug": "7.3-psychology-of-drawdowns",
+    "title": "7.3 Psychology of Drawdowns",
+    "href": "/education/module-7-performance-review-routine/7.3-psychology-of-drawdowns"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "7.1-journaling-like-risk-manager",
+      "title": "7.1 Journaling Like a Risk Manager",
+      "href": "/education/module-7-performance-review-routine/7.1-journaling-like-risk-manager"
+    },
+    {
+      "lessonSlug": "7.2-win-rate-vs-payoff",
+      "title": "7.2 Win Rate vs. Payoff",
+      "href": "/education/module-7-performance-review-routine/7.2-win-rate-vs-payoff"
+    },
+    {
+      "lessonSlug": "7.3-psychology-of-drawdowns",
+      "title": "7.3 Psychology of Drawdowns",
+      "href": "/education/module-7-performance-review-routine/7.3-psychology-of-drawdowns"
+    },
+    {
+      "lessonSlug": "7.4-self-test-portfolio-review",
+      "title": "7.4 Self-Test: Portfolio Review",
+      "href": "/education/module-7-performance-review-routine/7.4-self-test-portfolio-review"
+    }
+  ]
+}

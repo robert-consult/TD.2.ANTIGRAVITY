@@ -1,0 +1,260 @@
+{
+  "moduleSlug": "module-9-crypto-and-defi",
+  "moduleTitle": "Module 9: Crypto and DeFi",
+  "moduleBaseRoute": "/education/module-9-crypto-and-defi",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "9.1-clob-vs-amm",
+  "title": "9.1 CLOB Versus AMM",
+  "summary": "Two crypto apps can both show a `Buy` button and still work very differently underneath.",
+  "bodyHtml": "<h1 id=\"user-content-91-clob-versus-amm\">9.1 CLOB Versus AMM</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Two crypto apps can both show a <code>Buy</code> button and still work very differently underneath.</p>\n<p>One venue may match buyers and sellers through an order book.\nAnother may let you swap against a liquidity pool.</p>\n<p>That difference matters because it can change:</p>\n<ul>\n<li>how your order gets filled;</li>\n<li>how much slippage you face;</li>\n<li>whether you are trusting an exchange account or a wallet transaction;</li>\n<li>whether public transaction ordering can make your price worse.</li>\n</ul>\n<p>If you do not understand the structure, you may blame the chart for a problem that actually came from the venue.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a CLOB is in plain language;</li>\n<li>explain what an AMM is in plain language;</li>\n<li>identify the main beginner risks that change when you move from an order book to a public liquidity pool.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-clob-in-plain-language\">CLOB in Plain Language</h2>\n<p>A <strong>CLOB</strong> is a <strong>central limit order book</strong>.</p>\n<p>Think of it as a live list of:</p>\n<ul>\n<li>buyers and the prices they are willing to pay;</li>\n<li>sellers and the prices they are willing to accept.</li>\n</ul>\n<p>This list is usually shown as:</p>\n<ul>\n<li><strong>bids</strong> for buyers;</li>\n<li><strong>asks</strong> for sellers.</li>\n</ul>\n<p>When prices match, the trade happens.</p>\n<p>That is the same basic idea used in many traditional markets and in many centralized crypto exchanges.</p>\n<hr>\n<h2 id=\"user-content-amm-in-plain-language\">AMM in Plain Language</h2>\n<p>An <strong>AMM</strong> is an <strong>automated market maker</strong>.</p>\n<p>Instead of matching your order with one visible seller in an order book, an AMM usually lets you trade against a <strong>liquidity pool</strong>.</p>\n<p>That pool holds two assets, and a pricing rule updates the exchange rate as traders swap in and out of it.</p>\n<p>Many well-known AMMs use a simple constant-product idea often written as:</p>\n<p><code>x * y = k</code></p>\n<p>You do not need to master the formula in this lesson.</p>\n<p>You only need the beginner takeaway:</p>\n<p>if your trade is large compared with the pool, the price can move against you more.</p>\n<hr>\n<h2 id=\"user-content-a-simple-comparison\">A Simple Comparison</h2>\n<table>\n<thead>\n<tr>\n<th>Feature</th>\n<th>CLOB</th>\n<th>AMM</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>How trades happen</strong></td>\n<td>Buyers and sellers are matched in an order book</td>\n<td>Traders swap against pooled liquidity</td>\n</tr>\n<tr>\n<td><strong>What you watch</strong></td>\n<td>Bids, asks, spread, and depth</td>\n<td>Pool depth, quoted output, slippage settings</td>\n</tr>\n<tr>\n<td><strong>Main execution issue</strong></td>\n<td>Thin order book can cause slippage</td>\n<td>Shallow pool can cause price impact and slippage</td>\n</tr>\n<tr>\n<td><strong>Main beginner risk</strong></td>\n<td>Assuming the exchange is always liquid</td>\n<td>Assuming the quoted swap price is guaranteed</td>\n</tr>\n<tr>\n<td><strong>Extra caution</strong></td>\n<td>Venue custody and exchange risk</td>\n<td>Wallet approvals, public transaction ordering, smart-contract risk</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A five-row table comparing CLOBs and AMMs by trade matching, what traders watch, execution issues, and key beginner risks.)</em></p>\n<hr>\n<h2 id=\"user-content-why-pool-depth-matters\">Why Pool Depth Matters</h2>\n<p>Imagine two places to buy the same token:</p>\n<ul>\n<li>a deep order book with many buyers and sellers;</li>\n<li>a small liquidity pool with limited reserves.</li>\n</ul>\n<p>If your order is small, both venues may feel similar.</p>\n<p>If your order is large, the difference becomes obvious.</p>\n<p>On a smaller AMM pool, your own trade can move the pool price a lot.\nThat means the final execution can be worse than the first quote you saw.</p>\n<p>This is why traders talk about:</p>\n<ul>\n<li><strong>price impact</strong>;</li>\n<li><strong>slippage tolerance</strong>;</li>\n<li><strong>pool depth</strong>.</li>\n</ul>\n<p>Slippage tolerance is not a magic protection setting.\nIt only tells the transaction how much worse the fill can get before it fails.</p>\n<hr>\n<h2 id=\"user-content-why-mev-matters-on-public-dex-trades\">Why MEV Matters on Public DEX Trades</h2>\n<p>Ethereum.org explains that <strong>MEV</strong> involves value being extracted by changing the order of transactions in a block.</p>\n<p>In plain language, that means bots may watch public pending transactions and try to place their own trades around them.</p>\n<p>For a beginner, the practical point is simple:</p>\n<ul>\n<li>public DEX trades can face transaction-ordering risk;</li>\n<li>that risk can lead to worse execution;</li>\n<li>setting wide slippage tolerance without understanding it can make the problem worse.</li>\n</ul>\n<p>Not every trade is attacked.\nBut the risk is real enough that beginners should know it exists.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Suppose you want to swap a token worth about <code>USD 500</code>.</p>\n<p>On a deep order-book exchange, that trade may fill near the quoted market price.</p>\n<p>On a shallow AMM pool, the same trade may:</p>\n<ul>\n<li>move the pool price;</li>\n<li>return fewer tokens than expected;</li>\n<li>become more expensive if bots react to the pending transaction.</li>\n</ul>\n<p>The chart did not necessarily change first.\nThe <strong>execution structure</strong> changed first.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-every-venue-works-the-same-way\">Mistake 1: Thinking Every Venue Works the Same Way</h3>\n<p>The button may look the same.\nThe matching system may not be.</p>\n<h3 id=\"user-content-mistake-2-treating-the-first-quote-as-a-guaranteed-final-fill\">Mistake 2: Treating the First Quote as a Guaranteed Final Fill</h3>\n<p>On an AMM, the quote can change with pool depth and transaction ordering.</p>\n<h3 id=\"user-content-mistake-3-ignoring-custody-differences\">Mistake 3: Ignoring Custody Differences</h3>\n<p>On a centralized exchange, the platform relationship matters more.\nOn a DEX, wallet and transaction handling matter more.</p>\n<h3 id=\"user-content-mistake-4-using-slippage-settings-without-understanding-them\">Mistake 4: Using Slippage Settings Without Understanding Them</h3>\n<p>A bigger slippage limit is not automatically better.\nIt can allow a worse fill.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain the plain-language difference between an order book market and an AMM pool;",
+    "identify how slippage, custody, and transaction ordering risk can differ across those systems;",
+    "avoid assuming that every crypto venue matches trades the same way."
+  ],
+  "quizItems": [
+    {
+      "id": "9.1-clob-vs-amm-q1",
+      "prompt": "What is the main structural difference between a CLOB and an AMM in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "A CLOB matches bids and asks in an order book, while an AMM lets traders swap against pooled liquidity"
+        },
+        {
+          "label": "B",
+          "text": "They are the same system with different colors"
+        },
+        {
+          "label": "C",
+          "text": "An AMM has no prices"
+        },
+        {
+          "label": "D",
+          "text": "A CLOB always removes slippage"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "A CLOB matches bids and asks in an order book, while an AMM lets traders swap against pooled liquidity"
+      },
+      "explanation": "The lesson teaches that the matching method is different: order queue versus pool-based pricing.",
+      "lessonAnchor": "CLOB and AMM in plain language"
+    },
+    {
+      "id": "9.1-clob-vs-amm-q2",
+      "prompt": "Why can a large trade get a worse price on an AMM?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because the pool price often moves more when the trade is large relative to the reserves"
+        },
+        {
+          "label": "B",
+          "text": "Because AMMs never allow large trades"
+        },
+        {
+          "label": "C",
+          "text": "Because blockchain charts stop updating"
+        },
+        {
+          "label": "D",
+          "text": "Because gas fees set the asset price"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because the pool price often moves more when the trade is large relative to the reserves"
+      },
+      "explanation": "The lesson explains that pool depth matters, so bigger trades can create more price impact.",
+      "lessonAnchor": "Why pool depth matters"
+    },
+    {
+      "id": "9.1-clob-vs-amm-q3",
+      "prompt": "Which risk becomes especially important on public DEX transactions?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Transaction ordering and sandwich risk from bots watching public transactions"
+        },
+        {
+          "label": "B",
+          "text": "Guaranteed better fills than every order book"
+        },
+        {
+          "label": "C",
+          "text": "No need to think about custody"
+        },
+        {
+          "label": "D",
+          "text": "Zero chance of slippage"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Transaction ordering and sandwich risk from bots watching public transactions"
+      },
+      "explanation": "The lesson introduces MEV and explains that public transaction ordering can worsen execution.",
+      "lessonAnchor": "Why MEV matters"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "cryptoElevatedRisk",
+      "title": "Crypto And DeFi Risk Warning",
+      "tone": "danger",
+      "body": "Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. This material is educational only and is not a recommendation to buy, sell, or hold any instrument.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "antiImpersonation",
+      "title": "Anti-Impersonation Notice",
+      "tone": "danger",
+      "body": "TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and will never ask users to send funds, crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "3mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and any future promotional excerpt"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "This material is provided for general educational and informational purposes only. It is not investment, legal, tax, or accounting advice, and it is not a recommendation or solicitation to buy, sell, or hold any instrument. Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and it will never ask users to send crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action."
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": true
+    }
+  ],
+  "openQuestions": [
+    "Module 9 still requires elevated compliance review before publication; reopen if cautionary language requirements change."
+  ],
+  "sources": [
+    {
+      "label": "Coinbase, What is an order book?",
+      "url": "https://www.coinbase.com/learn/advanced-trading/what-is-an-order-book"
+    },
+    {
+      "label": "Uniswap Docs, How Uniswap works",
+      "url": "https://docs.uniswap.org/contracts/v2/concepts/protocol-overview/how-uniswap-works"
+    },
+    {
+      "label": "Ethereum.org, Maximal extractable value (MEV)",
+      "url": "https://ethereum.org/en/developers/docs/mev/"
+    },
+    {
+      "label": "Investor.gov, Exercise Caution with Crypto Asset Securities",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-alerts/crypto-asset-securities"
+    },
+    {
+      "label": "CFTC, Use Caution When Buying Digital Coins or Tokens",
+      "url": "https://www.cftc.gov/LearnAndProtect/AdvisoriesAndArticles/caution_of_digital_currencies.html"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "9.2-on-chain-metrics",
+    "title": "9.2 On-Chain Metrics",
+    "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "9.1-clob-vs-amm",
+      "title": "9.1 CLOB vs. AMM",
+      "href": "/education/module-9-crypto-and-defi/9.1-clob-vs-amm"
+    },
+    {
+      "lessonSlug": "9.2-on-chain-metrics",
+      "title": "9.2 On-Chain Metrics",
+      "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+    },
+    {
+      "lessonSlug": "9.3-smart-contract-risks",
+      "title": "9.3 Smart Contract Risks",
+      "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+    },
+    {
+      "lessonSlug": "9.4-settlement-mechanics",
+      "title": "9.4 Settlement Mechanics",
+      "href": "/education/module-9-crypto-and-defi/9.4-settlement-mechanics"
+    }
+  ]
+}

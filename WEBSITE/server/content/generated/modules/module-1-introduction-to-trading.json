@@ -1,0 +1,52 @@
+{
+  "moduleSlug": "module-1-introduction-to-trading",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 1: Introduction to Trading",
+  "cardSummary": "Build the vocabulary, product map, and basic risk math needed to understand what you are trading and what a move means.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-1-introduction-to-trading",
+  "lessonCount": 4,
+  "quizItemCount": 12,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "1.1-terminology-glossary",
+      "title": "1.1 Terminology Glossary",
+      "summary": "Trading starts to feel confusing when new words arrive faster than understanding. The fix is not to memorize everything at once. The fix is to sort each word into the job it does.",
+      "href": "/education/module-1-introduction-to-trading/1.1-terminology-glossary"
+    },
+    {
+      "lessonSlug": "1.2-instruments-overview",
+      "title": "1.2 Instruments Overview",
+      "summary": "Many beginners say, “I want to trade gold,” or “I want to trade the stock market,” before they know what product they are actually using.",
+      "href": "/education/module-1-introduction-to-trading/1.2-instruments-overview"
+    },
+    {
+      "lessonSlug": "1.3-core-calculations",
+      "title": "1.3 Core Calculations",
+      "summary": "You do not need advanced mathematics to start learning trading.",
+      "href": "/education/module-1-introduction-to-trading/1.3-core-calculations"
+    },
+    {
+      "lessonSlug": "1.4-profit-loss-risk-math",
+      "title": "1.4 Profit, Loss, and Risk Math",
+      "summary": "Many beginners think the goal is to be right as often as possible.",
+      "href": "/education/module-1-introduction-to-trading/1.4-profit-loss-risk-math"
+    }
+  ]
+}

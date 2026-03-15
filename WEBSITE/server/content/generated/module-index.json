@@ -1,0 +1,55 @@
+{
+  "generatedOn": "2026-03-15T06:40:39.312Z",
+  "modules": {
+    "module-1-introduction-to-trading": {
+      "file": "modules/module-1-introduction-to-trading.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-2-market-structure-basics": {
+      "file": "modules/module-2-market-structure-basics.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-3-chart-platform-workflows": {
+      "file": "modules/module-3-chart-platform-workflows.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-4-risk-and-position-sizing": {
+      "file": "modules/module-4-risk-and-position-sizing.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-5-technical-analysis-process": {
+      "file": "modules/module-5-technical-analysis-process.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-6-macro-and-event-awareness": {
+      "file": "modules/module-6-macro-and-event-awareness.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-7-performance-review-routine": {
+      "file": "modules/module-7-performance-review-routine.json",
+      "trackType": "coreCurriculum",
+      "catalogGroup": "core"
+    },
+    "module-8-behavioral-finance": {
+      "file": "modules/module-8-behavioral-finance.json",
+      "trackType": "optionalExtension",
+      "catalogGroup": "optionalExtensions"
+    },
+    "module-9-crypto-and-defi": {
+      "file": "modules/module-9-crypto-and-defi.json",
+      "trackType": "optionalExtension",
+      "catalogGroup": "optionalExtensions"
+    },
+    "module-10-how-to-use-app": {
+      "file": "modules/module-10-how-to-use-app.json",
+      "trackType": "platformGuide",
+      "catalogGroup": "platformGuide"
+    }
+  }
+}

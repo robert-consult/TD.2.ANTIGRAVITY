@@ -1,0 +1,227 @@
+{
+  "moduleSlug": "module-3-chart-platform-workflows",
+  "moduleTitle": "Module 3: Chart and Platform Workflows",
+  "moduleBaseRoute": "/education/module-3-chart-platform-workflows",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "3.2-watchlist-management",
+  "title": "3.2 Watchlist Management",
+  "summary": "Beginners often think the solution is to scan more charts.",
+  "bodyHtml": "<h1 id=\"user-content-32-watchlist-management\">3.2 Watchlist Management</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Beginners often think the solution is to scan more charts.</p>\n<p>Usually the opposite is true.</p>\n<p>If you follow too many symbols, you may spend a lot of time looking without really understanding any of them well. A watchlist helps you narrow the field so you can review markets in a calm and repeatable way.</p>\n<p>The goal is not to collect symbols. The goal is to focus on the markets that deserve attention.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a watchlist is for;</li>\n<li>organize markets into a small, logical list;</li>\n<li>understand when to keep, rank, or remove a symbol.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-a-watchlist-actually-does\">What a Watchlist Actually Does</h2>\n<p>A watchlist is a shortlist of markets you want to review regularly.</p>\n<p>It helps you:</p>\n<ul>\n<li>save time;</li>\n<li>compare markets more consistently;</li>\n<li>avoid random scanning;</li>\n<li>rank which charts matter most today.</li>\n</ul>\n<p>The watchlist is a workflow tool, not a prediction tool.</p>\n<hr>\n<h2 id=\"user-content-use-two-layers-core-list-and-active-list\">Use Two Layers: Core List and Active List</h2>\n<p>One of the easiest ways to stay organized is to split the list into two parts.</p>\n<table>\n<thead>\n<tr>\n<th>List type</th>\n<th>Job</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Core list</strong></td>\n<td>Markets you review most days because they fit your learning plan</td>\n</tr>\n<tr>\n<td><strong>Active list</strong></td>\n<td>A smaller group that looks most relevant right now</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row table showing the difference between a core watchlist and a smaller active list.)</em></p>\n<p>This helps because not every market deserves equal attention every day.</p>\n<hr>\n<h2 id=\"user-content-group-markets-logically\">Group Markets Logically</h2>\n<p>A beginner watchlist works better when similar products are grouped together.</p>\n<p>A simple global structure might look like this:</p>\n<ul>\n<li><strong>Major FX pairs:</strong> such as EUR/USD or USD/JPY</li>\n<li><strong>Global equity indices:</strong> such as the S&#x26;P 500, DAX, or Nikkei 225</li>\n<li><strong>Metals:</strong> such as gold or silver</li>\n<li><strong>Energy:</strong> such as Brent crude or WTI crude</li>\n<li><strong>Optional extension markets:</strong> only if they are part of your learning scope</li>\n</ul>\n<p>This grouping makes the review easier because you can compare similar products without mixing everything together.</p>\n<hr>\n<h2 id=\"user-content-watch-for-duplicate-exposure\">Watch for Duplicate Exposure</h2>\n<p>A useful watchlist is not only about what you add. It is also about what you remove.</p>\n<p>One common issue is <strong>duplicate exposure</strong>.</p>\n<p>That means two charts may be giving you very similar market exposure even though they have different names.</p>\n<p>Simple examples:</p>\n<ul>\n<li>EUR/USD and GBP/USD may both be moving mainly around broad U.S. dollar strength or weakness.</li>\n<li>Two products tied to the same stock index may be different wrappers around a very similar idea.</li>\n<li>Spot gold and another gold-linked product may not give you a truly different market view.</li>\n</ul>\n<p>This does <strong>not</strong> mean the charts always move the same way. It means you should ask whether you are really following different ideas or just repeating the same one.</p>\n<hr>\n<h2 id=\"user-content-when-to-remove-a-market\">When to Remove a Market</h2>\n<p>A market may leave your active list if:</p>\n<ul>\n<li>it no longer fits your process;</li>\n<li>it is stuck in messy, unclear price action;</li>\n<li>it duplicates a stronger chart you are already watching;</li>\n<li>spreads or trading conditions are not attractive for your current plan.</li>\n</ul>\n<p>Removing a symbol is not a mistake. Sometimes it is the disciplined choice.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine your <strong>core list</strong> contains:</p>\n<ul>\n<li>EUR/USD</li>\n<li>USD/JPY</li>\n<li>DAX</li>\n<li>Nikkei 225</li>\n<li>Gold</li>\n<li>Brent crude</li>\n</ul>\n<p>Now imagine you start the day and review each chart:</p>\n<ul>\n<li>EUR/USD is moving sideways inside a narrow range.</li>\n<li>USD/JPY is also not offering a clear structure.</li>\n<li>DAX is testing a major support zone.</li>\n<li>Gold is pulling back inside a broader uptrend.</li>\n<li>Brent crude is moving cleanly inside a range.</li>\n</ul>\n<p>A reasonable <strong>active list</strong> for extra attention today might be:</p>\n<ul>\n<li>DAX</li>\n<li>Gold</li>\n<li>Brent crude</li>\n</ul>\n<p>You still know the other markets exist. You are simply ranking the ones that deserve more focus right now.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-collecting-too-many-symbols\">Mistake 1: Collecting Too Many Symbols</h3>\n<p>A long list often creates shallow analysis instead of better analysis.</p>\n<h3 id=\"user-content-mistake-2-adding-markets-only-because-they-moved-recently\">Mistake 2: Adding Markets Only Because They Moved Recently</h3>\n<p>Recent movement alone does not make a chart useful for your process.</p>\n<h3 id=\"user-content-mistake-3-ignoring-duplicate-exposure\">Mistake 3: Ignoring Duplicate Exposure</h3>\n<p>Two different symbols can still reflect a very similar market idea.</p>\n<h3 id=\"user-content-mistake-4-leaving-weak-charts-on-the-active-list\">Mistake 4: Leaving Weak Charts on the Active List</h3>\n<p>If a chart is messy and unclear, it does not need prime attention.</p>\n<hr>",
+  "learningOutcomes": [
+    "build a manageable watchlist organized by product family or theme;",
+    "explain why too many symbols reduce clarity;",
+    "rank markets by relevance instead of scanning randomly."
+  ],
+  "quizItems": [
+    {
+      "id": "3.2-watchlist-management-q1",
+      "prompt": "What is the main purpose of a watchlist?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "To display as many symbols as possible"
+        },
+        {
+          "label": "B",
+          "text": "To organize markets worth reviewing regularly"
+        },
+        {
+          "label": "C",
+          "text": "To replace a risk plan"
+        },
+        {
+          "label": "D",
+          "text": "To guarantee trade frequency"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "To organize markets worth reviewing regularly"
+      },
+      "explanation": "A watchlist is a focus tool, not a collection contest.",
+      "lessonAnchor": "Purpose section"
+    },
+    {
+      "id": "3.2-watchlist-management-q2",
+      "prompt": "Which watchlist structure is most useful for a beginner?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Random symbols from social media"
+        },
+        {
+          "label": "B",
+          "text": "Organized groups by asset class or theme"
+        },
+        {
+          "label": "C",
+          "text": "Only the cheapest-looking markets"
+        },
+        {
+          "label": "D",
+          "text": "Every instrument available"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Organized groups by asset class or theme"
+      },
+      "explanation": "Grouping by asset class or theme makes review faster and more logical.",
+      "lessonAnchor": "Organization section"
+    },
+    {
+      "id": "3.2-watchlist-management-q3",
+      "prompt": "What is a strong reason to remove a market from the active watchlist?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "It no longer fits the process or adds duplicate exposure"
+        },
+        {
+          "label": "B",
+          "text": "It moved last week"
+        },
+        {
+          "label": "C",
+          "text": "It has letters in the symbol"
+        },
+        {
+          "label": "D",
+          "text": "Another trader dislikes it"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "It no longer fits the process or adds duplicate exposure"
+      },
+      "explanation": "The watchlist should support focus and meaningful coverage, not clutter.",
+      "lessonAnchor": "Maintenance section"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; watchlist examples illustrate organization and review logic, not a recommendation to trade those instruments"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the course later adds live scanner or platform-specific symbol lists."
+  ],
+  "sources": [
+    {
+      "label": "BIS foreign exchange turnover survey",
+      "url": "https://www.bis.org/statistics/rpfx25_fx.htm"
+    },
+    {
+      "label": "CME Group education hub",
+      "url": "https://www.cmegroup.com/education.html"
+    },
+    {
+      "label": "ICE education hub",
+      "url": "https://www.ice.com/support/education"
+    },
+    {
+      "label": "ASX investor online courses",
+      "url": "https://www.asx.com.au/investors/investment-tools-and-resources/online-courses"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "3.1-workspace-setup",
+    "title": "3.1 Workspace Setup",
+    "href": "/education/module-3-chart-platform-workflows/3.1-workspace-setup"
+  },
+  "nextLesson": {
+    "lessonSlug": "3.3-trade-execution",
+    "title": "3.3 Trade Execution",
+    "href": "/education/module-3-chart-platform-workflows/3.3-trade-execution"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "3.1-workspace-setup",
+      "title": "3.1 Workspace Setup",
+      "href": "/education/module-3-chart-platform-workflows/3.1-workspace-setup"
+    },
+    {
+      "lessonSlug": "3.2-watchlist-management",
+      "title": "3.2 Watchlist Management",
+      "href": "/education/module-3-chart-platform-workflows/3.2-watchlist-management"
+    },
+    {
+      "lessonSlug": "3.3-trade-execution",
+      "title": "3.3 Trade Execution",
+      "href": "/education/module-3-chart-platform-workflows/3.3-trade-execution"
+    }
+  ]
+}

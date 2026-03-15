@@ -1,0 +1,46 @@
+{
+  "moduleSlug": "module-3-chart-platform-workflows",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 3: Chart and Platform Workflows",
+  "cardSummary": "Build clean chart routines, keep watchlists focused, and connect market context to a repeatable execution workflow.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-3-chart-platform-workflows",
+  "lessonCount": 3,
+  "quizItemCount": 9,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "3.1-workspace-setup",
+      "title": "3.1 Workspace Setup",
+      "summary": "A beginner screen often becomes too busy too quickly.",
+      "href": "/education/module-3-chart-platform-workflows/3.1-workspace-setup"
+    },
+    {
+      "lessonSlug": "3.2-watchlist-management",
+      "title": "3.2 Watchlist Management",
+      "summary": "Beginners often think the solution is to scan more charts.",
+      "href": "/education/module-3-chart-platform-workflows/3.2-watchlist-management"
+    },
+    {
+      "lessonSlug": "3.3-trade-execution",
+      "title": "3.3 Trade Execution Workflow",
+      "summary": "Finding a setup is only part of the job.",
+      "href": "/education/module-3-chart-platform-workflows/3.3-trade-execution"
+    }
+  ]
+}

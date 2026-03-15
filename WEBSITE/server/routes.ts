@@ -1,15 +1,29 @@
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
-import { educationModules } from "./content/educationModules";
+import {
+  getEducationCatalog,
+  getEducationLesson,
+  getEducationModule,
+  getLegacyEducationModuleCards,
+  getPlatformGuideLesson,
+  getPlatformGuideOverview,
+} from "./content/contentStore";
 
 /**
  * Website-only routes — NO auth, NO trading, NO database.
  *
- * Only three endpoints:
- *  1. GET  /api/status           — health check
- *  2. GET  /api/education/modules — returns website-owned education content
- *  3. POST /api/contact          — validates and forwards contact form submissions
+ * Primary website endpoints:
+ *  1. GET  /api/status
+ *  2. GET  /api/education/catalog
+ *  3. GET  /api/education/modules/:moduleSlug
+ *  4. GET  /api/education/lessons/:moduleSlug/:lessonSlug
+ *  5. GET  /api/platform-guide
+ *  6. GET  /api/platform-guide/lessons/:lessonSlug
+ *  7. POST /api/contact
+ *
+ * Legacy compatibility:
+ *  - GET /api/education/modules
  */
 const contactSubmissionSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -88,7 +102,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/education/modules", (_req, res) => {
-    return res.json(educationModules);
+    return res.json(getLegacyEducationModuleCards());
+  });
+
+  app.get("/api/education/catalog", (_req, res) => {
+    return res.json(getEducationCatalog());
+  });
+
+  app.get("/api/education/modules/:moduleSlug", (req, res) => {
+    const modulePayload = getEducationModule(req.params.moduleSlug);
+    if (!modulePayload) {
+      return res.status(404).json({ message: "Education module not found." });
+    }
+
+    return res.json(modulePayload);
+  });
+
+  app.get("/api/education/lessons/:moduleSlug/:lessonSlug", (req, res) => {
+    const lessonPayload = getEducationLesson(
+      req.params.moduleSlug,
+      req.params.lessonSlug,
+    );
+    if (!lessonPayload) {
+      return res.status(404).json({ message: "Education lesson not found." });
+    }
+
+    return res.json(lessonPayload);
+  });
+
+  app.get("/api/platform-guide", (_req, res) => {
+    const platformGuide = getPlatformGuideOverview();
+    if (!platformGuide) {
+      return res.status(404).json({ message: "Platform guide not found." });
+    }
+
+    return res.json(platformGuide);
+  });
+
+  app.get("/api/platform-guide/lessons/:lessonSlug", (req, res) => {
+    const lessonPayload = getPlatformGuideLesson(req.params.lessonSlug);
+    if (!lessonPayload) {
+      return res.status(404).json({ message: "Platform guide lesson not found." });
+    }
+
+    return res.json(lessonPayload);
   });
 
   app.post("/api/contact", async (req, res) => {

@@ -1,0 +1,236 @@
+{
+  "moduleSlug": "module-1-introduction-to-trading",
+  "moduleTitle": "Module 1: Introduction to Trading",
+  "moduleBaseRoute": "/education/module-1-introduction-to-trading",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "1.2-instruments-overview",
+  "title": "1.2 Instruments Overview",
+  "summary": "Many beginners say, “I want to trade gold,” or “I want to trade the stock market,” before they know what product they are actually using.",
+  "bodyHtml": "<h1 id=\"user-content-12-instruments-overview\">1.2 Instruments Overview</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Many beginners say, “I want to trade gold,” or “I want to trade the stock market,” before they know what product they are actually using.</p>\n<p>That is a problem because the same market idea can be reached through very different products, with very different rules.</p>\n<p>This lesson teaches one core idea:</p>\n<p><code>first understand the market, then understand the product used to reach it</code></p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>name the main market families a beginner is likely to see;</li>\n<li>explain the difference between an underlying market and a wrapper;</li>\n<li>spot where extra caution is needed before using a product.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-main-market-families\">The Main Market Families</h2>\n<table>\n<thead>\n<tr>\n<th>Market family</th>\n<th>What it gives you exposure to</th>\n<th>Common access routes</th>\n<th>Main beginner caution</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Foreign exchange (FX)</strong></td>\n<td>One currency compared with another</td>\n<td>spot FX, FX futures, CFDs</td>\n<td>leverage and spread costs</td>\n</tr>\n<tr>\n<td><strong>Stocks / equities</strong></td>\n<td>Shares in individual companies</td>\n<td>shares, ETFs, options, CFDs</td>\n<td>company-specific risk</td>\n</tr>\n<tr>\n<td><strong>Indices</strong></td>\n<td>A basket of many stocks</td>\n<td>cash index references, ETFs, futures, CFDs</td>\n<td>confusing the index with the wrapper</td>\n</tr>\n<tr>\n<td><strong>Metals</strong></td>\n<td>Gold, silver, copper and other metals</td>\n<td>spot references, ETFs, futures, options, CFDs</td>\n<td>same metal name, different product rules</td>\n</tr>\n<tr>\n<td><strong>Energy</strong></td>\n<td>Oil, gas, power-related markets</td>\n<td>futures, options, CFDs, ETFs in some regions</td>\n<td>benchmark differences like WTI vs Brent</td>\n</tr>\n<tr>\n<td><strong>Agriculture</strong></td>\n<td>Corn, wheat, coffee, cocoa and more</td>\n<td>mainly futures and options</td>\n<td>seasonality and contract structure</td>\n</tr>\n<tr>\n<td><strong>Bonds / rates</strong></td>\n<td>Government debt and interest-rate exposure</td>\n<td>cash bonds, bond ETFs, bond futures, options</td>\n<td>price and yield are not the same thing</td>\n</tr>\n<tr>\n<td><strong>Options</strong></td>\n<td>A right to buy or sell something at a set price</td>\n<td>listed options, OTC options</td>\n<td>premium can be lost in full</td>\n</tr>\n<tr>\n<td><strong>Crypto</strong></td>\n<td>Digital assets and token-based markets</td>\n<td>spot, futures, perpetuals, ETFs in some regions, DeFi</td>\n<td>custody, leverage, and venue risk</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A beginner market map showing major asset classes, what each one gives exposure to, common product wrappers, and the main warning a beginner should focus on first.)</em></p>\n<hr>\n<h2 id=\"user-content-the-difference-between-a-market-and-a-wrapper\">The Difference Between a Market and a Wrapper</h2>\n<p>This is the most important idea in the lesson.</p>\n<ul>\n<li>The <strong>market</strong> is the thing you want exposure to.</li>\n<li>The <strong>wrapper</strong> is the product you actually trade.</li>\n</ul>\n<h3 id=\"user-content-three-short-terms-you-should-know-here\">Three Short Terms You Should Know Here</h3>\n<ul>\n<li><strong>ETF</strong> = exchange-traded fund</li>\n<li><strong>CFD</strong> = contract for difference, a broker-offered wrapper in many regions</li>\n<li><strong>OTC</strong> = over the counter, meaning trading happens through dealers or broker networks rather than one single central exchange</li>\n</ul>\n<h3 id=\"user-content-example-1-the-sp-500\">Example 1: The S&#x26;P 500</h3>\n<ul>\n<li>The <strong>market idea</strong> is the S&#x26;P 500 index.</li>\n<li>The <strong>wrapper</strong> might be:\n<ul>\n<li>an ETF,</li>\n<li>a futures contract,</li>\n<li>a CFD,</li>\n<li>an option on an ETF or future.</li>\n</ul>\n</li>\n</ul>\n<p>All of those point toward the same theme, but they do not behave the same way in fees, leverage, hours, expiry, or settlement.</p>\n<h3 id=\"user-content-example-2-gold\">Example 2: Gold</h3>\n<ul>\n<li>The <strong>market idea</strong> is gold.</li>\n<li>The <strong>wrapper</strong> might be:\n<ul>\n<li>a gold ETF,</li>\n<li>a futures contract,</li>\n<li>a spot-style product,</li>\n<li>a broker CFD.</li>\n</ul>\n</li>\n</ul>\n<p>So saying “I trade gold” is not enough information. A careful trader asks:</p>\n<ul>\n<li>Which gold product?</li>\n<li>Which venue?</li>\n<li>Which rules?</li>\n</ul>\n<hr>\n<h2 id=\"user-content-a-simple-global-view\">A Simple Global View</h2>\n<p>This course is not built around one country alone.</p>\n<p>A beginner should know that global markets include:</p>\n<ul>\n<li>FX trading across Asia, Europe, the Middle East, and the Americas;</li>\n<li>stock indices such as the S&#x26;P 500, DAX, FTSE 100, Nikkei 225, and Hang Seng;</li>\n<li>metals and energy benchmarks such as gold, WTI crude, and Brent crude;</li>\n<li>government bond and rate products that respond to central-bank policy in different regions.</li>\n</ul>\n<p>The exact product available to a learner may depend on where they live and what type of account or broker they use. That is why understanding structure comes before choosing a product.</p>\n<hr>\n<h2 id=\"user-content-a-safer-learning-order-for-beginners\">A Safer Learning Order for Beginners</h2>\n<p>A beginner does not need to learn every market at once.</p>\n<p>A simpler order is:</p>\n<ol>\n<li>major FX pairs and major stock indices;</li>\n<li>metals and energy benchmarks;</li>\n<li>simple futures concepts;</li>\n<li>basic options language;</li>\n<li>crypto only after the main market map is clear.</li>\n</ol>\n<p>This order matches the parent-folder rule that early modules should stay easy to digest.</p>\n<hr>\n<h2 id=\"user-content-worked-example-i-want-to-trade-oil\">Worked Example: \"I Want to Trade Oil\"</h2>\n<p>A beginner says, “I want to trade oil.”</p>\n<p>That still leaves several unanswered questions:</p>\n<ul>\n<li>Do they mean <strong>WTI</strong> or <strong>Brent</strong>?</li>\n<li>Are they using a <strong>futures contract</strong>, <strong>ETF</strong>, or <strong>CFD</strong>?</li>\n<li>Does the product <strong>expire</strong>?</li>\n<li>Does the product include <strong>overnight financing</strong>?</li>\n</ul>\n<p>The same market idea can lead to very different costs and risks.</p>\n<p>That is why a good first habit is not “Which chart looks exciting?”</p>\n<p>It is:</p>\n<p><code>What is the underlying market, and what product am I actually trading?</code></p>\n<hr>\n<h2 id=\"user-content-crypto-needs-extra-caution\">Crypto Needs Extra Caution</h2>\n<p>Crypto belongs in the market map, but it should not be treated as a beginner shortcut.</p>\n<p>A beginner needs to understand that crypto products can involve:</p>\n<ul>\n<li>large price swings;</li>\n<li>liquidation risk in leveraged products;</li>\n<li>exchange and custody risk;</li>\n<li>smart-contract risk in DeFi;</li>\n<li>different legal treatment across countries.</li>\n</ul>\n<p>So crypto should be understood as a separate, higher-caution part of the map, not as a replacement for learning basic market structure.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-confusing-the-index-with-the-etf\">Mistake 1: Confusing the Index With the ETF</h3>\n<p>An index is the benchmark idea. An ETF is one tradable product that may track that idea.</p>\n<h3 id=\"user-content-mistake-2-thinking-the-same-asset-name-means-the-same-rules\">Mistake 2: Thinking the Same Asset Name Means the Same Rules</h3>\n<p>“Gold,” “oil,” or “Bitcoin” can appear in very different products with very different mechanics.</p>\n<h3 id=\"user-content-mistake-3-choosing-the-most-leveraged-product-first\">Mistake 3: Choosing the Most Leveraged Product First</h3>\n<p>Beginners often pick the product that looks fastest or cheapest before understanding the risk.</p>\n<h3 id=\"user-content-mistake-4-thinking-all-products-are-global-in-the-same-way\">Mistake 4: Thinking All Products Are Global in the Same Way</h3>\n<p>Some products are centralized on exchanges. Some are OTC. Some depend heavily on the broker or platform offering them.</p>\n<hr>",
+  "learningOutcomes": [
+    "distinguish the major tradable market families a beginner is likely to encounter;",
+    "explain the difference between an underlying market and an access wrapper;",
+    "identify which product families need extra caution before use."
+  ],
+  "quizItems": [
+    {
+      "id": "1.2-instruments-overview-q1",
+      "prompt": "Which choice is best described as a wrapper that provides exposure to an underlying market rather than being the underlying market itself?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "ETF"
+        },
+        {
+          "label": "B",
+          "text": "Spot FX market"
+        },
+        {
+          "label": "C",
+          "text": "Physical gold inventory"
+        },
+        {
+          "label": "D",
+          "text": "Central-bank policy rate"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "ETF"
+      },
+      "explanation": "An ETF is a tradable wrapper. It can track an underlying basket or index, but it is not the same thing as the underlying market itself.",
+      "lessonAnchor": "Underlying versus wrapper section"
+    },
+    {
+      "id": "1.2-instruments-overview-q2",
+      "prompt": "Which market is most commonly described as primarily OTC rather than centralized on one exchange?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Spot FX"
+        },
+        {
+          "label": "B",
+          "text": "Index futures"
+        },
+        {
+          "label": "C",
+          "text": "Exchange-listed options"
+        },
+        {
+          "label": "D",
+          "text": "Treasury futures"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Spot FX"
+      },
+      "explanation": "Spot FX is generally described as an OTC market, while the others are primarily exchange-traded examples.",
+      "lessonAnchor": "Venue structure section"
+    },
+    {
+      "id": "1.2-instruments-overview-q3",
+      "prompt": "Why should a beginner learn the underlying market before choosing a product wrapper?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because wrappers always reduce risk to zero"
+        },
+        {
+          "label": "B",
+          "text": "Because the same underlying can behave differently across fees, leverage, expiry, and settlement rules"
+        },
+        {
+          "label": "C",
+          "text": "Because wrappers are illegal in most regions"
+        },
+        {
+          "label": "D",
+          "text": "Because only professionals can trade ETFs"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because the same underlying can behave differently across fees, leverage, expiry, and settlement rules"
+      },
+      "explanation": "The underlying theme may be similar, but the trading mechanics can differ a lot across wrappers.",
+      "lessonAnchor": "Wrapper-selection caution section"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "standard education disclaimer, plus elevated caution for crypto and CFD references"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "products differ by venue and jurisdiction; leverage can magnify losses"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none blocking first publication draft"
+  ],
+  "sources": [
+    {
+      "label": "Investor.gov main education hub",
+      "url": "https://www.investor.gov/"
+    },
+    {
+      "label": "CME futures guide",
+      "url": "https://www.cmegroup.com/education/files/a-traders-guide-to-futures.pdf"
+    },
+    {
+      "label": "ICE education hub",
+      "url": "https://www.ice.com/support/education"
+    },
+    {
+      "label": "BIS FX overview",
+      "url": "https://www.bis.org/statistics/rpfx25_fx.htm"
+    },
+    {
+      "label": "ASX options and education resources",
+      "url": "https://www.asx.com.au/investors/investment-tools-and-resources/online-courses"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "1.1-terminology-glossary",
+    "title": "1.1 Terminology Glossary",
+    "href": "/education/module-1-introduction-to-trading/1.1-terminology-glossary"
+  },
+  "nextLesson": {
+    "lessonSlug": "1.3-core-calculations",
+    "title": "1.3 Core Calculations",
+    "href": "/education/module-1-introduction-to-trading/1.3-core-calculations"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "1.1-terminology-glossary",
+      "title": "1.1 Terminology Glossary",
+      "href": "/education/module-1-introduction-to-trading/1.1-terminology-glossary"
+    },
+    {
+      "lessonSlug": "1.2-instruments-overview",
+      "title": "1.2 Instruments Overview",
+      "href": "/education/module-1-introduction-to-trading/1.2-instruments-overview"
+    },
+    {
+      "lessonSlug": "1.3-core-calculations",
+      "title": "1.3 Core Calculations",
+      "href": "/education/module-1-introduction-to-trading/1.3-core-calculations"
+    },
+    {
+      "lessonSlug": "1.4-profit-loss-risk-math",
+      "title": "1.4 Profit, Loss, and Risk Math",
+      "href": "/education/module-1-introduction-to-trading/1.4-profit-loss-risk-math"
+    }
+  ]
+}

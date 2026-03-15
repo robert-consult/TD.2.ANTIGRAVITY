@@ -1,0 +1,52 @@
+{
+  "moduleSlug": "module-7-performance-review-routine",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 7: Performance Review Routine",
+  "cardSummary": "Review trades like a risk manager by combining journaling, payoff analysis, drawdown discipline, and structured self-tests.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-7-performance-review-routine",
+  "lessonCount": 4,
+  "quizItemCount": 12,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "7.1-journaling-like-risk-manager",
+      "title": "7.1 Journaling Like a Risk Manager",
+      "summary": "Many beginners think a journal is just a place to write:",
+      "href": "/education/module-7-performance-review-routine/7.1-journaling-like-risk-manager"
+    },
+    {
+      "lessonSlug": "7.2-win-rate-vs-payoff",
+      "title": "7.2 Win Rate Versus Payoff",
+      "summary": "Beginners often chase one number:",
+      "href": "/education/module-7-performance-review-routine/7.2-win-rate-vs-payoff"
+    },
+    {
+      "lessonSlug": "7.3-psychology-of-drawdowns",
+      "title": "7.3 Psychology of Drawdowns",
+      "summary": "A drawdown is not just a math event.",
+      "href": "/education/module-7-performance-review-routine/7.3-psychology-of-drawdowns"
+    },
+    {
+      "lessonSlug": "7.4-self-test-portfolio-review",
+      "title": "7.4 Self-Test Portfolio Review",
+      "summary": "Reviewing one trade at a time is useful.",
+      "href": "/education/module-7-performance-review-routine/7.4-self-test-portfolio-review"
+    }
+  ]
+}

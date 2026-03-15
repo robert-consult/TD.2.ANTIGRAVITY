@@ -5,10 +5,13 @@
   "type": "module",
   "description": "Public marketing website and TradingView dashboard for TradeQuip, fully standalone from the trading app.",
   "scripts": {
-    "dev": "tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "content:sync": "tsx scripts/syncEducationContent.ts",
+    "content:validate": "tsx scripts/verifyEducationContent.ts --skip-sync",
+    "content:verify": "npm run content:sync && npm run content:validate",
+    "dev": "npm run content:sync && tsx server/index.ts",
+    "build": "npm run content:sync && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
-    "check": "tsc --noEmit"
+    "check": "npm run content:verify && tsc --noEmit"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.2",
@@ -44,9 +47,16 @@
     "framer-motion": "^12.0.6",
     "lucide-react": "^0.462.0",
     "nanoid": "^5.0.9",
+    "rehype-sanitize": "^6.0.0",
+    "rehype-slug": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
     "tailwind-merge": "^2.6.0",
+    "unified": "^11.0.5",
     "wouter": "^3.3.5",
     "zod": "^3.23.8"
   },

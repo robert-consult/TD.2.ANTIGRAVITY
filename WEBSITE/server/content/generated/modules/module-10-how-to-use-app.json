@@ -1,0 +1,65 @@
+{
+  "moduleSlug": "module-10-how-to-use-app",
+  "trackType": "platformGuide",
+  "catalogGroup": "platformGuide",
+  "publicTitle": "Module 10: How to Use the App",
+  "cardSummary": "A verified beginner guide to the authenticated TradeQuip app using exact current user-facing labels and screenshot placeholders.",
+  "status": "draft-ready",
+  "flags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "baseRoute": "/platform-guide",
+  "lessonCount": 4,
+  "quizItemCount": 12,
+  "disclosures": [
+    {
+      "id": "platformGuide",
+      "title": "Product Guide Notice",
+      "tone": "info",
+      "body": "This public guide explains the current authenticated TradeQuip product using verified user-facing labels. It is instructional documentation, not a trading recommendation, and app labels or flows may change over time.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "screenshotPending",
+      "title": "Screenshots Pending",
+      "tone": "warning",
+      "body": "This lesson is intentionally publishing with screenshot placeholders until current captures are collected and verified against the live trader-facing app.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "10.1-dashboard-layout",
+      "title": "10.1 Dashboard Navigation, Header, and Layout",
+      "summary": "A beginner can feel lost if a trading app looks like many different tools at once.",
+      "href": "/platform-guide/10.1-dashboard-layout"
+    },
+    {
+      "lessonSlug": "10.2-portfolio-metrics",
+      "title": "10.2 Account, Mailbox, Metrics, and Trade History",
+      "summary": "Beginners often open the account area and see many numbers without knowing which ones describe the present, which ones describe the past, and which ones are warnings.",
+      "href": "/platform-guide/10.2-portfolio-metrics"
+    },
+    {
+      "lessonSlug": "10.3-executing-trades",
+      "title": "10.3 Trading on the Trade Screen",
+      "summary": "The trade screen is where beginners can make the most expensive platform mistakes.",
+      "href": "/platform-guide/10.3-executing-trades"
+    },
+    {
+      "lessonSlug": "10.4-advanced-features",
+      "title": "10.4 Journal, Profile Settings, Talent, and Supporting Workflows",
+      "summary": "Trading is not only about clicking `Buy` or `Sell`.",
+      "href": "/platform-guide/10.4-advanced-features"
+    }
+  ]
+}

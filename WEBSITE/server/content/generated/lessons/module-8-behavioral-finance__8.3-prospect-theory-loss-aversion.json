@@ -1,0 +1,231 @@
+{
+  "moduleSlug": "module-8-behavioral-finance",
+  "moduleTitle": "Module 8: Behavioral Finance",
+  "moduleBaseRoute": "/education/module-8-behavioral-finance",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "8.3-prospect-theory-loss-aversion",
+  "title": "8.3 Prospect Theory and Loss Aversion",
+  "summary": "Many beginners think the hardest part of trading is finding the right setup.",
+  "bodyHtml": "<h1 id=\"user-content-83-prospect-theory-and-loss-aversion\">8.3 Prospect Theory and Loss Aversion</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Many beginners think the hardest part of trading is finding the right setup.</p>\n<p>Often the harder part is staying honest once money is at risk.</p>\n<p>People usually do not feel gains and losses in a balanced way.</p>\n<p>A small win may feel nice.\nA similar-sized loss may feel much more painful.</p>\n<p>That difference matters because it can change behavior:</p>\n<ul>\n<li>holding losers too long;</li>\n<li>moving stops;</li>\n<li>taking profits too early;</li>\n<li>refusing to accept a planned loss.</li>\n</ul>\n<p>This lesson explains that pattern in simple terms.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain loss aversion in plain language;</li>\n<li>describe how fear of loss can bend trade management;</li>\n<li>use a few review questions to catch the bias early.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-loss-aversion-in-plain-language\">Loss Aversion in Plain Language</h2>\n<p><strong>Loss aversion</strong> means losses often feel more painful than similar gains feel rewarding.</p>\n<p>That does not mean everyone reacts the same way.</p>\n<p>It means many people naturally want to avoid the feeling of a loss so strongly that they make worse decisions.</p>\n<p>In trading, that may sound like:</p>\n<ul>\n<li><code>I cannot close here, because then the loss becomes real</code></li>\n<li><code>I will just move the stop a little</code></li>\n<li><code>I should take this small profit now before it disappears</code></li>\n</ul>\n<p>Those feelings are common.\nThey can also be expensive.</p>\n<hr>\n<h2 id=\"user-content-how-loss-aversion-appears-in-trading\">How Loss Aversion Appears in Trading</h2>\n<table>\n<thead>\n<tr>\n<th>Situation</th>\n<th>What the trader feels</th>\n<th>Risky reaction</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>EUR/USD or Nasdaq trade moves against plan</td>\n<td>The pain of realizing a loss</td>\n<td>Hold the loser too long</td>\n</tr>\n<tr>\n<td>Gold or Brent stop is close</td>\n<td>Fear of being wrong</td>\n<td>Move the stop farther away</td>\n</tr>\n<tr>\n<td>Gold or stock-index trade is in profit</td>\n<td>Fear of losing the unrealized gain</td>\n<td>Exit too early</td>\n</tr>\n<tr>\n<td>Review time arrives after a bad multi-market week</td>\n<td>Discomfort about mistakes</td>\n<td>Avoid the journal or soften the truth</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table showing common trading situations, the feeling created by loss aversion, and the risky reaction that can follow.)</em></p>\n<hr>\n<h2 id=\"user-content-prospect-theory-without-the-academic-jargon\">Prospect Theory Without the Academic Jargon</h2>\n<p>You do not need the full academic graph for this lesson.</p>\n<p>The beginner version is enough:</p>\n<ul>\n<li>people do not always make decisions in a cool, balanced way;</li>\n<li>the fear of loss can become stronger than the logic of the plan;</li>\n<li>that emotional imbalance can change trade behavior.</li>\n</ul>\n<p>This is why mechanical rules matter so much.</p>\n<p>Rules help when emotions stop being fair.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine a trader plans:</p>\n<ul>\n<li>risk <code>USD 100</code>;</li>\n<li>target <code>USD 200</code>;</li>\n<li>stop at a clear level.</li>\n</ul>\n<p>The trade goes slightly against the position.</p>\n<p>The trader feels:</p>\n<p><code>I do not want to take this loss yet</code></p>\n<p>So the trader moves the stop farther away on an EUR/USD or Brent crude trade.</p>\n<p>Now the risk plan is broken.</p>\n<p>Later, a gold or stock-index trade goes into a small profit.\nThis time the trader exits too quickly because the profit feels too precious to lose.</p>\n<p>Both mistakes come from the same place:</p>\n<p>fear changed the plan.</p>\n<hr>\n<h2 id=\"user-content-a-simple-review-prompt\">A Simple Review Prompt</h2>\n<p>After a trade, ask:</p>\n<p><code>Did I change the plan because I wanted to avoid the feeling of a loss?</code></p>\n<p>That one question can reveal a lot.</p>\n<p>If the answer is yes, the real issue may not be chart analysis.\nIt may be loss aversion.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-a-planned-loss-is-personal-failure\">Mistake 1: Thinking a Planned Loss Is Personal Failure</h3>\n<p>A planned loss is part of risk control, not proof of weakness.</p>\n<h3 id=\"user-content-mistake-2-treating-unrealized-pain-as-safer-than-realized-pain\">Mistake 2: Treating Unrealized Pain as Safer Than Realized Pain</h3>\n<p>Holding a bad trade does not make the risk disappear.</p>\n<h3 id=\"user-content-mistake-3-cutting-winners-only-to-feel-safe\">Mistake 3: Cutting Winners Only to Feel Safe</h3>\n<p>Safety can feel good in the moment and still damage the long-run plan.</p>\n<h3 id=\"user-content-mistake-4-ignoring-the-emotional-reason-for-rule-changes\">Mistake 4: Ignoring the Emotional Reason for Rule Changes</h3>\n<p>If fear changed the plan, that needs to be written down clearly.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain loss aversion in plain language;",
+    "connect prospect-theory ideas to common trading behavior;",
+    "use review prompts that detect when fear of loss is changing the plan."
+  ],
+  "quizItems": [
+    {
+      "id": "8.3-prospect-theory-loss-aversion-q1",
+      "prompt": "What does loss aversion mean in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Losses often feel more painful than similar gains feel rewarding"
+        },
+        {
+          "label": "B",
+          "text": "Traders enjoy losses"
+        },
+        {
+          "label": "C",
+          "text": "Risk disappears after experience"
+        },
+        {
+          "label": "D",
+          "text": "Gains and losses are always felt equally"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Losses often feel more painful than similar gains feel rewarding"
+      },
+      "explanation": "The lesson explains loss aversion as an uneven emotional response that can distort behavior.",
+      "lessonAnchor": "Loss aversion in plain language"
+    },
+    {
+      "id": "8.3-prospect-theory-loss-aversion-q2",
+      "prompt": "Which trading behavior often reflects loss aversion?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Holding a loser too long to avoid taking the loss"
+        },
+        {
+          "label": "B",
+          "text": "Respecting a stop exactly as planned"
+        },
+        {
+          "label": "C",
+          "text": "Writing a journal note"
+        },
+        {
+          "label": "D",
+          "text": "Reducing size after fatigue"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Holding a loser too long to avoid taking the loss"
+      },
+      "explanation": "The lesson connects loss aversion to delay in accepting planned losses.",
+      "lessonAnchor": "How loss aversion appears in trading"
+    },
+    {
+      "id": "8.3-prospect-theory-loss-aversion-q3",
+      "prompt": "Which review question best helps detect this bias?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Did I change the plan because I wanted to avoid the feeling of a loss?"
+        },
+        {
+          "label": "B",
+          "text": "Did I use enough indicators?"
+        },
+        {
+          "label": "C",
+          "text": "Did I trade more markets than usual?"
+        },
+        {
+          "label": "D",
+          "text": "Did I remove every target before entry?"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Did I change the plan because I wanted to avoid the feeling of a loss?"
+      },
+      "explanation": "The lesson teaches that pain-driven rule changes are the key behavior to look for.",
+      "lessonAnchor": "A simple review prompt"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "n/a"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and summary cards"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; behavioral patterns can improve review but do not guarantee future performance"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson adds new source-backed experimental examples."
+  ],
+  "sources": [
+    {
+      "label": "Daniel Kahneman, Facts",
+      "url": "https://www.nobelprize.org/prizes/economic-sciences/2002/kahneman/facts/"
+    },
+    {
+      "label": "Daniel Kahneman, Prize Lecture",
+      "url": "https://www.nobelprize.org/prizes/economic-sciences/2002/kahneman/lecture/"
+    },
+    {
+      "label": "Investor.gov, Glossary: Loss Aversion",
+      "url": "https://www.investor.gov/introduction-investing/investing-basics/glossary/loss-aversion"
+    },
+    {
+      "label": "Investor.gov, Investor Bulletin: Behavioral Patterns of U.S. Investors",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-72"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "8.2-cognitive-biases",
+    "title": "8.2 Cognitive Biases",
+    "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+  },
+  "nextLesson": {
+    "lessonSlug": "8.4-emotional-regulation-in-trading",
+    "title": "8.4 Emotional Regulation in Trading",
+    "href": "/education/module-8-behavioral-finance/8.4-emotional-regulation-in-trading"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "8.1-decision-making-under-uncertainty",
+      "title": "8.1 Decision-Making Under Uncertainty",
+      "href": "/education/module-8-behavioral-finance/8.1-decision-making-under-uncertainty"
+    },
+    {
+      "lessonSlug": "8.2-cognitive-biases",
+      "title": "8.2 Cognitive Biases",
+      "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+    },
+    {
+      "lessonSlug": "8.3-prospect-theory-loss-aversion",
+      "title": "8.3 Prospect Theory and Loss Aversion",
+      "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+    },
+    {
+      "lessonSlug": "8.4-emotional-regulation-in-trading",
+      "title": "8.4 Emotional Regulation in Trading",
+      "href": "/education/module-8-behavioral-finance/8.4-emotional-regulation-in-trading"
+    }
+  ]
+}

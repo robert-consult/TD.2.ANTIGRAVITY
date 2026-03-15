@@ -1,0 +1,223 @@
+{
+  "moduleSlug": "module-5-technical-analysis-process",
+  "moduleTitle": "Module 5: Technical Analysis Process",
+  "moduleBaseRoute": "/education/module-5-technical-analysis-process",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "5.2-volume-profile-order-flow",
+  "title": "5.2 Volume Profile and Order Flow",
+  "summary": "This lesson introduces a topic that beginners often find impressive and confusing at the same time.",
+  "bodyHtml": "<h1 id=\"user-content-52-volume-profile-and-order-flow\">5.2 Volume Profile and Order Flow</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>This lesson introduces a topic that beginners often find impressive and confusing at the same time.</p>\n<p>Tools such as <strong>volume profile</strong> and <strong>order flow</strong> try to show where trading activity happened and how buyers and sellers interacted. These tools can be useful, but they are easy to oversell.</p>\n<p>The most important lesson is not advanced jargon. It is <strong>data literacy</strong>.</p>\n<p>You need to ask:</p>\n<p><code>What market does this data actually represent?</code></p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain volume profile and order flow in plain language;</li>\n<li>understand why exchange-traded and OTC markets give different data pictures;</li>\n<li>use these tools as context, not certainty.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-four-terms-first\">Four Terms First</h2>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Volume</strong></td>\n<td>How much trading activity happened</td>\n</tr>\n<tr>\n<td><strong>Volume profile</strong></td>\n<td>A view of how much volume traded at different price levels</td>\n</tr>\n<tr>\n<td><strong>Order flow</strong></td>\n<td>A closer look at how orders and trades are interacting</td>\n</tr>\n<tr>\n<td><strong>OTC market</strong></td>\n<td>An over-the-counter market with no single central exchange</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row beginner glossary table defining volume, volume profile, order flow, and OTC market in simple language.)</em></p>\n<hr>\n<h2 id=\"user-content-why-data-structure-matters\">Why Data Structure Matters</h2>\n<p>The same tool can mean different things depending on the market.</p>\n<h3 id=\"user-content-exchange-traded-markets\">Exchange-Traded Markets</h3>\n<p>In centralized futures or many equity markets, the trading venue gives a more complete picture of trading activity on that exchange.</p>\n<p>That makes volume-based tools easier to interpret.</p>\n<h3 id=\"user-content-otc-markets\">OTC Markets</h3>\n<p>In spot FX, most trading happens over the counter.</p>\n<p>BIS explains that spot FX and most FX derivatives trade OTC rather than on centralized exchanges. The market is also fragmented across many venues and dealer relationships.</p>\n<p>That means one screen usually does <strong>not</strong> show the whole global market.</p>\n<hr>\n<h2 id=\"user-content-a-simple-rule-for-beginners\">A Simple Rule for Beginners</h2>\n<p>If the market is more centralized, volume-style tools are usually easier to teach and understand.</p>\n<p>If the market is fragmented or OTC, you need more caution.</p>\n<p>That does not mean OTC data is useless. It means you should not pretend one feed is the whole market.</p>\n<hr>\n<h2 id=\"user-content-what-volume-profile-tries-to-show\">What Volume Profile Tries to Show</h2>\n<p>Volume profile tries to answer a question like:</p>\n<p><code>At which prices did a lot of trading happen?</code></p>\n<p>If a lot of volume traded around one price area, traders may treat that zone as important context.</p>\n<p>That still does <strong>not</strong> mean price must reverse there in the future. It only means the area attracted activity before.</p>\n<hr>\n<h2 id=\"user-content-what-order-flow-tries-to-show\">What Order Flow Tries to Show</h2>\n<p>Order flow looks more closely at how buying and selling pressure is appearing in the market.</p>\n<p>This can include ideas such as:</p>\n<ul>\n<li>how much size is visible in the order book;</li>\n<li>where trading is clustering;</li>\n<li>whether activity looks more aggressive or more passive.</li>\n</ul>\n<p>For beginners, this lesson stays conceptual on purpose. You do not need advanced footprint software to understand the main risk:</p>\n<p><code>good-looking data can still be incomplete data</code></p>\n<hr>\n<h2 id=\"user-content-how-this-looks-across-markets\">How This Looks Across Markets</h2>\n<table>\n<thead>\n<tr>\n<th>Market example</th>\n<th>What the data usually represents</th>\n<th>Beginner caution</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>E-mini or DAX future</strong></td>\n<td>Exchange activity on that futures venue</td>\n<td>Useful context, but still not a guarantee of direction</td>\n</tr>\n<tr>\n<td><strong>Gold future</strong></td>\n<td>Centralized exchange activity in that gold contract</td>\n<td>Stronger volume context than a vague metal quote, but still contract-specific</td>\n</tr>\n<tr>\n<td><strong>WTI or Brent future</strong></td>\n<td>Centralized energy-contract activity</td>\n<td>Headline risk can still make the tape look dramatic and unstable</td>\n</tr>\n<tr>\n<td><strong>Spot EUR/USD feed</strong></td>\n<td>A partial OTC view from one venue or broker</td>\n<td>Do not call one feed the whole global FX market</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table comparing what order-flow or volume data usually represents in stock-index futures, gold futures, energy futures, and a spot FX feed, plus the main beginner caution for each.)</em></p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine two traders are studying the same currency pair.</p>\n<h3 id=\"user-content-trader-a\">Trader A</h3>\n<p>Looks at an exchange-based futures tool with centralized exchange data.</p>\n<h3 id=\"user-content-trader-b\">Trader B</h3>\n<p>Looks at a spot FX feed from one broker.</p>\n<p>Both traders may see useful information, but the data pictures are not the same.</p>\n<p>Trader B should be especially careful about saying:</p>\n<p><code>This level is where the whole world traded.</code></p>\n<p>That claim may not be true.</p>\n<hr>\n<h2 id=\"user-content-use-these-tools-as-context\">Use These Tools as Context</h2>\n<p>A safer beginner workflow is:</p>\n<ol>\n<li>start with price structure;</li>\n<li>understand the market type;</li>\n<li>identify where the data comes from;</li>\n<li>use volume or order-flow tools as additional context.</li>\n</ol>\n<p>This keeps the tool in the correct role.</p>\n<p>The same rule applies if you are watching an index future, gold, or crude oil. Ask what venue you are seeing, what contract or wrapper you are looking at, and whether the data is broad or partial.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-treating-one-feed-as-the-whole-market\">Mistake 1: Treating One Feed as the Whole Market</h3>\n<p>This is especially dangerous in OTC markets.</p>\n<h3 id=\"user-content-mistake-2-using-the-tool-without-knowing-the-venue\">Mistake 2: Using the Tool Without Knowing the Venue</h3>\n<p>If you do not know where the data comes from, interpretation becomes weaker.</p>\n<h3 id=\"user-content-mistake-3-letting-complex-screens-replace-basic-analysis\">Mistake 3: Letting Complex Screens Replace Basic Analysis</h3>\n<p>A crowded order-flow screen does not remove the need to read trend, levels, and risk.</p>\n<h3 id=\"user-content-mistake-4-treating-volume-clusters-as-guarantees\">Mistake 4: Treating Volume Clusters as Guarantees</h3>\n<p>Past activity can matter without forcing future behavior.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain volume profile and order-flow language at a conceptual level;",
+    "identify where these tools are more natural for exchange-traded markets than OTC markets;",
+    "avoid pretending incomplete data gives total market visibility."
+  ],
+  "quizItems": [
+    {
+      "id": "5.2-volume-profile-order-flow-q1",
+      "prompt": "Why is volume profile often easier to teach in exchange-traded markets than in OTC spot markets?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because exchange venues provide more centralized transaction data"
+        },
+        {
+          "label": "B",
+          "text": "Because OTC markets have no prices"
+        },
+        {
+          "label": "C",
+          "text": "Because volume does not matter in futures"
+        },
+        {
+          "label": "D",
+          "text": "Because profile only works on Mondays"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because exchange venues provide more centralized transaction data"
+      },
+      "explanation": "Centralized exchange data makes certain volume-based tools easier to interpret.",
+      "lessonAnchor": "Data-structure section"
+    },
+    {
+      "id": "5.2-volume-profile-order-flow-q2",
+      "prompt": "What is the most disciplined way to use order-flow tools?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "As context, with awareness of data limits"
+        },
+        {
+          "label": "B",
+          "text": "As absolute proof of the next move"
+        },
+        {
+          "label": "C",
+          "text": "Without knowing the venue"
+        },
+        {
+          "label": "D",
+          "text": "Only to increase leverage"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "As context, with awareness of data limits"
+      },
+      "explanation": "These tools can be informative, but they do not remove uncertainty.",
+      "lessonAnchor": "Context-not-certainty section"
+    },
+    {
+      "id": "5.2-volume-profile-order-flow-q3",
+      "prompt": "What is the main beginner mistake with order-flow language?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Learning what bids and asks are"
+        },
+        {
+          "label": "B",
+          "text": "Pretending one feed represents the whole market"
+        },
+        {
+          "label": "C",
+          "text": "Asking where the data comes from"
+        },
+        {
+          "label": "D",
+          "text": "Using a glossary"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Pretending one feed represents the whole market"
+      },
+      "explanation": "Data-source limitations must be stated clearly.",
+      "lessonAnchor": "Feed-limitation warning"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; volume and order-flow examples illustrate data interpretation limits and do not predict market direction"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "re-open when newer BIS or exchange guidance materially changes the data-structure examples."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, FX Market Profile User Guide",
+      "url": "https://www.cmegroup.com/education/articles-and-reports/fx-market-profile-user-guide"
+    },
+    {
+      "label": "BIS, OTC foreign exchange turnover in April 2025",
+      "url": "https://www.bis.org/statistics/rpfx25_fx.htm"
+    },
+    {
+      "label": "BIS Quarterly Review, The FX trade execution landscape through the prism of the 2025 BIS Triennial Survey",
+      "url": "https://www.bis.org/publ/qtrpdf/r_qt2512v.htm"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "5.1-moving-averages-momentum",
+    "title": "5.1 Moving Averages and Momentum",
+    "href": "/education/module-5-technical-analysis-process/5.1-moving-averages-momentum"
+  },
+  "nextLesson": {
+    "lessonSlug": "5.3-confluence-checklist",
+    "title": "5.3 Confluence Checklist",
+    "href": "/education/module-5-technical-analysis-process/5.3-confluence-checklist"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "5.1-moving-averages-momentum",
+      "title": "5.1 Moving Averages and Momentum",
+      "href": "/education/module-5-technical-analysis-process/5.1-moving-averages-momentum"
+    },
+    {
+      "lessonSlug": "5.2-volume-profile-order-flow",
+      "title": "5.2 Volume Profile and Order Flow",
+      "href": "/education/module-5-technical-analysis-process/5.2-volume-profile-order-flow"
+    },
+    {
+      "lessonSlug": "5.3-confluence-checklist",
+      "title": "5.3 Confluence Checklist",
+      "href": "/education/module-5-technical-analysis-process/5.3-confluence-checklist"
+    }
+  ]
+}

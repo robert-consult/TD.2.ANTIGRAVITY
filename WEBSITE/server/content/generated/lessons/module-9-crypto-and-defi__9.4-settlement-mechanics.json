@@ -1,0 +1,264 @@
+{
+  "moduleSlug": "module-9-crypto-and-defi",
+  "moduleTitle": "Module 9: Crypto and DeFi",
+  "moduleBaseRoute": "/education/module-9-crypto-and-defi",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "9.4-settlement-mechanics",
+  "title": "9.4 Settlement Mechanics",
+  "summary": "A trade is not fully finished just because you clicked `confirm`.",
+  "bodyHtml": "<h1 id=\"user-content-94-settlement-mechanics\">9.4 Settlement Mechanics</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>A trade is not fully finished just because you clicked <code>confirm</code>.</p>\n<p>There is still a practical question:</p>\n<p><code>How does the asset or money actually move and finalize?</code></p>\n<p>That question is called <strong>settlement</strong>.</p>\n<p>In many traditional beginner experiences, settlement is mostly hidden.</p>\n<p>In crypto, users often feel more of it directly through:</p>\n<ul>\n<li>wallet prompts;</li>\n<li>network fees;</li>\n<li>confirmation delays;</li>\n<li>address details;</li>\n<li>irreversible actions.</li>\n</ul>\n<p>That means settlement is not back-office trivia.\nIt is part of risk.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what settlement means in plain language;</li>\n<li>compare exchange-account activity with direct on-chain activity;</li>\n<li>identify the main operational mistakes that can turn settlement into a loss source.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-settlement-in-plain-language\">Settlement in Plain Language</h2>\n<p><strong>Settlement</strong> is the step that actually completes the trade or transfer.</p>\n<p>In beginner language:</p>\n<ul>\n<li>the order or swap is the instruction;</li>\n<li>settlement is the real completion of what that instruction was supposed to do.</li>\n</ul>\n<p>That completion may happen:</p>\n<ul>\n<li>inside an exchange account environment;</li>\n<li>on a public blockchain;</li>\n<li>during a wallet transfer;</li>\n<li>during a smart-contract interaction.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-two-common-paths\">Two Common Paths</h2>\n<table>\n<thead>\n<tr>\n<th>Path</th>\n<th>What the user sees</th>\n<th>What matters most</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Exchange-account view</strong></td>\n<td>Your balance changes inside the platform</td>\n<td>Venue trust, withdrawal rules, platform operations</td>\n</tr>\n<tr>\n<td><strong>On-chain view</strong></td>\n<td>You sign and broadcast a blockchain transaction</td>\n<td>Fees, confirmation time, address accuracy, irreversible actions</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row table comparing exchange-account settlement and on-chain settlement by what the user sees and what risks matter most.)</em></p>\n<hr>\n<h2 id=\"user-content-why-gas-and-delay-matter\">Why Gas and Delay Matter</h2>\n<p>Ethereum.org explains that gas measures the computational effort needed for a transaction, and users pay fees for that computation.</p>\n<p>A beginner does not need to memorize every fee rule.</p>\n<p>The important lesson is:</p>\n<ul>\n<li>network conditions affect cost;</li>\n<li>transactions can take time to confirm;</li>\n<li>fees still matter even when a transaction fails.</li>\n</ul>\n<p>So if you are trying to do something time-sensitive, such as moving funds or interacting with a protocol during heavy activity, the settlement path can become part of the risk.</p>\n<hr>\n<h2 id=\"user-content-why-address-details-matter\">Why Address Details Matter</h2>\n<p>Ethereum.org explains that transactions are signed instructions that specify a receiving address or contract target.</p>\n<p>That sounds technical, but the beginner meaning is simple:</p>\n<p>you are telling the network exactly where the transaction should go.</p>\n<p>If you choose the wrong destination, wrong contract, or wrong network assumptions, the result may be very hard to undo.</p>\n<p>Ethereum.org also notes that smart-contract interactions are irreversible by default.</p>\n<p>In practice, that means operational mistakes can have permanent consequences.</p>\n<hr>\n<h2 id=\"user-content-when-settlement-becomes-a-risk-problem\">When Settlement Becomes a Risk Problem</h2>\n<p>Settlement becomes a risk problem when the post-click details are important enough to change the outcome.</p>\n<p>Examples include:</p>\n<ul>\n<li>paying a higher fee than expected;</li>\n<li>waiting longer than expected during congestion;</li>\n<li>signing the wrong contract interaction;</li>\n<li>sending funds to the wrong address or under the wrong network assumption;</li>\n<li>trusting fake support or fake recovery help from a scammer.</li>\n</ul>\n<p>Notice that none of those problems require a wrong chart idea.</p>\n<p>They come from the mechanics.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine you want to move a stablecoin from one place to another.</p>\n<p>Before you send it, you need to confirm:</p>\n<ul>\n<li>the correct asset;</li>\n<li>the correct network;</li>\n<li>the correct destination;</li>\n<li>the expected fees;</li>\n<li>the urgency of the transfer.</li>\n</ul>\n<p>If you skip those checks, the loss may come from handling, not from price action.</p>\n<p>That is the core lesson.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-the-trade-ends-at-entry\">Mistake 1: Thinking the Trade Ends at Entry</h3>\n<p>The instruction is not the same as the completed result.</p>\n<h3 id=\"user-content-mistake-2-ignoring-fees-until-the-last-second\">Mistake 2: Ignoring Fees Until the Last Second</h3>\n<p>Fees can change the cost of the action and can matter even when the transaction fails.</p>\n<h3 id=\"user-content-mistake-3-treating-address-and-network-details-as-minor\">Mistake 3: Treating Address and Network Details as Minor</h3>\n<p>Those details are often the whole point of safe settlement.</p>\n<h3 id=\"user-content-mistake-4-trusting-random-recovery-or-support-messages\">Mistake 4: Trusting Random Recovery or Support Messages</h3>\n<p>Scammers know that confused users are easier to exploit after a transfer problem.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain settlement as the step that actually finalizes a trade or transfer;",
+    "compare exchange-account updates with direct on-chain transactions;",
+    "identify how fees, delays, addresses, and wrong-network assumptions create extra risk."
+  ],
+  "quizItems": [
+    {
+      "id": "9.4-settlement-mechanics-q1",
+      "prompt": "What does settlement mean in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "The step that actually completes the trade or transfer after it is initiated"
+        },
+        {
+          "label": "B",
+          "text": "A chart pattern"
+        },
+        {
+          "label": "C",
+          "text": "A market mood"
+        },
+        {
+          "label": "D",
+          "text": "A moving-average crossover"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "The step that actually completes the trade or transfer after it is initiated"
+      },
+      "explanation": "The lesson defines settlement as the practical finalization step, not the entry click by itself.",
+      "lessonAnchor": "Settlement in plain language"
+    },
+    {
+      "id": "9.4-settlement-mechanics-q2",
+      "prompt": "What makes on-chain settlement feel riskier to many beginners?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Fees, delay, address details, and irreversible actions matter directly"
+        },
+        {
+          "label": "B",
+          "text": "Candles are smaller"
+        },
+        {
+          "label": "C",
+          "text": "Price charts disappear"
+        },
+        {
+          "label": "D",
+          "text": "Exchanges stop existing"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Fees, delay, address details, and irreversible actions matter directly"
+      },
+      "explanation": "The lesson explains that operational handling becomes part of the risk.",
+      "lessonAnchor": "When settlement becomes risk"
+    },
+    {
+      "id": "9.4-settlement-mechanics-q3",
+      "prompt": "Which checklist item belongs before sending funds on-chain?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Confirm the asset, network, address, amount, and fee assumptions"
+        },
+        {
+          "label": "B",
+          "text": "Ignore the destination address"
+        },
+        {
+          "label": "C",
+          "text": "Assume every network is interchangeable"
+        },
+        {
+          "label": "D",
+          "text": "Assume a test transfer is never useful"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Confirm the asset, network, address, amount, and fee assumptions"
+      },
+      "explanation": "The lesson ends with a settlement safety checklist focused on operational accuracy.",
+      "lessonAnchor": "Quick checklist"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "cryptoElevatedRisk",
+      "title": "Crypto And DeFi Risk Warning",
+      "tone": "danger",
+      "body": "Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. This material is educational only and is not a recommendation to buy, sell, or hold any instrument.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "antiImpersonation",
+      "title": "Anti-Impersonation Notice",
+      "tone": "danger",
+      "body": "TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and will never ask users to send funds, crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "3mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and any future callout cards"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "This material is provided for general educational and informational purposes only. It is not investment, legal, tax, or accounting advice, and it is not a recommendation or solicitation to buy, sell, or hold any instrument. Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, settlement error, operational error, and fraud risk. TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and it will never ask users to send crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action."
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": true
+    }
+  ],
+  "openQuestions": [
+    "Module 9 still requires elevated compliance review before publication, and settlement-warning language should be re-checked if product or regulatory guidance changes."
+  ],
+  "sources": [
+    {
+      "label": "Ethereum.org, Transactions",
+      "url": "https://ethereum.org/en/developers/docs/transactions/"
+    },
+    {
+      "label": "Ethereum.org, Gas and fees",
+      "url": "https://ethereum.org/en/developers/docs/gas/"
+    },
+    {
+      "label": "Ethereum.org, Introduction to smart contracts",
+      "url": "https://ethereum.org/en/developers/docs/smart-contracts/"
+    },
+    {
+      "label": "Investor.gov, Exercise Caution with Crypto Asset Securities",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-alerts/crypto-asset-securities"
+    },
+    {
+      "label": "CFTC, Use Caution When Buying Digital Coins or Tokens",
+      "url": "https://www.cftc.gov/LearnAndProtect/AdvisoriesAndArticles/caution_of_digital_currencies.html"
+    },
+    {
+      "label": "CFTC, Potential Dangers for Messaging App Users",
+      "url": "https://www.cftc.gov/PressRoom/PressReleases/9005-24"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "9.3-smart-contract-risks",
+    "title": "9.3 Smart Contract Risks",
+    "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "9.1-clob-vs-amm",
+      "title": "9.1 CLOB vs. AMM",
+      "href": "/education/module-9-crypto-and-defi/9.1-clob-vs-amm"
+    },
+    {
+      "lessonSlug": "9.2-on-chain-metrics",
+      "title": "9.2 On-Chain Metrics",
+      "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+    },
+    {
+      "lessonSlug": "9.3-smart-contract-risks",
+      "title": "9.3 Smart Contract Risks",
+      "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+    },
+    {
+      "lessonSlug": "9.4-settlement-mechanics",
+      "title": "9.4 Settlement Mechanics",
+      "href": "/education/module-9-crypto-and-defi/9.4-settlement-mechanics"
+    }
+  ]
+}

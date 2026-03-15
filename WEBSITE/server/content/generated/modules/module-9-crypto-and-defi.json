@@ -1,0 +1,76 @@
+{
+  "moduleSlug": "module-9-crypto-and-defi",
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "publicTitle": "Module 9: Crypto and DeFi",
+  "cardSummary": "A beginner-friendly crypto and DeFi extension that explains mechanisms while keeping fraud, custody, and irreversibility risks explicit.",
+  "status": "draft-ready",
+  "flags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "baseRoute": "/education/module-9-crypto-and-defi",
+  "lessonCount": 4,
+  "quizItemCount": 12,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "cryptoElevatedRisk",
+      "title": "Crypto And DeFi Risk Warning",
+      "tone": "danger",
+      "body": "Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. This material is educational only and is not a recommendation to buy, sell, or hold any instrument.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "antiImpersonation",
+      "title": "Anti-Impersonation Notice",
+      "tone": "danger",
+      "body": "TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and will never ask users to send funds, crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "9.1-clob-vs-amm",
+      "title": "9.1 CLOB Versus AMM",
+      "summary": "Two crypto apps can both show a `Buy` button and still work very differently underneath.",
+      "href": "/education/module-9-crypto-and-defi/9.1-clob-vs-amm"
+    },
+    {
+      "lessonSlug": "9.2-on-chain-metrics",
+      "title": "9.2 On-Chain Metrics",
+      "summary": "Crypto markets create a lot of public data.",
+      "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+    },
+    {
+      "lessonSlug": "9.3-smart-contract-risks",
+      "title": "9.3 Smart Contract Risks",
+      "summary": "In normal beginner trading lessons, the main risk is usually:",
+      "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+    },
+    {
+      "lessonSlug": "9.4-settlement-mechanics",
+      "title": "9.4 Settlement Mechanics",
+      "summary": "A trade is not fully finished just because you clicked `confirm`.",
+      "href": "/education/module-9-crypto-and-defi/9.4-settlement-mechanics"
+    }
+  ]
+}

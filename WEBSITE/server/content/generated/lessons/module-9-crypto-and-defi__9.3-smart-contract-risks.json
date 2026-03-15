@@ -1,0 +1,272 @@
+{
+  "moduleSlug": "module-9-crypto-and-defi",
+  "moduleTitle": "Module 9: Crypto and DeFi",
+  "moduleBaseRoute": "/education/module-9-crypto-and-defi",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "9.3-smart-contract-risks",
+  "title": "9.3 Smart Contract Risks",
+  "summary": "In normal beginner trading lessons, the main risk is usually:",
+  "bodyHtml": "<h1 id=\"user-content-93-smart-contract-risks\">9.3 Smart Contract Risks</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>In normal beginner trading lessons, the main risk is usually:</p>\n<p><code>the price moved against me</code></p>\n<p>In DeFi, that is only one layer of risk.</p>\n<p>You can be right about the market direction and still lose money because:</p>\n<ul>\n<li>the contract code had a flaw;</li>\n<li>the protocol depended on bad outside data;</li>\n<li>the bridge or wallet flow failed;</li>\n<li>you approved the wrong contract;</li>\n<li>you followed a scammer into a fake app or chat group.</li>\n</ul>\n<p>That is why crypto and DeFi need stronger caution than the core curriculum.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what smart-contract risk means in plain language;</li>\n<li>identify several common non-price risks in DeFi;</li>\n<li>understand why software risk and scam risk must be considered before trade size.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-smart-contract-risk-means\">What Smart-Contract Risk Means</h2>\n<p>Ethereum.org explains that a smart contract is a program on the blockchain that runs as programmed.</p>\n<p>That sounds efficient, but it creates a key beginner risk:</p>\n<p>if the program has a flaw, bad rule, or unsafe connection to outside systems, the damage can happen automatically.</p>\n<p>So <strong>smart-contract risk</strong> means:</p>\n<p>the software and its connected infrastructure can create loss, even if the market itself did not move much.</p>\n<hr>\n<h2 id=\"user-content-five-common-risk-buckets\">Five Common Risk Buckets</h2>\n<table>\n<thead>\n<tr>\n<th>Risk type</th>\n<th>Plain-language meaning</th>\n<th>Why beginners should care</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Code risk</strong></td>\n<td>The contract logic may contain a bug or exploit path</td>\n<td>Funds can be drained, frozen, or misrouted</td>\n</tr>\n<tr>\n<td><strong>Oracle risk</strong></td>\n<td>The protocol depends on outside data feeds</td>\n<td>Wrong data can trigger wrong actions such as liquidations</td>\n</tr>\n<tr>\n<td><strong>Bridge risk</strong></td>\n<td>Assets move across chains through extra infrastructure</td>\n<td>More moving parts usually mean more failure points</td>\n</tr>\n<tr>\n<td><strong>Approval risk</strong></td>\n<td>You sign permission for a contract to spend tokens</td>\n<td>A wrong or compromised spender can abuse that permission</td>\n</tr>\n<tr>\n<td><strong>Governance or rule-change risk</strong></td>\n<td>Protocol settings or control can change</td>\n<td>Risk conditions can shift after you join</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A five-row table listing code risk, oracle risk, bridge risk, approval risk, and governance or rule-change risk, along with why each matters to beginners.)</em></p>\n<hr>\n<h2 id=\"user-content-oracle-risk-in-plain-language\">Oracle Risk in Plain Language</h2>\n<p>Blockchains do not automatically know off-chain facts such as a market price or event result.</p>\n<p>Ethereum.org explains that <strong>oracles</strong> bring outside data to smart contracts.</p>\n<p>That is useful, but it also means the protocol depends on a data pipeline.</p>\n<p>If that data is late, wrong, or manipulated, the protocol may react badly.</p>\n<p>For example:</p>\n<ul>\n<li>a lending app may think your collateral is worth less than it really is;</li>\n<li>a liquidation rule may trigger at the wrong time.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-bridge-risk-in-plain-language\">Bridge Risk in Plain Language</h2>\n<p>Bridges help move assets or messages between chains.</p>\n<p>That sounds convenient, but it also adds another layer of infrastructure.</p>\n<p>More infrastructure means more places where something can go wrong:</p>\n<ul>\n<li>the design may be weak;</li>\n<li>the operators or validation rules may fail;</li>\n<li>the assumptions may be different from what the user thinks.</li>\n</ul>\n<p>For a beginner, the lesson is not to memorize bridge architecture.</p>\n<p>It is to understand that cross-chain movement is not a free extra feature.\nIt is extra risk.</p>\n<hr>\n<h2 id=\"user-content-approval-risk-is-real-permission-risk\">Approval Risk Is Real Permission Risk</h2>\n<p>Some DeFi apps ask you to <strong>approve</strong> a contract before it can move your tokens.</p>\n<p>OpenZeppelin documents that ERC-20 approvals create an <strong>allowance</strong> for a spender.</p>\n<p>In plain language, that means:</p>\n<p>you are granting permission.</p>\n<p>That permission is not the same as <code>just opening the app</code>.</p>\n<p>If you approve:</p>\n<ul>\n<li>the wrong contract;</li>\n<li>a fake copy of a real app;</li>\n<li>a contract that later becomes compromised;</li>\n</ul>\n<p>you may be exposing tokens to loss.</p>\n<p>That is why wallet prompts should be read carefully, not clicked through quickly.</p>\n<hr>\n<h2 id=\"user-content-scams-and-impersonation-make-the-risk-worse\">Scams and Impersonation Make the Risk Worse</h2>\n<p>CFTC warnings on messaging-app scams matter here.</p>\n<p>Scammers often mix:</p>\n<ul>\n<li>fake trading groups;</li>\n<li>guaranteed-return claims;</li>\n<li>fake support staff;</li>\n<li>fake protocol links;</li>\n<li>pressure to connect a wallet or sign something quickly.</li>\n</ul>\n<p>A beginner should treat unsolicited crypto contact as a warning sign, not a shortcut.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Suppose you think ETH will go up and you use a DeFi lending or swapping app.</p>\n<p>Your market view may be correct.</p>\n<p>But if:</p>\n<ul>\n<li>the oracle reports bad data;</li>\n<li>the contract has a serious flaw;</li>\n<li>you approved a malicious spender;</li>\n</ul>\n<p>you can still lose money.</p>\n<p>That means your trade risk was not only about direction.\nIt was also about software and permissions.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-decentralized-means-safe\">Mistake 1: Thinking Decentralized Means Safe</h3>\n<p>Decentralized does not mean risk-free.\nIt often means risk is moved to software, wallet handling, and user responsibility.</p>\n<h3 id=\"user-content-mistake-2-treating-audits-or-popularity-as-guarantees\">Mistake 2: Treating Audits or Popularity as Guarantees</h3>\n<p>Even well-known systems can still carry risk.</p>\n<h3 id=\"user-content-mistake-3-clicking-approvals-too-quickly\">Mistake 3: Clicking Approvals Too Quickly</h3>\n<p>An approval is permission, not decoration.</p>\n<h3 id=\"user-content-mistake-4-trusting-random-messages-groups-or-support-accounts\">Mistake 4: Trusting Random Messages, Groups, or Support Accounts</h3>\n<p>Scammers often use urgency, fake profits, and impersonation.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain smart-contract risk in plain language;",
+    "identify major non-price risks that can damage a DeFi trade or wallet;",
+    "separate software and operational risk from ordinary market-direction risk."
+  ],
+  "quizItems": [
+    {
+      "id": "9.3-smart-contract-risks-q1",
+      "prompt": "What does smart-contract risk mean in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "The software or related infrastructure can fail, be exploited, or behave in a way that harms users"
+        },
+        {
+          "label": "B",
+          "text": "The chart can pull back"
+        },
+        {
+          "label": "C",
+          "text": "A moving average can flatten"
+        },
+        {
+          "label": "D",
+          "text": "Every token must go to zero"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "The software or related infrastructure can fail, be exploited, or behave in a way that harms users"
+      },
+      "explanation": "The lesson separates software and infrastructure risk from ordinary price movement.",
+      "lessonAnchor": "What smart-contract risk means"
+    },
+    {
+      "id": "9.3-smart-contract-risks-q2",
+      "prompt": "Which example is a non-price DeFi risk?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Oracle failure"
+        },
+        {
+          "label": "B",
+          "text": "A normal pullback in trend"
+        },
+        {
+          "label": "C",
+          "text": "A slower RSI reading"
+        },
+        {
+          "label": "D",
+          "text": "A chart retest"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Oracle failure"
+      },
+      "explanation": "The lesson explains that DeFi depends on software and data inputs such as oracles.",
+      "lessonAnchor": "Five common risk buckets"
+    },
+    {
+      "id": "9.3-smart-contract-risks-q3",
+      "prompt": "Why can a token approval create risk?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because approvals can grant a spender permission over tokens if the user signs for the wrong or compromised contract"
+        },
+        {
+          "label": "B",
+          "text": "Because approvals remove all need for security"
+        },
+        {
+          "label": "C",
+          "text": "Because approvals guarantee profit"
+        },
+        {
+          "label": "D",
+          "text": "Because approvals change the market trend"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because approvals can grant a spender permission over tokens if the user signs for the wrong or compromised contract"
+      },
+      "explanation": "The lesson explains that approvals are permissions, not harmless clicks.",
+      "lessonAnchor": "Approval risk"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "cryptoElevatedRisk",
+      "title": "Crypto And DeFi Risk Warning",
+      "tone": "danger",
+      "body": "Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. This material is educational only and is not a recommendation to buy, sell, or hold any instrument.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "antiImpersonation",
+      "title": "Anti-Impersonation Notice",
+      "tone": "danger",
+      "body": "TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and will never ask users to send funds, crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "3mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and any future excerpts"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "This material is provided for general educational and informational purposes only. It is not investment, legal, tax, or accounting advice, and it is not a recommendation or solicitation to buy, sell, or hold any instrument. Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, approval risk, operational error, and fraud risk. TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and it will never ask users to send crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action."
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": true
+    }
+  ],
+  "openQuestions": [
+    "Module 9 still requires elevated compliance review before publication, especially around approval-risk and scam-language requirements."
+  ],
+  "sources": [
+    {
+      "label": "Ethereum.org, Introduction to smart contracts",
+      "url": "https://ethereum.org/en/developers/docs/smart-contracts/"
+    },
+    {
+      "label": "Ethereum.org, Oracles",
+      "url": "https://ethereum.org/en/developers/docs/oracles/"
+    },
+    {
+      "label": "Ethereum.org, Bridges",
+      "url": "https://ethereum.org/en/developers/docs/bridges/"
+    },
+    {
+      "label": "OpenZeppelin Docs, ERC20",
+      "url": "https://docs.openzeppelin.com/contracts/5.x/api/token/ERC20"
+    },
+    {
+      "label": "Investor.gov, Exercise Caution with Crypto Asset Securities",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-alerts/crypto-asset-securities"
+    },
+    {
+      "label": "CFTC, Use Caution When Buying Digital Coins or Tokens",
+      "url": "https://www.cftc.gov/LearnAndProtect/AdvisoriesAndArticles/caution_of_digital_currencies.html"
+    },
+    {
+      "label": "CFTC, Potential Dangers for Messaging App Users",
+      "url": "https://www.cftc.gov/PressRoom/PressReleases/9005-24"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "9.2-on-chain-metrics",
+    "title": "9.2 On-Chain Metrics",
+    "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+  },
+  "nextLesson": {
+    "lessonSlug": "9.4-settlement-mechanics",
+    "title": "9.4 Settlement Mechanics",
+    "href": "/education/module-9-crypto-and-defi/9.4-settlement-mechanics"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "9.1-clob-vs-amm",
+      "title": "9.1 CLOB vs. AMM",
+      "href": "/education/module-9-crypto-and-defi/9.1-clob-vs-amm"
+    },
+    {
+      "lessonSlug": "9.2-on-chain-metrics",
+      "title": "9.2 On-Chain Metrics",
+      "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+    },
+    {
+      "lessonSlug": "9.3-smart-contract-risks",
+      "title": "9.3 Smart Contract Risks",
+      "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+    },
+    {
+      "lessonSlug": "9.4-settlement-mechanics",
+      "title": "9.4 Settlement Mechanics",
+      "href": "/education/module-9-crypto-and-defi/9.4-settlement-mechanics"
+    }
+  ]
+}

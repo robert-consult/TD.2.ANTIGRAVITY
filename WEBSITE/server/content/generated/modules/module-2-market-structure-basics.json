@@ -1,0 +1,46 @@
+{
+  "moduleSlug": "module-2-market-structure-basics",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 2: Market Structure Basics",
+  "cardSummary": "Learn how trends, key levels, and session liquidity shape the conditions around a trade before risk is placed.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-2-market-structure-basics",
+  "lessonCount": 3,
+  "quizItemCount": 9,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "2.1-defining-the-trend",
+      "title": "2.1 Defining the Trend",
+      "summary": "Beginners often use the word \"trend\" to mean \"price moved fast.\"",
+      "href": "/education/module-2-market-structure-basics/2.1-defining-the-trend"
+    },
+    {
+      "lessonSlug": "2.2-support-resistance-key-levels",
+      "title": "2.2 Support, Resistance, and Key Levels",
+      "summary": "Many beginners fill a chart with lines and then expect every line to act like a wall.",
+      "href": "/education/module-2-market-structure-basics/2.2-support-resistance-key-levels"
+    },
+    {
+      "lessonSlug": "2.3-session-overlaps-liquidity",
+      "title": "2.3 Session Overlaps and Liquidity",
+      "summary": "Markets are global, but market activity is not evenly spread across every hour of the day.",
+      "href": "/education/module-2-market-structure-basics/2.3-session-overlaps-liquidity"
+    }
+  ]
+}

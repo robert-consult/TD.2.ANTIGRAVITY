@@ -18,7 +18,11 @@ The website server defaults to `http://localhost:5001`. Override it with `PORT` 
 |-------|------|-------------|
 | `/` | Home | Hero, features, TradingView ticker tape, external auth CTA buttons |
 | `/dashboard` | Markets | Live TradingView charts, market cards by category |
-| `/education` | Education | Website-owned education modules |
+| `/education` | Education catalog | Core curriculum, optional extensions, and platform-guide callout |
+| `/education/:moduleSlug` | Module | Module landing page with lesson list, flags, and disclosures |
+| `/education/:moduleSlug/:lessonSlug` | Lesson | GitBook-style lesson page with inline quiz and disclosures |
+| `/platform-guide` | Platform Guide | Module 10 overview for the authenticated app guide |
+| `/platform-guide/:lessonSlug` | Platform lesson | Platform-guide lesson page with screenshot placeholders |
 | `/contact` | Contact | Contact form (POST to `/api/contact`) |
 
 ## API Endpoints
@@ -26,7 +30,12 @@ The website server defaults to `http://localhost:5001`. Override it with `PORT` 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/status` | GET | Health check |
-| `/api/education/modules` | GET | Returns website-owned education content |
+| `/api/education/catalog` | GET | Returns the grouped education catalog for Modules 1-9 |
+| `/api/education/modules/:moduleSlug` | GET | Returns module landing data for Modules 1-9 |
+| `/api/education/lessons/:moduleSlug/:lessonSlug` | GET | Returns lesson payloads for Modules 1-9 |
+| `/api/platform-guide` | GET | Returns Module 10 overview payload |
+| `/api/platform-guide/lessons/:lessonSlug` | GET | Returns Module 10 lesson payloads |
+| `/api/education/modules` | GET | Legacy summary alias for module cards |
 | `/api/contact` | POST | Validates and forwards contact form submissions |
 
 ## App Link Contract
@@ -47,6 +56,13 @@ npm run build
 
 Production output goes to `dist/public/` (static assets) and `dist/index.js` (server).
 
+The education surface is generated before dev/build from:
+
+- `/home/bcodex/PUBLIC WEBSITE/integration_enhancements_framework`
+- `/home/bcodex/PUBLIC WEBSITE/education_module_development`
+
+Generated website-owned payloads are written into `server/content/generated/`.
+
 ## Environment
 
 - `PORT`
@@ -60,7 +76,8 @@ Production output goes to `dist/public/` (static assets) and `dist/index.js` (se
 - **Frontend:** React 18, Wouter, TanStack Query, Framer Motion, TailwindCSS
 - **UI Components:** shadcn/ui (Radix primitives)
 - **TradingView:** Embedded widgets (chart, ticker tape, market cards)
-- **Server:** Express (minimal — serves static files + 3 API routes)
+- **Server:** Express (static hosting + education/platform-guide JSON APIs)
+- **Content Pipeline:** build-time markdown sync and verification scripts
 - **Build:** Vite, TypeScript, esbuild
 
 ## Architecture

@@ -1,0 +1,240 @@
+{
+  "moduleSlug": "module-6-macro-and-event-awareness",
+  "moduleTitle": "Module 6: Macro and Event Awareness",
+  "moduleBaseRoute": "/education/module-6-macro-and-event-awareness",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner",
+    "Freshness Reviewed March 12, 2026",
+    "Re-review by June 12, 2026"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "6.1-federal-reserve-interest-rates",
+  "title": "6.1 Federal Reserve and Interest Rates",
+  "summary": "Macro news can sound far away from the chart in front of you.",
+  "bodyHtml": "<h1 id=\"user-content-61-federal-reserve-and-interest-rates\">6.1 Federal Reserve and Interest Rates</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Macro news can sound far away from the chart in front of you.</p>\n<p>But if you trade products such as EUR/USD, gold, the S&#x26;P 500, or Treasury bonds, changes in interest-rate expectations can affect your market quickly.</p>\n<p>You do not need an economics degree to use this lesson well.</p>\n<p>You only need to understand one core idea:</p>\n<p><code>interest-rate expectations are one of the main forces that shape borrowing costs and asset prices across the financial system</code></p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what the Federal Reserve is trying to do in plain language;</li>\n<li>describe how rate expectations can affect bonds, the U.S. dollar, stocks, gold, and oil;</li>\n<li>use the FOMC calendar as a risk-timing tool instead of a prediction tool.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-the-fed-actually-does\">What the Fed Actually Does</h2>\n<p>The <strong>Federal Reserve</strong>, or <strong>Fed</strong>, is the central bank of the United States.</p>\n<p>On its monetary policy page, the Fed says its actions and communications are meant to promote:</p>\n<ul>\n<li>maximum employment;</li>\n<li>stable prices;</li>\n<li>moderate long-term interest rates.</li>\n</ul>\n<p>For a beginner, the easiest way to think about this is:</p>\n<p><code>the Fed helps set the tone for the cost of borrowing money in the U.S.</code></p>\n<p>That matters globally because U.S. rates influence:</p>\n<ul>\n<li>bond yields;</li>\n<li>the value of the U.S. dollar;</li>\n<li>borrowing conditions for companies and households;</li>\n<li>the way investors compare risky assets with safer ones.</li>\n</ul>\n<p>The Fed is not the only central bank that matters. The same logic also applies to major institutions such as the European Central Bank and the Bank of England. The Fed gets extra attention because the U.S. dollar is so important in global trade and finance.</p>\n<hr>\n<h2 id=\"user-content-three-terms-you-need\">Three Terms You Need</h2>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n<th>Why traders care</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Interest-rate decision</strong></td>\n<td>A choice to raise, lower, or hold the policy rate</td>\n<td>It can change market expectations quickly</td>\n</tr>\n<tr>\n<td><strong>FOMC</strong></td>\n<td>The Federal Open Market Committee, the Fed group that sets policy</td>\n<td>This is the meeting traders watch on the calendar</td>\n</tr>\n<tr>\n<td><strong>Yield</strong></td>\n<td>The return investors demand from assets such as bonds</td>\n<td>Yield moves can spill into currencies, stocks, and gold</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A three-row table explaining interest-rate decision, FOMC, and yield in simple language for beginners.)</em></p>\n<hr>\n<h2 id=\"user-content-why-rates-move-more-than-one-market\">Why Rates Move More Than One Market</h2>\n<p>Interest rates do not only matter to bond traders.</p>\n<p>They can affect several markets at once because they change how investors compare:</p>\n<ul>\n<li>holding cash;</li>\n<li>owning bonds;</li>\n<li>buying stocks;</li>\n<li>holding assets such as gold that do not pay income;</li>\n<li>pricing future growth and demand in markets such as oil.</li>\n</ul>\n<p>Here is a simple cross-asset view:</p>\n<table>\n<thead>\n<tr>\n<th>Market</th>\n<th>What higher-rate expectations can often do</th>\n<th>Why</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Bonds</strong></td>\n<td>Pressure bond prices and lift yields</td>\n<td>Older fixed payments look less attractive when new rates are higher</td>\n</tr>\n<tr>\n<td><strong>U.S. dollar</strong></td>\n<td>Support the dollar</td>\n<td>Higher expected U.S. yields can attract capital</td>\n</tr>\n<tr>\n<td><strong>Stocks</strong></td>\n<td>Pressure growth-sensitive shares and indices</td>\n<td>Higher discount rates and borrowing costs can hurt valuations</td>\n</tr>\n<tr>\n<td><strong>Gold</strong></td>\n<td>Create headwinds for gold</td>\n<td>Higher yields can raise the opportunity cost of holding a non-income asset</td>\n</tr>\n<tr>\n<td><strong>Oil / energy</strong></td>\n<td>Influence demand expectations and dollar-sensitive pricing</td>\n<td>Slower-growth fears or a stronger dollar can pressure oil, while easier policy can support demand-sensitive assets</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A five-row table showing common cross-asset effects of higher rate expectations on bonds, the U.S. dollar, stocks, gold, and oil.)</em></p>\n<p>These are tendencies, not guarantees.</p>\n<p>Markets move based on expectations, surprises, positioning, and broader risk mood. A rate hold can still move markets sharply if traders expected a cut. A hike can cause less damage than expected if the market had already priced it in.</p>\n<hr>\n<h2 id=\"user-content-the-calendar-matters-more-than-prediction\">The Calendar Matters More Than Prediction</h2>\n<p>A disciplined beginner does not try to outguess every Fed sentence.</p>\n<p>A disciplined beginner asks:</p>\n<p><code>When is the event, and should I reduce risk before it hits?</code></p>\n<p>The Fed says the FOMC holds <strong>eight regularly scheduled meetings during the year</strong>. As of <strong>March 12, 2026</strong>, the 2026 FOMC page lists eight scheduled meetings, and the next meeting after this lesson date is <strong>March 17-18, 2026</strong>.</p>\n<p>The statement on a decision day is commonly released at <strong>2:00 p.m. U.S. Eastern Time</strong>. Always confirm the official calendar because schedules, statements, and related materials are published there.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine you trade gold.</p>\n<p>It is 1:50 p.m. U.S. Eastern Time on an FOMC day. You see what looks like a breakout and feel tempted to buy immediately.</p>\n<p>Now stop and ask:</p>\n<ol>\n<li>Is this breakout still worth taking if a major policy statement is due in 10 minutes?</li>\n<li>If the statement surprises the market, could gold move sharply before my order fills cleanly?</li>\n<li>Am I trading my chart plan, or am I drifting into a news gamble?</li>\n</ol>\n<p>The disciplined answer for many beginners is simple:</p>\n<ul>\n<li>do not open a fresh trade seconds before the announcement;</li>\n<li>wait for the statement;</li>\n<li>let the first reaction settle;</li>\n<li>then study the new structure.</li>\n</ul>\n<p>That is not being timid. That is professional timing.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-only-bond-traders-need-to-care\">Mistake 1: Thinking Only Bond Traders Need to Care</h3>\n<p>Rates can affect currencies, stocks, commodities, and volatility.</p>\n<h3 id=\"user-content-mistake-2-treating-the-fed-as-a-prediction-game\">Mistake 2: Treating the Fed as a Prediction Game</h3>\n<p>The lesson is about risk awareness, not perfect forecasting.</p>\n<h3 id=\"user-content-mistake-3-ignoring-time-zones\">Mistake 3: Ignoring Time Zones</h3>\n<p>Always convert event time to your own local time before the session starts.</p>\n<h3 id=\"user-content-mistake-4-treating-every-reaction-as-permanent\">Mistake 4: Treating Every Reaction as Permanent</h3>\n<p>The first move after a statement is not always the lasting move.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain in plain language what the Federal Reserve is trying to do;",
+    "describe how rate expectations can influence bonds, the U.S. dollar, stocks/indices, gold, and oil;",
+    "use the FOMC calendar as a risk-management tool rather than a prediction tool."
+  ],
+  "quizItems": [
+    {
+      "id": "6.1-federal-reserve-interest-rates-q1",
+      "prompt": "Which statement best describes the Federal Reserve in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "It sets the exact price of every asset"
+        },
+        {
+          "label": "B",
+          "text": "It uses monetary policy and communication to pursue maximum employment and stable prices"
+        },
+        {
+          "label": "C",
+          "text": "It only matters to bond traders"
+        },
+        {
+          "label": "D",
+          "text": "It guarantees calm markets"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "It uses monetary policy and communication to pursue maximum employment and stable prices"
+      },
+      "explanation": "The lesson frames the Fed as a central bank whose policy stance influences financial conditions, not as a direct controller of every market price.",
+      "lessonAnchor": "What the Fed actually does"
+    },
+    {
+      "id": "6.1-federal-reserve-interest-rates-q2",
+      "prompt": "Why can a Fed decision affect more than one market at once?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because rates can influence yields, the dollar, stock valuations, and the appeal of holding cash or gold"
+        },
+        {
+          "label": "B",
+          "text": "Because every market closes during the statement"
+        },
+        {
+          "label": "C",
+          "text": "Because only U.S. stocks trade on Fed days"
+        },
+        {
+          "label": "D",
+          "text": "Because the Fed controls commodity production"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because rates can influence yields, the dollar, stock valuations, and the appeal of holding cash or gold"
+      },
+      "explanation": "The lesson teaches cross-asset transmission, not a single-market effect.",
+      "lessonAnchor": "Why rates move more than one market"
+    },
+    {
+      "id": "6.1-federal-reserve-interest-rates-q3",
+      "prompt": "What is the best beginner use of an FOMC calendar?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Predict the exact first candle"
+        },
+        {
+          "label": "B",
+          "text": "Know when conditions may become unstable and avoid poor timing"
+        },
+        {
+          "label": "C",
+          "text": "Ignore it unless you trade bonds"
+        },
+        {
+          "label": "D",
+          "text": "Increase size before the event"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Know when conditions may become unstable and avoid poor timing"
+      },
+      "explanation": "The calendar is used for risk timing and preparation, not certainty.",
+      "lessonAnchor": "The calendar matters more than prediction"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "macroFreshness",
+      "title": "Freshness Notice",
+      "tone": "warning",
+      "body": "This lesson contains time-sensitive market context verified on March 12, 2026. Review again by June 12, 2026 before publication or reuse.",
+      "placements": [
+        "top"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner",
+    "Freshness Reviewed March 12, 2026",
+    "Re-review by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "3mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near event examples, date references, and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; macro-event examples illustrate preparation and risk awareness, not trade recommendations or forecasts"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "re-open close to publication to confirm the latest official FOMC schedule and any dated examples used in the lesson."
+  ],
+  "sources": [
+    {
+      "label": "Federal Reserve monetary policy overview",
+      "url": "https://www.federalreserve.gov/monetarypolicy.htm"
+    },
+    {
+      "label": "Federal Reserve FOMC calendars and 2026 schedule",
+      "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "label": "January 28, 2026 FOMC statement release page",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260128a.htm"
+    },
+    {
+      "label": "ECB monetary policy explainer",
+      "url": "https://www.ecb.europa.eu/ecb-and-you/explainers/monetary-policy/html/index.en.html"
+    },
+    {
+      "label": "Investor.gov bulletin on interest-rate risk and bond prices",
+      "url": "https://www.investor.gov/sites/default/files/ib_interestraterisk.pdf"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "6.2-nfp-cpi-tactics",
+    "title": "6.2 NFP and CPI Tactics",
+    "href": "/education/module-6-macro-and-event-awareness/6.2-nfp-cpi-tactics"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "6.1-federal-reserve-interest-rates",
+      "title": "6.1 Federal Reserve and Interest Rates",
+      "href": "/education/module-6-macro-and-event-awareness/6.1-federal-reserve-interest-rates"
+    },
+    {
+      "lessonSlug": "6.2-nfp-cpi-tactics",
+      "title": "6.2 NFP and CPI Tactics",
+      "href": "/education/module-6-macro-and-event-awareness/6.2-nfp-cpi-tactics"
+    },
+    {
+      "lessonSlug": "6.3-correlated-assets",
+      "title": "6.3 Correlated Assets",
+      "href": "/education/module-6-macro-and-event-awareness/6.3-correlated-assets"
+    }
+  ]
+}

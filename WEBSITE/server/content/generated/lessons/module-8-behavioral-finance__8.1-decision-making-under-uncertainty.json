@@ -1,0 +1,227 @@
+{
+  "moduleSlug": "module-8-behavioral-finance",
+  "moduleTitle": "Module 8: Behavioral Finance",
+  "moduleBaseRoute": "/education/module-8-behavioral-finance",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "8.1-decision-making-under-uncertainty",
+  "title": "8.1 Decision Making Under Uncertainty",
+  "summary": "Many people grow up thinking:",
+  "bodyHtml": "<h1 id=\"user-content-81-decision-making-under-uncertainty\">8.1 Decision Making Under Uncertainty</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Many people grow up thinking:</p>\n<p><code>good decision = good result</code></p>\n<p>That works in some parts of life.</p>\n<p>Trading is harder.</p>\n<p>In markets, you can:</p>\n<ul>\n<li>follow the rules;</li>\n<li>size the trade correctly;</li>\n<li>wait for a solid setup;</li>\n<li>still lose on that one trade.</li>\n</ul>\n<p>That does not automatically mean the decision was bad.</p>\n<p>If beginners do not understand this, they often become unstable very quickly:</p>\n<ul>\n<li>one loss makes them abandon a good process;</li>\n<li>one win makes them trust a bad process.</li>\n</ul>\n<p>Both reactions are dangerous.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain why a good process can still produce a loss;</li>\n<li>separate process quality from single-trade outcome quality;</li>\n<li>name what a trader can control and what a trader cannot control.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-process-and-outcome-are-not-the-same-thing\">Process and Outcome Are Not the Same Thing</h2>\n<p>A <strong>process</strong> is the method you used:</p>\n<ul>\n<li>your setup rules;</li>\n<li>your position size;</li>\n<li>your entry and exit plan;</li>\n<li>your discipline.</li>\n</ul>\n<p>An <strong>outcome</strong> is what happened after the trade:</p>\n<ul>\n<li>win;</li>\n<li>loss;</li>\n<li>small gain;</li>\n<li>stopped out;</li>\n<li>target reached.</li>\n</ul>\n<p>In uncertain markets, those two things do not always match in the short term.</p>\n<hr>\n<h2 id=\"user-content-a-simple-process-outcome-table\">A Simple Process-Outcome Table</h2>\n<table>\n<thead>\n<tr>\n<th>Situation</th>\n<th>What happened</th>\n<th>What the trader should learn</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Good process, good outcome</strong></td>\n<td>Rules were followed and the trade won</td>\n<td>Keep the discipline and still review calmly</td>\n</tr>\n<tr>\n<td><strong>Good process, bad outcome</strong></td>\n<td>Rules were followed and the trade lost</td>\n<td>Accept that losses are part of uncertain markets</td>\n</tr>\n<tr>\n<td><strong>Bad process, good outcome</strong></td>\n<td>Rules were broken and the trade still won</td>\n<td>Do not let luck train bad habits</td>\n</tr>\n<tr>\n<td><strong>Bad process, bad outcome</strong></td>\n<td>Rules were broken and the trade lost</td>\n<td>Fix the process before thinking about money again</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table showing how good or bad process can combine with winning or losing outcomes, plus the lesson each situation should teach.)</em></p>\n<p>This table is not theory for one market only.</p>\n<p>It can describe:</p>\n<ul>\n<li>a careful EUR/USD trade that still loses after a surprise dollar move;</li>\n<li>a disciplined Nasdaq trade that still fails after a rate shock;</li>\n<li>a well-planned gold trade that loses when the market focus changes;</li>\n<li>a bad Brent crude trade that wins once because of luck.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-good-process-and-bad-outcome\">Good Process and Bad Outcome</h2>\n<p>Imagine this trade:</p>\n<ul>\n<li>the trend is clear;</li>\n<li>the entry follows your checklist;</li>\n<li>the stop is placed where the plan says it should be;</li>\n<li>the size fits your risk rule.</li>\n</ul>\n<p>Then unexpected news hits the market and your stop is triggered.</p>\n<p>The trade lost.\nBut the process may still have been good.</p>\n<p>That matters because beginners often make the wrong conclusion:</p>\n<p><code>I lost, so my whole method must be broken</code></p>\n<p>That is not always true.</p>\n<p>Sometimes the market simply delivered one losing result inside a larger uncertain process.</p>\n<hr>\n<h2 id=\"user-content-bad-process-and-good-outcome\">Bad Process and Good Outcome</h2>\n<p>This is the more dangerous trap.</p>\n<p>Imagine a trader:</p>\n<ul>\n<li>ignores the checklist;</li>\n<li>enters from boredom;</li>\n<li>risks too much;</li>\n<li>wins anyway.</li>\n</ul>\n<p>The account balance went up.\nBut the process was weak.</p>\n<p>If the trader learns the wrong lesson from that win, the next bad decision may cost much more.</p>\n<p>Luck can hide bad habits.</p>\n<hr>\n<h2 id=\"user-content-what-you-can-control\">What You Can Control</h2>\n<p>You cannot control:</p>\n<ul>\n<li>the next headline;</li>\n<li>the next candle;</li>\n<li>what other traders do;</li>\n<li>whether one trade wins or loses.</li>\n</ul>\n<p>You can control:</p>\n<ul>\n<li>whether the setup matches your rules;</li>\n<li>how much you risk;</li>\n<li>whether you follow the plan;</li>\n<li>whether you review the trade honestly.</li>\n</ul>\n<p>That is why good traders focus on process first.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Suppose your plan says:</p>\n<ul>\n<li>risk <code>1%</code>;</li>\n<li>buy only after a pullback;</li>\n<li>place the stop below a clear structure point.</li>\n</ul>\n<p>You follow the plan exactly on a trade in EUR/USD, a stock-index product, gold, or Brent crude.\nThe trade still loses.</p>\n<p>The right review question is not:</p>\n<p><code>why did the market betray me?</code></p>\n<p>The better question is:</p>\n<p><code>did I follow a sound process?</code></p>\n<p>If the answer is yes, the loss may be normal.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-treating-every-loss-as-proof-of-failure\">Mistake 1: Treating Every Loss as Proof of Failure</h3>\n<p>One loss does not automatically mean the idea or method is useless.</p>\n<h3 id=\"user-content-mistake-2-treating-every-win-as-proof-of-skill\">Mistake 2: Treating Every Win as Proof of Skill</h3>\n<p>Short-term wins can come from luck, poor discipline, or both.</p>\n<h3 id=\"user-content-mistake-3-trying-to-control-the-uncontrollable\">Mistake 3: Trying to Control the Uncontrollable</h3>\n<p>Risk management controls exposure.\nIt does not force the market to reward you immediately.</p>\n<h3 id=\"user-content-mistake-4-reviewing-emotion-before-reviewing-process\">Mistake 4: Reviewing Emotion Before Reviewing Process</h3>\n<p>Feelings matter, but the first question should still be:</p>\n<p><code>did I follow the plan?</code></p>\n<hr>",
+  "learningOutcomes": [
+    "explain why uncertain environments can produce good decisions with bad short-term outcomes;",
+    "distinguish process quality from single-trade outcome quality;",
+    "identify what a trader can control and what a trader cannot control."
+  ],
+  "quizItems": [
+    {
+      "id": "8.1-decision-making-under-uncertainty-q1",
+      "prompt": "What is the main lesson about uncertainty in trading?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "A good process can still lead to a losing trade"
+        },
+        {
+          "label": "B",
+          "text": "A good process guarantees a win"
+        },
+        {
+          "label": "C",
+          "text": "Every losing trade proves the setup was bad"
+        },
+        {
+          "label": "D",
+          "text": "Charts remove uncertainty"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "A good process can still lead to a losing trade"
+      },
+      "explanation": "The lesson teaches that outcome and decision quality are not identical in uncertain markets.",
+      "lessonAnchor": "Good process and bad outcome"
+    },
+    {
+      "id": "8.1-decision-making-under-uncertainty-q2",
+      "prompt": "Which item is mostly under the trader's control?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "The next market move"
+        },
+        {
+          "label": "B",
+          "text": "The news headline after entry"
+        },
+        {
+          "label": "C",
+          "text": "Position size and rule-following"
+        },
+        {
+          "label": "D",
+          "text": "The exact final outcome"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "Position size and rule-following"
+      },
+      "explanation": "The lesson separates controllable actions such as size and execution from uncontrollable market results.",
+      "lessonAnchor": "What you can control"
+    },
+    {
+      "id": "8.1-decision-making-under-uncertainty-q3",
+      "prompt": "After a difficult trade, what should be reviewed first?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Whether the process was followed"
+        },
+        {
+          "label": "B",
+          "text": "Whether luck should be blamed only"
+        },
+        {
+          "label": "C",
+          "text": "Whether size should be doubled next time"
+        },
+        {
+          "label": "D",
+          "text": "Whether the journal should be ignored"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Whether the process was followed"
+      },
+      "explanation": "The lesson teaches process-first review instead of outcome-first self-judgment.",
+      "lessonAnchor": "Common beginner mistakes"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "n/a"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and summary cards"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; behavioral-finance concepts improve review quality but do not guarantee future results"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adds newer behavioral-finance primary sources."
+  ],
+  "sources": [
+    {
+      "label": "Daniel Kahneman, Prize Lecture",
+      "url": "https://www.nobelprize.org/prizes/economic-sciences/2002/kahneman/lecture/"
+    },
+    {
+      "label": "Daniel Kahneman, Facts",
+      "url": "https://www.nobelprize.org/prizes/economic-sciences/2002/kahneman/facts/"
+    },
+    {
+      "label": "Investor.gov, Investor Bulletin: Behavioral Patterns of U.S. Investors",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-72"
+    },
+    {
+      "label": "FINRA, Financial Tips for New Investors",
+      "url": "https://www.finra.org/investors/insights/tips-new-investors"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "8.2-cognitive-biases",
+    "title": "8.2 Cognitive Biases",
+    "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "8.1-decision-making-under-uncertainty",
+      "title": "8.1 Decision-Making Under Uncertainty",
+      "href": "/education/module-8-behavioral-finance/8.1-decision-making-under-uncertainty"
+    },
+    {
+      "lessonSlug": "8.2-cognitive-biases",
+      "title": "8.2 Cognitive Biases",
+      "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+    },
+    {
+      "lessonSlug": "8.3-prospect-theory-loss-aversion",
+      "title": "8.3 Prospect Theory and Loss Aversion",
+      "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+    },
+    {
+      "lessonSlug": "8.4-emotional-regulation-in-trading",
+      "title": "8.4 Emotional Regulation in Trading",
+      "href": "/education/module-8-behavioral-finance/8.4-emotional-regulation-in-trading"
+    }
+  ]
+}

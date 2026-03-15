@@ -1,0 +1,223 @@
+{
+  "moduleSlug": "module-2-market-structure-basics",
+  "moduleTitle": "Module 2: Market Structure Basics",
+  "moduleBaseRoute": "/education/module-2-market-structure-basics",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "2.3-session-overlaps-liquidity",
+  "title": "2.3 Session Overlaps and Liquidity",
+  "summary": "Markets are global, but market activity is not evenly spread across every hour of the day.",
+  "bodyHtml": "<h1 id=\"user-content-23-session-overlaps-and-liquidity\">2.3 Session Overlaps and Liquidity</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Markets are global, but market activity is not evenly spread across every hour of the day.</p>\n<p>That means:</p>\n<ul>\n<li>the number of active participants changes;</li>\n<li>the spread can change;</li>\n<li>price can move more smoothly at some times and more sharply at others.</li>\n</ul>\n<p>If you ignore time-of-day context, you may misunderstand what the chart is doing.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain liquidity in simple language;</li>\n<li>describe why activity changes through the global trading day;</li>\n<li>understand why session overlaps can affect both spread and volatility.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-four-terms-you-need-first\">Four Terms You Need First</h2>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Liquidity</strong></td>\n<td>How easy it is to trade because enough buyers and sellers are active.</td>\n</tr>\n<tr>\n<td><strong>Spread</strong></td>\n<td>The gap between the buy price and the sell price.</td>\n</tr>\n<tr>\n<td><strong>Slippage</strong></td>\n<td>When your actual fill price is worse than the price you expected.</td>\n</tr>\n<tr>\n<td><strong>Session overlap</strong></td>\n<td>A period when two major trading regions are active at the same time.</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A beginner glossary table defining liquidity, spread, slippage, and session overlap in simple language.)</em></p>\n<p>When liquidity is strong, trading can be easier and spreads may be narrower. When liquidity is thin, spreads may widen and price can jump more unevenly.</p>\n<hr>\n<h2 id=\"user-content-a-simplified-global-trading-day\">A Simplified Global Trading Day</h2>\n<p>For beginners, it is enough to think in three broad groups:</p>\n<h3 id=\"user-content-1-asia-pacific-hours\">1. Asia-Pacific Hours</h3>\n<p>Participants in places such as Tokyo, Sydney, Singapore, and Hong Kong are more active.</p>\n<h3 id=\"user-content-2-european-hours\">2. European Hours</h3>\n<p>London and other European financial centers add a large amount of participation.</p>\n<h3 id=\"user-content-3-north-american-hours\">3. North American Hours</h3>\n<p>New York and Chicago add another major wave of activity, especially across FX, futures, and index-linked products.</p>\n<p>These are broad teaching labels, not exact universal clock times. Actual local times shift with daylight-saving changes, exchange calendars, and holidays. For operational material, use the current venue schedule and specify UTC where needed.</p>\n<hr>\n<h2 id=\"user-content-why-activity-changes-by-product\">Why Activity Changes by Product</h2>\n<p>Different markets do not all behave in the same way.</p>\n<h3 id=\"user-content-fx\">FX</h3>\n<p>Spot FX is an over-the-counter market and trades across the global weekday cycle. Activity often increases when the largest regional centers are active together.</p>\n<h3 id=\"user-content-equity-indices\">Equity Indices</h3>\n<p>Index futures may trade electronically for long hours, but activity often becomes more meaningful when the main underlying cash market is open or when a major regional session begins.</p>\n<h3 id=\"user-content-metals-and-energy\">Metals and Energy</h3>\n<p>Products such as gold or Brent crude can trade for extended hours in derivative markets, but price discovery still often becomes more active around the regions that matter most for those products on that day.</p>\n<p>The main lesson is simple:</p>\n<p><code>Do not assume one time rule fits every product.</code></p>\n<hr>\n<h2 id=\"user-content-why-session-overlap-matters\">Why Session Overlap Matters</h2>\n<p>A <strong>session overlap</strong> happens when two major regions are active together.</p>\n<p>One well-known example is the period when European participants and North American participants are both active. That period often brings:</p>\n<ul>\n<li>more orders into the market;</li>\n<li>better liquidity;</li>\n<li>tighter spreads in many products;</li>\n<li>faster reactions to news and data releases.</li>\n</ul>\n<p>That sounds helpful, but there is an important warning:</p>\n<p>Better liquidity does <strong>not</strong> mean low risk.</p>\n<p>During active overlaps, price can still move very quickly because many participants are reacting at the same time.</p>\n<hr>\n<h2 id=\"user-content-one-simple-comparison\">One Simple Comparison</h2>\n<p>Imagine two moments in EUR/USD:</p>\n<table>\n<thead>\n<tr>\n<th>Situation</th>\n<th>What you may notice</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Quiet holiday or thin regional hour</td>\n<td>Fewer participants, wider spread, more uneven price movement</td>\n</tr>\n<tr>\n<td>Busy overlap between major regions</td>\n<td>More participation, often tighter spread, but faster movement</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row comparison showing how a quiet trading period can differ from an active overlap in terms of participation, spread, and price behavior.)</em></p>\n<p>Neither situation is automatically \"good\" or \"bad.\" They are simply different trading conditions.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine you are studying two products:</p>\n<ul>\n<li><strong>EUR/USD</strong></li>\n<li><strong>Gold futures</strong></li>\n</ul>\n<p>During a quiet regional holiday, both may feel slower at times, and the trading cost may become less favorable. During a busy overlap with a major inflation report or central-bank event, both may become much more active very quickly.</p>\n<p>The chart pattern may look similar in both cases, but the <strong>trading conditions</strong> are different.</p>\n<p>That is why good preparation includes both:</p>\n<ul>\n<li>chart structure;</li>\n<li>session and event context.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-one-session-is-best-for-every-product\">Mistake 1: Thinking One Session Is Best for Every Product</h3>\n<p>EUR/USD, Nikkei futures, gold, and crude oil do not all have the same busiest hours.</p>\n<h3 id=\"user-content-mistake-2-ignoring-wider-spreads-in-thin-conditions\">Mistake 2: Ignoring Wider Spreads in Thin Conditions</h3>\n<p>A trade can start badly if the spread is much wider than expected.</p>\n<h3 id=\"user-content-mistake-3-forgetting-the-event-calendar\">Mistake 3: Forgetting the Event Calendar</h3>\n<p>High activity periods often line up with economic data releases, central-bank decisions, and speeches. More participation can also mean faster price changes.</p>\n<h3 id=\"user-content-mistake-4-treating-session-knowledge-as-a-prediction-tool\">Mistake 4: Treating Session Knowledge as a Prediction Tool</h3>\n<p>Session context helps you understand the environment. It does not guarantee direction.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain why liquidity changes through the global trading day;",
+    "identify why session overlap matters more than a simplistic “best session” rule;",
+    "connect liquidity conditions to spread, slippage, and trade timing."
+  ],
+  "quizItems": [
+    {
+      "id": "2.3-session-overlaps-liquidity-q1",
+      "prompt": "Why do spreads and slippage often change during the day?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because liquidity is not constant across sessions"
+        },
+        {
+          "label": "B",
+          "text": "Because charts stop working at noon"
+        },
+        {
+          "label": "C",
+          "text": "Because asset classes never overlap globally"
+        },
+        {
+          "label": "D",
+          "text": "Because only retail traders move price"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because liquidity is not constant across sessions"
+      },
+      "explanation": "When more participants are active, liquidity and price efficiency often improve, though volatility can also rise.",
+      "lessonAnchor": "Liquidity and session logic"
+    },
+    {
+      "id": "2.3-session-overlaps-liquidity-q2",
+      "prompt": "What is the most accurate beginner statement about session overlaps?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "One session is always best for every product"
+        },
+        {
+          "label": "B",
+          "text": "Overlaps often increase participation and can change spread and volatility conditions"
+        },
+        {
+          "label": "C",
+          "text": "Session timing matters only for crypto"
+        },
+        {
+          "label": "D",
+          "text": "Overlaps remove all risk"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Overlaps often increase participation and can change spread and volatility conditions"
+      },
+      "explanation": "Session overlap matters because different regional participant groups are active at the same time.",
+      "lessonAnchor": "Session overlap section"
+    },
+    {
+      "id": "2.3-session-overlaps-liquidity-q3",
+      "prompt": "Which is the most disciplined use of session knowledge?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Assume all products behave like EUR/USD"
+        },
+        {
+          "label": "B",
+          "text": "Use session context to understand liquidity and timing risk"
+        },
+        {
+          "label": "C",
+          "text": "Ignore session context if the chart looks good"
+        },
+        {
+          "label": "D",
+          "text": "Enter largest size during thin hours"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Use session context to understand liquidity and timing risk"
+      },
+      "explanation": "Session knowledge helps traders understand conditions, not guarantee outcomes.",
+      "lessonAnchor": "Risk-first application"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; session examples illustrate trading conditions and risk timing, not guaranteed market behavior"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "re-open close to publication if the lesson adds exact session-time tables or event-timing examples."
+  ],
+  "sources": [
+    {
+      "label": "BIS Triennial Central Bank Survey, foreign exchange turnover",
+      "url": "https://www.bis.org/statistics/rpfx25_fx.htm"
+    },
+    {
+      "label": "BIS research on FX market structure and liquidity",
+      "url": "https://www.bis.org/publ/work1094.htm"
+    },
+    {
+      "label": "CME Group FX Market Profile user guide",
+      "url": "https://www.cmegroup.com/education/articles-and-reports/fx-market-profile-user-guide"
+    },
+    {
+      "label": "ICE education hub",
+      "url": "https://www.ice.com/support/education"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "2.2-support-resistance-key-levels",
+    "title": "2.2 Support, Resistance, and Key Levels",
+    "href": "/education/module-2-market-structure-basics/2.2-support-resistance-key-levels"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "2.1-defining-the-trend",
+      "title": "2.1 Defining the Trend",
+      "href": "/education/module-2-market-structure-basics/2.1-defining-the-trend"
+    },
+    {
+      "lessonSlug": "2.2-support-resistance-key-levels",
+      "title": "2.2 Support, Resistance, and Key Levels",
+      "href": "/education/module-2-market-structure-basics/2.2-support-resistance-key-levels"
+    },
+    {
+      "lessonSlug": "2.3-session-overlaps-liquidity",
+      "title": "2.3 Session Overlaps and Liquidity",
+      "href": "/education/module-2-market-structure-basics/2.3-session-overlaps-liquidity"
+    }
+  ]
+}

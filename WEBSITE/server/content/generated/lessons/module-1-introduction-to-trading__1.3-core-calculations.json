@@ -1,0 +1,232 @@
+{
+  "moduleSlug": "module-1-introduction-to-trading",
+  "moduleTitle": "Module 1: Introduction to Trading",
+  "moduleBaseRoute": "/education/module-1-introduction-to-trading",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "1.3-core-calculations",
+  "title": "1.3 Core Calculations",
+  "summary": "You do not need advanced mathematics to start learning trading.",
+  "bodyHtml": "<h1 id=\"user-content-13-core-calculations\">1.3 Core Calculations</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>You do not need advanced mathematics to start learning trading.</p>\n<p>You do need reliable basic math.</p>\n<p>Before you place any trade, you should be able to answer one question:</p>\n<p><code>If this idea is wrong, how much money can I lose?</code></p>\n<p>This lesson shows the small amount of math needed to answer that question.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>calculate simple trade risk using a stop distance, a unit value, and a size;</li>\n<li>explain why the same-looking move can mean different money in different products;</li>\n<li>avoid the most common beginner unit mistakes.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-core-formula\">The Core Formula</h2>\n<p>The basic formula is:</p>\n<p><code>cash risk = distance to stop x value of one movement unit x quantity</code></p>\n<p>Now turn that into plain language:</p>\n<ul>\n<li><strong>distance to stop</strong> = how far your stop loss is from your entry;</li>\n<li><strong>value of one movement unit</strong> = how much one pip, tick, point, or dollar move is worth;</li>\n<li><strong>quantity</strong> = how many shares, contracts, or lots you are trading.</li>\n</ul>\n<p>That is the foundation of beginner trade math.</p>\n<hr>\n<h2 id=\"user-content-step-1-measure-the-distance\">Step 1: Measure the Distance</h2>\n<p>If you enter at one price and your stop is lower or higher, the gap between them is your stop distance.</p>\n<p>Examples:</p>\n<ul>\n<li>A stock trade with a stop <code>$2</code> away has a distance of <code>$2</code>.</li>\n<li>An FX trade with a stop <code>20 pips</code> away has a distance of <code>20 pips</code>.</li>\n<li>A futures trade with a stop <code>10 ticks</code> away has a distance of <code>10 ticks</code>.</li>\n</ul>\n<p>The number is useless until you also know the unit.</p>\n<hr>\n<h2 id=\"user-content-step-2-know-the-value-of-one-unit\">Step 2: Know the Value of One Unit</h2>\n<p>This is where many beginners go wrong.</p>\n<p>The same-looking move can mean very different money:</p>\n<ul>\n<li>1 share moving by <code>$1</code> is usually worth <code>$1</code> per share;</li>\n<li>1 tick in an E-mini S&#x26;P 500 future is worth <code>$12.50</code> per contract;</li>\n<li>1 tick in NYMEX WTI crude oil is worth <code>$10</code> per contract.</li>\n</ul>\n<p>The market does not care what feels small on the chart. The contract rules decide what the move is worth.</p>\n<hr>\n<h2 id=\"user-content-step-3-multiply-by-your-size\">Step 3: Multiply by Your Size</h2>\n<p>Once you know the distance and the value of one unit, multiply by the size you plan to trade.</p>\n<p>That turns a chart idea into a money amount.</p>\n<hr>\n<h2 id=\"user-content-worked-example-1-shares\">Worked Example 1: Shares</h2>\n<p>Imagine:</p>\n<ul>\n<li>you buy <code>50 shares</code>;</li>\n<li>your stop is <code>$2</code> away;</li>\n<li>each <code>$1</code> move in one share is worth <code>$1</code>.</li>\n</ul>\n<p>So:</p>\n<p><code>cash risk = 2 x 1 x 50 = $100</code></p>\n<p>If the stop is hit, the planned loss is about <code>$100</code>.</p>\n<hr>\n<h2 id=\"user-content-worked-example-2-fx\">Worked Example 2: FX</h2>\n<p>Imagine:</p>\n<ul>\n<li>your stop is <code>20 pips</code> away;</li>\n<li>your platform shows that each pip is worth <code>$5</code> at your chosen size;</li>\n<li>your quantity is already built into that <code>$5</code> pip value.</li>\n</ul>\n<p>So:</p>\n<p><code>cash risk = 20 x 5 = $100</code></p>\n<p>This is why traders must check pip value before pressing the button.</p>\n<hr>\n<h2 id=\"user-content-worked-example-3-futures\">Worked Example 3: Futures</h2>\n<p>CME explains that:</p>\n<ul>\n<li>one E-mini S&#x26;P 500 tick is worth <code>$12.50</code>;</li>\n<li>one NYMEX WTI crude oil tick is worth <code>$10</code>.</li>\n</ul>\n<p>If your WTI stop is <code>10 ticks</code> away and you trade <code>1 contract</code>:</p>\n<p><code>cash risk = 10 x 10 x 1 = $100</code></p>\n<p>If your E-mini S&#x26;P 500 stop is <code>10 ticks</code> away and you trade <code>1 contract</code>:</p>\n<p><code>cash risk = 10 x 12.50 x 1 = $125</code></p>\n<p>Same number of ticks. Different money.</p>\n<hr>\n<h2 id=\"user-content-same-number-different-risk\">Same Number, Different Risk</h2>\n<table>\n<thead>\n<tr>\n<th>Trade example</th>\n<th>Distance</th>\n<th>Unit value</th>\n<th>Quantity</th>\n<th>Total risk</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Shares</td>\n<td><code>$2</code></td>\n<td><code>$1 per share</code></td>\n<td><code>50 shares</code></td>\n<td><code>$100</code></td>\n</tr>\n<tr>\n<td>FX</td>\n<td><code>20 pips</code></td>\n<td><code>$5 per pip</code></td>\n<td>included in pip value</td>\n<td><code>$100</code></td>\n</tr>\n<tr>\n<td>WTI futures</td>\n<td><code>10 ticks</code></td>\n<td><code>$10 per tick</code></td>\n<td><code>1 contract</code></td>\n<td><code>$100</code></td>\n</tr>\n<tr>\n<td>E-mini S&#x26;P futures</td>\n<td><code>10 ticks</code></td>\n<td><code>$12.50 per tick</code></td>\n<td><code>1 contract</code></td>\n<td><code>$125</code></td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A beginner trade-risk table comparing shares, FX, WTI futures, and E-mini S&#x26;P futures, showing how distance, unit value, and quantity combine to create total cash risk.)</em></p>\n<hr>\n<h2 id=\"user-content-notional-value-a-different-calculation\">Notional Value: A Different Calculation</h2>\n<p>Sometimes you also need to know the full size of the position, not just the planned loss.</p>\n<p>That is called <strong>notional value</strong>.</p>\n<p>The simple formula is:</p>\n<p><code>notional value = price x quantity</code></p>\n<p>Example:</p>\n<ul>\n<li><code>100 shares</code> of a stock priced at <code>$50</code></li>\n<li>notional value = <code>50 x 100 = $5,000</code></li>\n</ul>\n<p>Notional value is not the same as cash risk.</p>\n<ul>\n<li><strong>Notional value</strong> tells you the full size of the position.</li>\n<li><strong>Cash risk</strong> tells you how much you plan to lose if the stop is hit.</li>\n</ul>\n<p>You need both ideas, but you must not confuse them.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-choosing-size-first\">Mistake 1: Choosing Size First</h3>\n<p>The correct order is:</p>\n<ol>\n<li>find the stop distance;</li>\n<li>check the unit value;</li>\n<li>calculate the size.</li>\n</ol>\n<p>Not the other way around.</p>\n<h3 id=\"user-content-mistake-2-mixing-ticks-pips-and-points\">Mistake 2: Mixing Ticks, Pips, and Points</h3>\n<p>If you use the wrong unit, your risk number becomes wrong immediately.</p>\n<h3 id=\"user-content-mistake-3-thinking-the-same-chart-shape-means-the-same-risk\">Mistake 3: Thinking the Same Chart Shape Means the Same Risk</h3>\n<p>A setup that looks “small” on one product can still be expensive on another product.</p>\n<h3 id=\"user-content-mistake-4-confusing-notional-value-with-planned-loss\">Mistake 4: Confusing Notional Value With Planned Loss</h3>\n<p>A big notional value does not automatically mean a big loss. A small notional value does not automatically mean a safe trade. Stop distance and unit value still matter.</p>\n<hr>",
+  "learningOutcomes": [
+    "calculate simple price-distance and cash-risk examples across more than one asset class;",
+    "explain why the same move size does not create the same dollar impact in every product;",
+    "avoid the most common unit mistakes before they reach the order screen."
+  ],
+  "quizItems": [
+    {
+      "id": "1.3-core-calculations-q1",
+      "prompt": "What must you know before you can convert a stop distance into cash risk?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Only the chart timeframe"
+        },
+        {
+          "label": "B",
+          "text": "The value of one unit of movement and the quantity traded"
+        },
+        {
+          "label": "C",
+          "text": "The next central-bank meeting date"
+        },
+        {
+          "label": "D",
+          "text": "The previous day’s close only"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "The value of one unit of movement and the quantity traded"
+      },
+      "explanation": "Stop distance alone is not enough. You must know the cash value of that movement for the chosen size.",
+      "lessonAnchor": "Core formula section"
+    },
+    {
+      "id": "1.3-core-calculations-q2",
+      "prompt": "Why can two 20-unit moves create very different cash results?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because every product uses the same contract size"
+        },
+        {
+          "label": "B",
+          "text": "Because movement units and contract values differ across products"
+        },
+        {
+          "label": "C",
+          "text": "Because all markets settle in the same currency"
+        },
+        {
+          "label": "D",
+          "text": "Because volatility removes the need for sizing"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because movement units and contract values differ across products"
+      },
+      "explanation": "A 20-pip FX move and a 20-tick futures move can represent very different cash effects.",
+      "lessonAnchor": "Cross-asset comparison section"
+    },
+    {
+      "id": "1.3-core-calculations-q3",
+      "prompt": "Which sequence is most disciplined for a beginner?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Choose the size first, then estimate risk"
+        },
+        {
+          "label": "B",
+          "text": "Choose the market first, then ignore unit value"
+        },
+        {
+          "label": "C",
+          "text": "Measure stop distance, confirm unit value, then determine size"
+        },
+        {
+          "label": "D",
+          "text": "Pick leverage, then look for a chart"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "Measure stop distance, confirm unit value, then determine size"
+      },
+      "explanation": "Risk should be translated from the plan into size, not guessed after the trade is chosen.",
+      "lessonAnchor": "Risk-first workflow"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "append hypothetical-example education disclaimer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "examples are illustrative only and not a recommendation"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none blocking draft completion"
+  ],
+  "sources": [
+    {
+      "label": "CME education",
+      "url": "https://www.cmegroup.com/education.html"
+    },
+    {
+      "label": "CME futures guide",
+      "url": "https://www.cmegroup.com/education/files/a-traders-guide-to-futures.pdf"
+    },
+    {
+      "label": "Investor.gov main education hub",
+      "url": "https://www.investor.gov/"
+    },
+    {
+      "label": "FINRA margin education",
+      "url": "https://www.finra.org/investors/learn-to-invest/advanced-investing/margin-accounts"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "1.2-instruments-overview",
+    "title": "1.2 Instruments Overview",
+    "href": "/education/module-1-introduction-to-trading/1.2-instruments-overview"
+  },
+  "nextLesson": {
+    "lessonSlug": "1.4-profit-loss-risk-math",
+    "title": "1.4 Profit, Loss, and Risk Math",
+    "href": "/education/module-1-introduction-to-trading/1.4-profit-loss-risk-math"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "1.1-terminology-glossary",
+      "title": "1.1 Terminology Glossary",
+      "href": "/education/module-1-introduction-to-trading/1.1-terminology-glossary"
+    },
+    {
+      "lessonSlug": "1.2-instruments-overview",
+      "title": "1.2 Instruments Overview",
+      "href": "/education/module-1-introduction-to-trading/1.2-instruments-overview"
+    },
+    {
+      "lessonSlug": "1.3-core-calculations",
+      "title": "1.3 Core Calculations",
+      "href": "/education/module-1-introduction-to-trading/1.3-core-calculations"
+    },
+    {
+      "lessonSlug": "1.4-profit-loss-risk-math",
+      "title": "1.4 Profit, Loss, and Risk Math",
+      "href": "/education/module-1-introduction-to-trading/1.4-profit-loss-risk-math"
+    }
+  ]
+}

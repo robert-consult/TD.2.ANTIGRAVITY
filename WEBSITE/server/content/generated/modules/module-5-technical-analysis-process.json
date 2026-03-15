@@ -1,0 +1,46 @@
+{
+  "moduleSlug": "module-5-technical-analysis-process",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 5: Technical Analysis Process",
+  "cardSummary": "Use structure, momentum, order flow, and checklist discipline as a process instead of a bag of disconnected indicators.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-5-technical-analysis-process",
+  "lessonCount": 3,
+  "quizItemCount": 9,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "5.1-moving-averages-momentum",
+      "title": "5.1 Moving Averages and Momentum",
+      "summary": "Charts can feel noisy at first.",
+      "href": "/education/module-5-technical-analysis-process/5.1-moving-averages-momentum"
+    },
+    {
+      "lessonSlug": "5.2-volume-profile-order-flow",
+      "title": "5.2 Volume Profile and Order Flow",
+      "summary": "This lesson introduces a topic that beginners often find impressive and confusing at the same time.",
+      "href": "/education/module-5-technical-analysis-process/5.2-volume-profile-order-flow"
+    },
+    {
+      "lessonSlug": "5.3-confluence-checklist",
+      "title": "5.3 Confluence Checklist",
+      "summary": "Confluence is a useful word, but it is often used badly.",
+      "href": "/education/module-5-technical-analysis-process/5.3-confluence-checklist"
+    }
+  ]
+}

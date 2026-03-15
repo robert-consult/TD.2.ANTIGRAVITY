@@ -1,0 +1,244 @@
+{
+  "moduleSlug": "module-6-macro-and-event-awareness",
+  "moduleTitle": "Module 6: Macro and Event Awareness",
+  "moduleBaseRoute": "/education/module-6-macro-and-event-awareness",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner",
+    "Freshness Reviewed March 12, 2026",
+    "Re-review by June 12, 2026"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "6.2-nfp-cpi-tactics",
+  "title": "6.2 NFP, CPI, and Event-Risk Tactics",
+  "summary": "Many beginners see a huge one-minute candle during a news release and think:",
+  "bodyHtml": "<h1 id=\"user-content-62-nfp-cpi-and-event-risk-tactics\">6.2 NFP, CPI, and Event-Risk Tactics</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Many beginners see a huge one-minute candle during a news release and think:</p>\n<p><code>this is my chance to catch a fast move</code></p>\n<p>That is usually the wrong lesson.</p>\n<p>For most new traders, the real lesson is not how to guess the number first.\nIt is how to avoid bad timing, unstable execution, and emotional decisions when the number arrives.</p>\n<p>This lesson uses major U.S. releases because they often move global markets, but the same risk habit applies to important data in any region.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what CPI measures in plain language;</li>\n<li>explain what traders mean by \"NFP\" and how it fits inside the Employment Situation report;</li>\n<li>understand why scheduled data releases can increase execution risk;</li>\n<li>choose a disciplined response such as waiting, reducing size, or standing aside.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-these-reports-actually-are\">What These Reports Actually Are</h2>\n<table>\n<thead>\n<tr>\n<th>Report</th>\n<th>Plain-English meaning</th>\n<th>Why traders watch it</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>CPI</strong></td>\n<td>A measure of the average change over time in prices paid by urban consumers for a basket of goods and services</td>\n<td>It can change inflation expectations and views on future rates</td>\n</tr>\n<tr>\n<td><strong>Employment Situation</strong></td>\n<td>The official U.S. jobs report from the BLS</td>\n<td>It can change expectations about growth, labor conditions, and policy</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row table explaining CPI and the Employment Situation in plain language for beginners.)</em></p>\n<p>Important beginner note:</p>\n<ul>\n<li>traders often say <strong>NFP</strong>;</li>\n<li>the official BLS release is the <strong>Employment Situation</strong>;</li>\n<li><strong>nonfarm payroll employment</strong> is one major number inside that broader report.</li>\n</ul>\n<p>So when you hear \"NFP day,\" think:</p>\n<p><code>jobs report day</code></p>\n<hr>\n<h2 id=\"user-content-why-markets-react\">Why Markets React</h2>\n<p>Markets do not only react to the number itself.\nThey react to the difference between:</p>\n<ul>\n<li>what the market expected;</li>\n<li>what the report actually showed;</li>\n<li>what traders think that means for future growth and rates.</li>\n</ul>\n<p>Simple examples:</p>\n<ul>\n<li>if inflation comes in hotter than expected, traders may expect tighter policy or fewer rate cuts;</li>\n<li>if jobs data comes in much weaker than expected, traders may price in slower growth or easier policy;</li>\n<li>if the number lands near expectations, the reaction may be smaller than beginners expect.</li>\n</ul>\n<p>That is why a single data release can move:</p>\n<ul>\n<li>the U.S. dollar;</li>\n<li>major FX pairs;</li>\n<li>bond yields;</li>\n<li>stock indices;</li>\n<li>gold.</li>\n<li>crude oil, especially when growth or demand expectations change with the data.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-time-matters\">Time Matters</h2>\n<p>Release timing is not a small detail.</p>\n<p>As of <strong>March 12, 2026</strong>, the BLS March release calendar showed both the <strong>Employment Situation</strong> for February 2026 and the <strong>Consumer Price Index</strong> for February 2026 at <strong>8:30 a.m. Eastern Time</strong>.</p>\n<p>The safe habit is:</p>\n<ol>\n<li>check the official calendar before the week starts;</li>\n<li>convert the time to your local timezone;</li>\n<li>avoid pretending \"8:30 in New York\" means the same thing in every country.</li>\n</ol>\n<p>If you do not know the release time in your own timezone, you are not ready to trade around it.</p>\n<hr>\n<h2 id=\"user-content-what-can-go-wrong-at-release-time\">What Can Go Wrong at Release Time</h2>\n<p>Major data releases can create fast and messy conditions.</p>\n<p>According to Investor.gov, a market order in a fast-moving market may execute at a price that is different from the last quote you saw. FINRA also warns that a stop order in volatile conditions may be filled at a price that is significantly different from the stop price.</p>\n<p>For a beginner, that translates into three practical risks:</p>\n<table>\n<thead>\n<tr>\n<th>Risk</th>\n<th>Plain-English meaning</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Fast price jump</strong></td>\n<td>Price can move before your order fills</td>\n<td>The trade may start worse than planned</td>\n</tr>\n<tr>\n<td><strong>Slippage</strong></td>\n<td>You get a worse fill than expected</td>\n<td>Your real loss can be larger than planned</td>\n</tr>\n<tr>\n<td><strong>Stop risk</strong></td>\n<td>A stop can trigger in a chaotic move and fill badly</td>\n<td>A \"controlled\" trade can become less controlled</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A three-row table showing fast price jumps, slippage, and stop-order risk during high-impact news.)</em></p>\n<p>You may also see wider bid-ask spreads in practice during these moments, which makes short-term trading even harder.</p>\n<hr>\n<h2 id=\"user-content-a-disciplined-beginner-response\">A Disciplined Beginner Response</h2>\n<p>For many learners, the best tactic on CPI or jobs-report day is not to force a trade.</p>\n<p>A professional beginner usually chooses one of these responses:</p>\n<h3 id=\"user-content-option-1-stand-aside\">Option 1: Stand Aside</h3>\n<p>If your setup appears right before the release, cancel it and wait.</p>\n<h3 id=\"user-content-option-2-wait-for-the-first-reaction-to-finish\">Option 2: Wait for the First Reaction to Finish</h3>\n<p>The first candle is often the noisiest part of the move.\nWaiting can give you:</p>\n<ul>\n<li>calmer spreads;</li>\n<li>clearer structure;</li>\n<li>better decision quality.</li>\n</ul>\n<h3 id=\"user-content-option-3-reduce-size-if-you-must-hold\">Option 3: Reduce Size if You Must Hold</h3>\n<p>If you are already in a longer-term position and your plan requires staying in, smaller size may be safer than pretending conditions are normal.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine EUR/USD is near your planned breakout level at <strong>8:28 a.m. Eastern Time</strong> and CPI is due at <strong>8:30 a.m.</strong></p>\n<p>A weak response would be:</p>\n<ul>\n<li>enter at normal size anyway;</li>\n<li>assume your stop will protect you perfectly;</li>\n<li>hope the headline helps you.</li>\n</ul>\n<p>A stronger response would be:</p>\n<ul>\n<li>pause the trade;</li>\n<li>wait for the data;</li>\n<li>let the first move settle;</li>\n<li>decide again only after the market shows clearer structure.</li>\n</ul>\n<p>That approach protects capital and protects your decision-making process. The same discipline matters if you were watching Nasdaq futures, gold, or WTI instead of EUR/USD.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-treating-the-calendar-like-a-profit-shortcut\">Mistake 1: Treating the Calendar Like a Profit Shortcut</h3>\n<p>The calendar is mainly a risk-management tool.</p>\n<h3 id=\"user-content-mistake-2-forgetting-the-official-release-name\">Mistake 2: Forgetting the Official Release Name</h3>\n<p>\"NFP\" is trader shorthand. The official BLS report is the Employment Situation.</p>\n<h3 id=\"user-content-mistake-3-using-normal-size-in-abnormal-conditions\">Mistake 3: Using Normal Size in Abnormal Conditions</h3>\n<p>A release window is not the same as a quiet market.</p>\n<h3 id=\"user-content-mistake-4-assuming-the-first-candle-tells-the-whole-story\">Mistake 4: Assuming the First Candle Tells the Whole Story</h3>\n<p>The first reaction can reverse hard.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain what CPI measures and what traders mean by \"NFP\";",
+    "identify why scheduled data releases can raise volatility and execution risk;",
+    "choose a risk response such as waiting, reducing size, or standing aside."
+  ],
+  "quizItems": [
+    {
+      "id": "6.2-nfp-cpi-tactics-q1",
+      "prompt": "What does CPI measure in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "The average change over time in prices paid by urban consumers for a basket of goods and services"
+        },
+        {
+          "label": "B",
+          "text": "The exact future price of the S&P 500"
+        },
+        {
+          "label": "C",
+          "text": "The total number of traders in the market"
+        },
+        {
+          "label": "D",
+          "text": "The level of corporate profits in every country"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "The average change over time in prices paid by urban consumers for a basket of goods and services"
+      },
+      "explanation": "The lesson defines CPI directly from the BLS framing and keeps the definition simple.",
+      "lessonAnchor": "What these reports actually are"
+    },
+    {
+      "id": "6.2-nfp-cpi-tactics-q2",
+      "prompt": "What is the safest beginner use of the CPI or jobs-report calendar?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Use it to force a quick trade before the number"
+        },
+        {
+          "label": "B",
+          "text": "Use it to plan around higher volatility and execution risk"
+        },
+        {
+          "label": "C",
+          "text": "Ignore it because charts already know the number"
+        },
+        {
+          "label": "D",
+          "text": "Double size before the release"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Use it to plan around higher volatility and execution risk"
+      },
+      "explanation": "The calendar is framed as a risk-management tool, not a shortcut to profit.",
+      "lessonAnchor": "Time matters"
+    },
+    {
+      "id": "6.2-nfp-cpi-tactics-q3",
+      "prompt": "What is the key execution lesson in a fast market?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Market and stop prices are always guaranteed"
+        },
+        {
+          "label": "B",
+          "text": "The first candle is always the true move"
+        },
+        {
+          "label": "C",
+          "text": "Fast conditions can lead to worse fills than expected"
+        },
+        {
+          "label": "D",
+          "text": "Only stock traders need to care"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "Fast conditions can lead to worse fills than expected"
+      },
+      "explanation": "Investor.gov and FINRA both warn that fast markets can produce worse execution than beginners expect.",
+      "lessonAnchor": "What can go wrong at release time"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "macroFreshness",
+      "title": "Freshness Notice",
+      "tone": "warning",
+      "body": "This lesson contains time-sensitive market context verified on March 12, 2026. Review again by June 12, 2026 before publication or reuse.",
+      "placements": [
+        "top"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner",
+    "Freshness Reviewed March 12, 2026",
+    "Re-review by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "3mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near release examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; event-day examples illustrate risk management around CPI and NFP, not trade recommendations or promises"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "re-open close to publication to confirm the official BLS schedule and any dated CPI or payroll examples."
+  ],
+  "sources": [
+    {
+      "label": "BLS CPI home page",
+      "url": "https://www.bls.gov/cpi/"
+    },
+    {
+      "label": "BLS Employment Situation summary",
+      "url": "https://www.bls.gov/news.release/empsit.nr0.htm"
+    },
+    {
+      "label": "BLS release calendar",
+      "url": "https://www.bls.gov/schedule/news_release/"
+    },
+    {
+      "label": "Investor.gov trading basics bulletin",
+      "url": "https://www.investor.gov/sites/default/files/trading101basics.pdf"
+    },
+    {
+      "label": "FINRA on stop orders in volatile markets",
+      "url": "https://www.finra.org/investors/insights/stop-orders-factors-consider-during-volatile-markets"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "6.1-federal-reserve-interest-rates",
+    "title": "6.1 Federal Reserve and Interest Rates",
+    "href": "/education/module-6-macro-and-event-awareness/6.1-federal-reserve-interest-rates"
+  },
+  "nextLesson": {
+    "lessonSlug": "6.3-correlated-assets",
+    "title": "6.3 Correlated Assets",
+    "href": "/education/module-6-macro-and-event-awareness/6.3-correlated-assets"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "6.1-federal-reserve-interest-rates",
+      "title": "6.1 Federal Reserve and Interest Rates",
+      "href": "/education/module-6-macro-and-event-awareness/6.1-federal-reserve-interest-rates"
+    },
+    {
+      "lessonSlug": "6.2-nfp-cpi-tactics",
+      "title": "6.2 NFP and CPI Tactics",
+      "href": "/education/module-6-macro-and-event-awareness/6.2-nfp-cpi-tactics"
+    },
+    {
+      "lessonSlug": "6.3-correlated-assets",
+      "title": "6.3 Correlated Assets",
+      "href": "/education/module-6-macro-and-event-awareness/6.3-correlated-assets"
+    }
+  ]
+}

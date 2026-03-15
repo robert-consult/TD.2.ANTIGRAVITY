@@ -238,6 +238,19 @@ Failure Mode if Missing:
   - Set `CHALLENGE_CERT_VERIFICATION_SECRET` in runtime secret manager and restart service.
   - Issue a new certificate and verify using `/api/public/trader/challenges/certificate/:verificationCode/verify`.
   - Change `challengeCertificateVerificationKeyId`, issue another certificate, and verify both old and new certificates still validate.
+- Failure Mode if Missing: rotated or newly issued public verification codes cannot be trusted or may become unverifiable across key-id changes.
+
+### PRD-WEB-EDU-001
+- ID: `PRD-WEB-EDU-001`
+- Date (UTC): `2026-03-15`
+- Scope: `WEBSITE education content publishing`
+- Requirement: `WEBSITE/server/content/generated` must be regenerated from `/home/bcodex/PUBLIC WEBSITE/integration_enhancements_framework` and `/home/bcodex/PUBLIC WEBSITE/education_module_development` before WEBSITE dev, check, or build runs, and the live website must serve only the generated JSON payloads at runtime rather than reading the staging authoring tree directly.
+- Enforcement: `WEBSITE/package.json` (`content:sync`, `content:validate`, `content:verify`, and the `dev`/`build`/`check` script chain), `WEBSITE/scripts/syncEducationContent.ts`, `WEBSITE/scripts/verifyEducationContent.ts`, and `WEBSITE/server/content/contentStore.ts`.
+- Validation:
+  - Run `cd WEBSITE && npm run content:verify` and confirm generation plus validation passes with 10 tracks, 35 lessons, 105 minimum quiz items, Module 9 flags, and Module 10 placeholders intact.
+  - Run `cd WEBSITE && npm run build` and confirm generated content is served successfully through `/api/education/catalog` and `/api/platform-guide`.
+  - Run `npm run audit:website-isolation` from the repo root and confirm WEBSITE has no runtime import path into the staging workspace.
+- Failure Mode if Missing: WEBSITE starts with stale or missing education content, production behavior depends on the authoring workspace being present at runtime, and Module 9/10 release gates can silently drift from the published site.
 - Failure Mode if Missing: certificate verification codes become weakly derived from fallback secrets, and key rotations can cause verification drift or invalid proofs.
 
 ### PRD-PERF-001

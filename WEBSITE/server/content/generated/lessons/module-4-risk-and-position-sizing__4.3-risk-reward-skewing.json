@@ -1,0 +1,218 @@
+{
+  "moduleSlug": "module-4-risk-and-position-sizing",
+  "moduleTitle": "Module 4: Risk and Position Sizing",
+  "moduleBaseRoute": "/education/module-4-risk-and-position-sizing",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "4.3-risk-reward-skewing",
+  "title": "4.3 Risk-Reward Skewing",
+  "summary": "Reward-to-risk is useful, but it is easy to misuse.",
+  "bodyHtml": "<h1 id=\"user-content-43-risk-reward-skewing\">4.3 Risk-Reward Skewing</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Reward-to-risk is useful, but it is easy to misuse.</p>\n<p>Some beginners hear that a trade should have a big reward compared with the risk and then start stretching targets or shrinking stops just to make the ratio look better on paper.</p>\n<p>That is not good planning. That is number-forcing.</p>\n<p>The real job of reward-to-risk is to help you compare the planned upside with the planned downside in a realistic way.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a reward-to-risk ratio means;</li>\n<li>spot when a ratio looks good on paper but is based on unrealistic assumptions;</li>\n<li>use reward-to-risk as a quality filter instead of a guarantee.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-basic-formula\">The Basic Formula</h2>\n<p><code>reward-to-risk = planned reward / planned risk</code></p>\n<p>Example:</p>\n<ul>\n<li>planned risk = <code>$50</code></li>\n<li>planned reward = <code>$100</code></li>\n</ul>\n<p>So:</p>\n<p><code>100 / 50 = 2</code></p>\n<p>That is a <code>2:1</code> reward-to-risk ratio.</p>\n<p>It means the planned upside is two times the planned downside.</p>\n<p>It does <strong>not</strong> mean the trade will win.</p>\n<hr>\n<h2 id=\"user-content-a-simple-comparison-table\">A Simple Comparison Table</h2>\n<table>\n<thead>\n<tr>\n<th>Planned risk</th>\n<th>Planned reward</th>\n<th>Reward-to-risk</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code>$50</code></td>\n<td><code>$50</code></td>\n<td><code>1:1</code></td>\n</tr>\n<tr>\n<td><code>$50</code></td>\n<td><code>$100</code></td>\n<td><code>2:1</code></td>\n</tr>\n<tr>\n<td><code>$50</code></td>\n<td><code>$150</code></td>\n<td><code>3:1</code></td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A three-row table showing how different planned reward amounts change the reward-to-risk ratio when the planned risk stays at fifty dollars.)</em></p>\n<p>The math is easy. The hard part is deciding whether the target and stop are realistic.</p>\n<hr>\n<h2 id=\"user-content-what-false-skew-looks-like\">What False Skew Looks Like</h2>\n<p>A trade can appear to have a strong reward-to-risk ratio even when the setup is weak.</p>\n<p>This usually happens in two ways.</p>\n<h3 id=\"user-content-1-unrealistic-target\">1. Unrealistic Target</h3>\n<p>The trader places the target far beyond any realistic support, resistance, or likely price path just to make the ratio look larger.</p>\n<h3 id=\"user-content-2-unrealistic-stop\">2. Unrealistic Stop</h3>\n<p>The trader places the stop too close to the entry, inside normal market movement, just to shrink the planned risk number.</p>\n<p>Both actions can create a better-looking ratio without creating a better trade.</p>\n<hr>\n<h2 id=\"user-content-use-reward-to-risk-as-a-filter\">Use Reward-to-Risk as a Filter</h2>\n<p>Reward-to-risk works best when it comes <strong>after</strong> the structure and context work.</p>\n<p>A simple sequence is:</p>\n<ol>\n<li>find the realistic invalidation point;</li>\n<li>find the realistic target area;</li>\n<li>measure the downside and upside;</li>\n<li>decide whether the payoff is good enough.</li>\n</ol>\n<p>If the realistic target is too close and the realistic stop is too wide, the trade may simply fail the filter.</p>\n<p>That does not mean you should bend the chart to fix the number.</p>\n<p>It means you may need to skip the trade.</p>\n<hr>\n<h2 id=\"user-content-cross-market-example\">Cross-Market Example</h2>\n<p>Imagine three different trade ideas:</p>\n<ul>\n<li><strong>EUR/USD:</strong> the chart offers a realistic <code>40 pip</code> stop and an <code>80 pip</code> target, so the ratio is <code>2:1</code>.</li>\n<li><strong>S&#x26;P 500 index product:</strong> the chart offers a realistic <code>20 point</code> stop and a <code>30 point</code> target, so the ratio is <code>1.5:1</code>.</li>\n<li><strong>Brent crude:</strong> the chart may look explosive, but the next obvious resistance is close and headline risk is high, so forcing a <code>4:1</code> target may be dishonest.</li>\n</ul>\n<p>The lesson is not that one market is better than the others.</p>\n<p>The lesson is that each market must use:</p>\n<ul>\n<li>a realistic invalidation point;</li>\n<li>a realistic target area;</li>\n<li>a payoff number built from those real levels.</li>\n</ul>\n<p>If you stretch the EUR/USD target, crush the index stop, or pretend oil volatility will skip the next headline, the ratio may look better on paper while the trade plan gets worse.</p>\n<hr>\n<h2 id=\"user-content-reward-to-risk-is-not-a-promise\">Reward-to-Risk Is Not a Promise</h2>\n<p>A <code>3:1</code> plan can still lose.</p>\n<p>A <code>1.5:1</code> plan can still win.</p>\n<p>The ratio is useful because it helps compare possible upside and downside before the trade. It does not predict the future by itself.</p>\n<p>You still need:</p>\n<ul>\n<li>market structure;</li>\n<li>realistic levels;</li>\n<li>spread and liquidity awareness;</li>\n<li>event awareness;</li>\n<li>disciplined sizing.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-forcing-the-target\">Mistake 1: Forcing the Target</h3>\n<p>A distant target can make the paper ratio look strong while making the plan unrealistic.</p>\n<h3 id=\"user-content-mistake-2-forcing-the-stop\">Mistake 2: Forcing the Stop</h3>\n<p>A stop that is too tight may get hit by normal market movement.</p>\n<h3 id=\"user-content-mistake-3-treating-the-ratio-like-a-guarantee\">Mistake 3: Treating the Ratio Like a Guarantee</h3>\n<p>The ratio describes a plan. It does not guarantee the result.</p>\n<h3 id=\"user-content-mistake-4-ignoring-context\">Mistake 4: Ignoring Context</h3>\n<p>A good-looking number is not enough if the chart, spread, or event timing is poor.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain what reward-to-risk skew means in practical planning;",
+    "identify when traders distort risk-reward by forcing unrealistic targets or loose stops;",
+    "use payoff logic as a quality filter rather than a marketing phrase."
+  ],
+  "quizItems": [
+    {
+      "id": "4.3-risk-reward-skewing-q1",
+      "prompt": "What makes a reward-to-risk ratio useful?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "It guarantees profit"
+        },
+        {
+          "label": "B",
+          "text": "It helps compare planned upside with planned downside"
+        },
+        {
+          "label": "C",
+          "text": "It replaces all context"
+        },
+        {
+          "label": "D",
+          "text": "It removes the need for stop placement"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "It helps compare planned upside with planned downside"
+      },
+      "explanation": "Reward-to-risk is a planning tool, not a guarantee.",
+      "lessonAnchor": "Payoff-planning section"
+    },
+    {
+      "id": "4.3-risk-reward-skewing-q2",
+      "prompt": "Which behavior distorts payoff analysis?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Using realistic structure-based targets"
+        },
+        {
+          "label": "B",
+          "text": "Forcing distant targets just to improve the ratio on paper"
+        },
+        {
+          "label": "C",
+          "text": "Measuring downside first"
+        },
+        {
+          "label": "D",
+          "text": "Reviewing failure modes"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Forcing distant targets just to improve the ratio on paper"
+      },
+      "explanation": "Inflated targets can make a weak trade look attractive on paper only.",
+      "lessonAnchor": "False skew section"
+    },
+    {
+      "id": "4.3-risk-reward-skewing-q3",
+      "prompt": "What is the best use of reward-to-risk in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "A quality filter for trade planning"
+        },
+        {
+          "label": "B",
+          "text": "A promise about accuracy"
+        },
+        {
+          "label": "C",
+          "text": "A replacement for event awareness"
+        },
+        {
+          "label": "D",
+          "text": "A reason to ignore liquidity"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "A quality filter for trade planning"
+      },
+      "explanation": "Reward-to-risk is one filter inside a broader process.",
+      "lessonAnchor": "Process framing"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "when core formula standards materially change"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; payoff examples illustrate planning quality and do not promise future results"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adds expectancy modeling beyond beginner scope."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, The 2% Rule",
+      "url": "https://www.cmegroup.com/education/courses/trade-and-risk-management/the-2-percent-rule"
+    },
+    {
+      "label": "CME Group, Risk Management and Your Trade Plan",
+      "url": "https://www.cmegroup.com/education/courses/building-a-trade-plan/risk-management-and-your-trade-plan"
+    },
+    {
+      "label": "CME Group, Master the Trade: Futures Trade Plan PDF",
+      "url": "https://www.cmegroup.com/content/dam/cmegroup/education/courses/files/download-trade-plan.pdf"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "4.2-calculating-position-size",
+    "title": "4.2 Calculating Position Size",
+    "href": "/education/module-4-risk-and-position-sizing/4.2-calculating-position-size"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "4.1-mathematics-of-ruin",
+      "title": "4.1 Mathematics of Ruin",
+      "href": "/education/module-4-risk-and-position-sizing/4.1-mathematics-of-ruin"
+    },
+    {
+      "lessonSlug": "4.2-calculating-position-size",
+      "title": "4.2 Calculating Position Size",
+      "href": "/education/module-4-risk-and-position-sizing/4.2-calculating-position-size"
+    },
+    {
+      "lessonSlug": "4.3-risk-reward-skewing",
+      "title": "4.3 Risk-Reward Skewing",
+      "href": "/education/module-4-risk-and-position-sizing/4.3-risk-reward-skewing"
+    }
+  ]
+}

@@ -1,0 +1,222 @@
+{
+  "moduleSlug": "module-5-technical-analysis-process",
+  "moduleTitle": "Module 5: Technical Analysis Process",
+  "moduleBaseRoute": "/education/module-5-technical-analysis-process",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "5.3-confluence-checklist",
+  "title": "5.3 Confluence Checklist",
+  "summary": "Confluence is a useful word, but it is often used badly.",
+  "bodyHtml": "<h1 id=\"user-content-53-confluence-checklist\">5.3 Confluence Checklist</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Confluence is a useful word, but it is often used badly.</p>\n<p>Some beginners think confluence means having many indicators on the screen. That is not enough. If three tools all measure almost the same thing, they are not giving you three different reasons. They may be giving you the same reason three times.</p>\n<p>In this course, confluence means:</p>\n<p><code>different kinds of evidence supporting the same trade idea</code></p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what real confluence means;</li>\n<li>separate useful evidence from repeated noise;</li>\n<li>use a simple checklist to judge trade quality more carefully.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-counts-as-real-confluence\">What Counts as Real Confluence</h2>\n<p>Real confluence usually comes from different categories of evidence.</p>\n<p>For example:</p>\n<ul>\n<li><strong>structure</strong>: Is the market trending or ranging?</li>\n<li><strong>location</strong>: Is price near a meaningful level?</li>\n<li><strong>tool support</strong>: Does an indicator support what price is already showing?</li>\n<li><strong>risk and environment</strong>: Does the setup still make sense after spread, liquidity, event timing, and payoff are considered?</li>\n</ul>\n<p>That is stronger than putting several similar indicators on the same chart.</p>\n<hr>\n<h2 id=\"user-content-a-simple-confluence-table\">A Simple Confluence Table</h2>\n<table>\n<thead>\n<tr>\n<th>Category</th>\n<th>Main question</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Structure</strong></td>\n<td>What is the market doing right now?</td>\n</tr>\n<tr>\n<td><strong>Location</strong></td>\n<td>Is the entry area meaningful on the chart?</td>\n</tr>\n<tr>\n<td><strong>Tool support</strong></td>\n<td>Does the tool add useful context without replacing structure?</td>\n</tr>\n<tr>\n<td><strong>Risk and environment</strong></td>\n<td>Does the trade still make sense after risk, spread, and event timing are checked?</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table showing the main confluence categories and the key question each category is meant to answer.)</em></p>\n<hr>\n<h2 id=\"user-content-what-does-not-count-as-strong-confluence\">What Does Not Count as Strong Confluence</h2>\n<p>The following may look impressive, but can be weak:</p>\n<ul>\n<li>three momentum indicators all pointing up;</li>\n<li>one chart pattern with no risk plan;</li>\n<li>one indicator signal right before a major event release;</li>\n<li>a nice-looking ratio with no logical target or invalidation point.</li>\n</ul>\n<p>The issue is not that each item is useless. The issue is that the evidence may not be diverse enough or complete enough.</p>\n<hr>\n<h2 id=\"user-content-cross-market-example\">Cross-Market Example</h2>\n<p>Imagine four different charts on your screen:</p>\n<ul>\n<li><strong>EUR/USD</strong> is pulling back into support during the London-New York overlap while the broader dollar trend still supports the idea.</li>\n<li><strong>S&#x26;P 500 or DAX product</strong> is bouncing at a known support zone, but a major event is due in five minutes.</li>\n<li><strong>Gold</strong> is holding above a breakout level and the trend is still intact.</li>\n<li><strong>Brent crude</strong> looks explosive, but the move is happening directly into a known resistance zone with no clean invalidation.</li>\n</ul>\n<p>Now compare the quality:</p>\n<ul>\n<li>EUR/USD may show good confluence if structure, session, and risk all align.</li>\n<li>The index setup may lose quality because timing and event risk weaken the environment.</li>\n<li>Gold may show stronger confluence if structure, tool support, and payoff all agree.</li>\n<li>Brent may show weak confluence if the chart is exciting but location and risk are poor.</li>\n</ul>\n<p>The strength comes from different categories agreeing, not from the chart that looks most dramatic.</p>\n<hr>\n<h2 id=\"user-content-why-risk-still-matters\">Why Risk Still Matters</h2>\n<p>Even strong confluence does not guarantee success.</p>\n<p>A trade can still fail because:</p>\n<ul>\n<li>price breaks the level;</li>\n<li>news changes conditions;</li>\n<li>volatility rises;</li>\n<li>your idea is simply wrong.</li>\n</ul>\n<p>Confluence is a quality filter. It is not a shield against loss.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-counting-signals-instead-of-checking-categories\">Mistake 1: Counting Signals Instead of Checking Categories</h3>\n<p>More signals do not always mean better evidence.</p>\n<h3 id=\"user-content-mistake-2-forcing-agreement\">Mistake 2: Forcing Agreement</h3>\n<p>Some traders keep adding tools until they find something that agrees with the trade they already want.</p>\n<h3 id=\"user-content-mistake-3-ignoring-environment\">Mistake 3: Ignoring Environment</h3>\n<p>A good-looking chart can still be poorly timed if spreads are wide or a major event is near.</p>\n<h3 id=\"user-content-mistake-4-treating-confluence-like-a-guarantee\">Mistake 4: Treating Confluence Like a Guarantee</h3>\n<p>Better alignment improves trade quality. It does not remove uncertainty.</p>\n<hr>",
+  "learningOutcomes": [
+    "use confluence as a decision-quality filter rather than a signal-counting game;",
+    "identify which forms of evidence should reinforce each other;",
+    "avoid inventing confluence by mixing repeated or weak signals."
+  ],
+  "quizItems": [
+    {
+      "id": "5.3-confluence-checklist-q1",
+      "prompt": "What is confluence in the context of this course?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Many unrelated signals collected without a plan"
+        },
+        {
+          "label": "B",
+          "text": "Different pieces of evidence supporting the same trade thesis"
+        },
+        {
+          "label": "C",
+          "text": "A guarantee of profit"
+        },
+        {
+          "label": "D",
+          "text": "A replacement for risk management"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Different pieces of evidence supporting the same trade thesis"
+      },
+      "explanation": "Confluence is about quality and alignment, not indicator quantity.",
+      "lessonAnchor": "Definition section"
+    },
+    {
+      "id": "5.3-confluence-checklist-q2",
+      "prompt": "Which combination shows stronger confluence?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Trend structure, key level, and realistic payoff align"
+        },
+        {
+          "label": "B",
+          "text": "Three similar oscillators say the same thing"
+        },
+        {
+          "label": "C",
+          "text": "A random breakout and a social post"
+        },
+        {
+          "label": "D",
+          "text": "Only one candle pattern"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Trend structure, key level, and realistic payoff align"
+      },
+      "explanation": "Confluence is strongest when different categories of evidence point to the same plan.",
+      "lessonAnchor": "Evidence categories section"
+    },
+    {
+      "id": "5.3-confluence-checklist-q3",
+      "prompt": "What remains true even with strong confluence?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "The trade cannot fail"
+        },
+        {
+          "label": "B",
+          "text": "Risk management still matters"
+        },
+        {
+          "label": "C",
+          "text": "Stops are optional"
+        },
+        {
+          "label": "D",
+          "text": "Event risk disappears"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Risk management still matters"
+      },
+      "explanation": "Confluence improves decision quality; it does not eliminate uncertainty.",
+      "lessonAnchor": "Risk still applies"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "when process standards materially change"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; confluence examples illustrate decision-quality filters and do not guarantee profitable setups"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the course later adds a formal scoring model."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, Step 3: Risk Management and Your Trade Plan",
+      "url": "https://www.cmegroup.com/education/courses/building-a-trade-plan/risk-management-and-your-trade-plan"
+    },
+    {
+      "label": "CME Group, Step 4: Trading Strategies in Your Trade Plan",
+      "url": "https://www.cmegroup.com/education/courses/building-a-trade-plan/trading-strategies-in-your-trade-plan"
+    },
+    {
+      "label": "CME Group, Technical Patterns: Reversals",
+      "url": "https://www.cmegroup.com/education/courses/technical-analysis/technical-patterns-reversals"
+    },
+    {
+      "label": "CMT Association, An Integrated Approach to Fundamental and Technical Analysis",
+      "url": "https://cmtassociation.org/wp-content/uploads/2024/01/0419-cieszynski-1.pdf"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "5.2-volume-profile-order-flow",
+    "title": "5.2 Volume Profile and Order Flow",
+    "href": "/education/module-5-technical-analysis-process/5.2-volume-profile-order-flow"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "5.1-moving-averages-momentum",
+      "title": "5.1 Moving Averages and Momentum",
+      "href": "/education/module-5-technical-analysis-process/5.1-moving-averages-momentum"
+    },
+    {
+      "lessonSlug": "5.2-volume-profile-order-flow",
+      "title": "5.2 Volume Profile and Order Flow",
+      "href": "/education/module-5-technical-analysis-process/5.2-volume-profile-order-flow"
+    },
+    {
+      "lessonSlug": "5.3-confluence-checklist",
+      "title": "5.3 Confluence Checklist",
+      "href": "/education/module-5-technical-analysis-process/5.3-confluence-checklist"
+    }
+  ]
+}

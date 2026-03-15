@@ -1,0 +1,227 @@
+{
+  "moduleSlug": "module-4-risk-and-position-sizing",
+  "moduleTitle": "Module 4: Risk and Position Sizing",
+  "moduleBaseRoute": "/education/module-4-risk-and-position-sizing",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "4.2-calculating-position-size",
+  "title": "4.2 Calculating Position Size",
+  "summary": "Position size should come from math, not mood.",
+  "bodyHtml": "<h1 id=\"user-content-42-calculating-position-size\">4.2 Calculating Position Size</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Position size should come from math, not mood.</p>\n<p>Some beginners choose size first and explain it later. That is backward. The better process is to decide how much you are willing to lose, then calculate the size that fits that limit.</p>\n<p>The core rule is simple:</p>\n<p><code>size is an output, not an input</code></p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain the steps used to calculate position size;</li>\n<li>use simple formulas for shares, FX lots, gold-linked share products, or futures contracts;</li>\n<li>understand why rounding down is usually the safer decision.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-four-step-sequence\">The Four-Step Sequence</h2>\n<table>\n<thead>\n<tr>\n<th>Step</th>\n<th>What you decide</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>1. Cash risk</strong></td>\n<td>The maximum amount you are willing to lose on the trade</td>\n<td>Sets the risk cap</td>\n</tr>\n<tr>\n<td><strong>2. Stop distance</strong></td>\n<td>The distance from entry to invalidation</td>\n<td>Shows how much room the trade needs</td>\n</tr>\n<tr>\n<td><strong>3. Unit value</strong></td>\n<td>What one pip, tick, point, or currency unit is worth</td>\n<td>Converts price movement into money</td>\n</tr>\n<tr>\n<td><strong>4. Final size</strong></td>\n<td>The number of shares, lots, or contracts that fit the plan</td>\n<td>Keeps risk aligned with the account</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table showing the sequence for calculating position size from cash risk to final size.)</em></p>\n<p>If you skip one of these steps, the result can be misleading.</p>\n<hr>\n<h2 id=\"user-content-the-main-formulas\">The Main Formulas</h2>\n<h3 id=\"user-content-shares-or-units\">Shares or Units</h3>\n<p><code>position size = cash risk / stop distance in price terms</code></p>\n<h3 id=\"user-content-fx-lots\">FX Lots</h3>\n<p><code>lots = cash risk / (stop distance in pips x pip value per lot)</code></p>\n<h3 id=\"user-content-futures-contracts\">Futures Contracts</h3>\n<p><code>contracts = cash risk / (stop distance in ticks x tick value)</code></p>\n<p>These are simple teaching formulas. Real products can differ by venue, contract size, quote format, and account currency. Always verify the current contract or product specification before using live numbers.</p>\n<hr>\n<h2 id=\"user-content-example-1-shares\">Example 1: Shares</h2>\n<p>Imagine:</p>\n<ul>\n<li>cash risk = <code>$100</code></li>\n<li>stock entry = <code>$50</code></li>\n<li>stop = <code>$45</code></li>\n</ul>\n<p>The stop distance is <code>$5</code>.</p>\n<p>So:</p>\n<p><code>shares = 100 / 5 = 20</code></p>\n<p>If the stop is hit, the planned loss is about <code>$100</code> before extra costs.</p>\n<hr>\n<h2 id=\"user-content-example-2-fx\">Example 2: FX</h2>\n<p>Imagine:</p>\n<ul>\n<li>cash risk = <code>$100</code></li>\n<li>stop distance = <code>20 pips</code></li>\n<li>pip value = <code>$10</code> per standard lot</li>\n</ul>\n<p>So:</p>\n<p><code>lots = 100 / (20 x 10) = 0.5</code></p>\n<p>That means <code>0.5</code> standard lots in this simplified example.</p>\n<p>Important note:</p>\n<p>pip values can vary depending on the pair, quote currency, and account currency. Always verify the actual value used by the product or platform.</p>\n<hr>\n<h2 id=\"user-content-example-3-gold-linked-shares-or-etf-units\">Example 3: Gold-Linked Shares or ETF Units</h2>\n<p>Imagine:</p>\n<ul>\n<li>cash risk = <code>$90</code></li>\n<li>gold ETF entry = <code>$30</code></li>\n<li>stop = <code>$27</code></li>\n</ul>\n<p>The stop distance is <code>$3</code>.</p>\n<p>So:</p>\n<p><code>units = 90 / 3 = 30</code></p>\n<p>This uses the same share-style logic as a stock trade. The difference is the market theme. You are sizing exposure to a metals product, not to a company share.</p>\n<hr>\n<h2 id=\"user-content-example-4-energy-futures\">Example 4: Energy Futures</h2>\n<p>CME’s education explains that position size depends on stop distance and tick value.</p>\n<p>Imagine:</p>\n<ul>\n<li>cash risk = <code>$100</code></li>\n<li>stop distance = <code>10 ticks</code></li>\n<li>tick value = <code>$10</code></li>\n</ul>\n<p>So:</p>\n<p><code>contracts = 100 / (10 x 10) = 1</code></p>\n<p>That means <code>1</code> contract in this simplified WTI-style example.</p>\n<p>Again, the tick value depends on the specific contract. The formula stays the same, but the numbers can change.</p>\n<hr>\n<h2 id=\"user-content-always-round-down-if-needed\">Always Round Down If Needed</h2>\n<p>Sometimes the formula gives a size like <code>1.6</code> contracts.</p>\n<p>If partial contracts are not available, the conservative choice is usually to round <strong>down</strong>.</p>\n<p>Why?</p>\n<p>Because rounding up can break the risk cap.</p>\n<p>If your plan allows only <code>$100</code> risk and rounding up would expose you to more than <code>$100</code>, the plan is no longer being followed.</p>\n<hr>\n<h2 id=\"user-content-why-notional-value-still-matters\">Why Notional Value Still Matters</h2>\n<p>Even when risk is capped with a stop, it is still useful to understand total exposure.</p>\n<p>One simple formula is:</p>\n<p><code>notional value = price x quantity</code></p>\n<p>This matters because a small-looking position in one market can still represent a large amount of exposure compared with another market.</p>\n<p>That is why a 30-unit gold ETF position, a half-lot FX position, and one oil contract should never be compared by chart shape alone. They must be compared by cash risk and product rules.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-choosing-size-before-doing-the-math\">Mistake 1: Choosing Size Before Doing the Math</h3>\n<p>This usually turns risk management into guesswork.</p>\n<h3 id=\"user-content-mistake-2-ignoring-product-differences\">Mistake 2: Ignoring Product Differences</h3>\n<p>One tick, one pip, or one point does not have the same money value in every market.</p>\n<h3 id=\"user-content-mistake-3-rounding-up-because-the-trade-looks-good\">Mistake 3: Rounding Up Because the Trade Looks Good</h3>\n<p>Confidence does not change the formula.</p>\n<h3 id=\"user-content-mistake-4-changing-the-stop-after-sizing\">Mistake 4: Changing the Stop After Sizing</h3>\n<p>If the stop changes, the size should usually be recalculated.</p>\n<hr>",
+  "learningOutcomes": [
+    "calculate size from cash risk and stop distance;",
+    "explain why position size is an output of the plan, not an input;",
+    "identify when rounding down is the correct risk decision."
+  ],
+  "quizItems": [
+    {
+      "id": "4.2-calculating-position-size-q1",
+      "prompt": "What should determine position size first?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Emotional conviction"
+        },
+        {
+          "label": "B",
+          "text": "Planned cash risk and stop distance"
+        },
+        {
+          "label": "C",
+          "text": "Last trade outcome"
+        },
+        {
+          "label": "D",
+          "text": "Social-media sentiment"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Planned cash risk and stop distance"
+      },
+      "explanation": "Size should be derived from the risk plan.",
+      "lessonAnchor": "Position-size formula"
+    },
+    {
+      "id": "4.2-calculating-position-size-q2",
+      "prompt": "If your risk is $100 and your stop distance is $5 per share, how many shares fit the plan?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "5"
+        },
+        {
+          "label": "B",
+          "text": "10"
+        },
+        {
+          "label": "C",
+          "text": "20"
+        },
+        {
+          "label": "D",
+          "text": "100"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "20"
+      },
+      "explanation": "Shares = cash risk divided by stop distance, so 100 / 5 = 20.",
+      "lessonAnchor": "Shares example"
+    },
+    {
+      "id": "4.2-calculating-position-size-q3",
+      "prompt": "Why is position size an output rather than an input?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because the market chooses it randomly"
+        },
+        {
+          "label": "B",
+          "text": "Because the trade plan defines the acceptable downside first"
+        },
+        {
+          "label": "C",
+          "text": "Because all products use the same contract size"
+        },
+        {
+          "label": "D",
+          "text": "Because size does not affect risk"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because the trade plan defines the acceptable downside first"
+      },
+      "explanation": "Risk planning should come before size selection.",
+      "lessonAnchor": "Risk-first sequence"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; position-size examples are simplified teaching illustrations and not universal live-trading instructions"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "re-open if a future revision adds venue-specific live contract values or account-currency conversions."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, Proper Position Size",
+      "url": "https://www.cmegroup.com/education/courses/trade-and-risk-management/proper-position-size"
+    },
+    {
+      "label": "CME Group, Calculating Futures Contract Profit or Loss",
+      "url": "https://www.cmegroup.com/education/courses/introduction-to-futures/calculating-futures-contract-profit-or-loss"
+    },
+    {
+      "label": "CME Group, A Trader's Guide to Futures",
+      "url": "https://www.cmegroup.com/education/files/a-traders-guide-to-futures.pdf"
+    },
+    {
+      "label": "FINRA margin accounts topic",
+      "url": "https://www.finra.org/rules-guidance/key-topics/margin-accounts"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "4.1-mathematics-of-ruin",
+    "title": "4.1 Mathematics of Ruin",
+    "href": "/education/module-4-risk-and-position-sizing/4.1-mathematics-of-ruin"
+  },
+  "nextLesson": {
+    "lessonSlug": "4.3-risk-reward-skewing",
+    "title": "4.3 Risk-Reward Skewing",
+    "href": "/education/module-4-risk-and-position-sizing/4.3-risk-reward-skewing"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "4.1-mathematics-of-ruin",
+      "title": "4.1 Mathematics of Ruin",
+      "href": "/education/module-4-risk-and-position-sizing/4.1-mathematics-of-ruin"
+    },
+    {
+      "lessonSlug": "4.2-calculating-position-size",
+      "title": "4.2 Calculating Position Size",
+      "href": "/education/module-4-risk-and-position-sizing/4.2-calculating-position-size"
+    },
+    {
+      "lessonSlug": "4.3-risk-reward-skewing",
+      "title": "4.3 Risk-Reward Skewing",
+      "href": "/education/module-4-risk-and-position-sizing/4.3-risk-reward-skewing"
+    }
+  ]
+}

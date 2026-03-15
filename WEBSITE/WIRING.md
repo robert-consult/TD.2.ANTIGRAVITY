@@ -6,11 +6,16 @@
 example.com (this module)          tradehub.example.com (TD.2.ANTIGRAVITY app)
 ├── /                  HomePage    ├── /login                     LoginPage
 ├── /dashboard         Markets     ├── /login?tab=login           Login tab deep link
-├── /education         Education   ├── /login?tab=register        Register tab deep link
+├── /education         Catalog     ├── /login?tab=register        Register tab deep link
+├── /education/:m      Module      ├── /verify-email              Email verification
+├── /education/:m/:l   Lesson      ├── /                          Authenticated app shell
+├── /platform-guide    Guide       ├── /api/auth/*                Auth endpoints
+├── /platform-guide/:l GuidePage   └── /api/trades/*, /api/quotes/*, ...
 ├── /contact           Contact     ├── /verify-email              Email verification
-└── /api/status        Health      ├── /                          Authenticated app shell
-    /api/education/*   Content     ├── /api/auth/*                Auth endpoints
-    /api/contact       Form POST   └── /api/trades/*, /api/quotes/*, ...
+└── /api/status        Health
+    /api/education/*   Curriculum content
+    /api/platform-guide/*  Module 10 content
+    /api/contact       Form POST
 ```
 
 ## Cross-Domain Link Map
@@ -45,16 +50,26 @@ export const APP_CONFIG = {
 // ✅ Internal navigation within the website SPA
 <Link href="/dashboard">Markets</Link>
 <Link href="/education">Education</Link>
+<Link href="/platform-guide">Platform Guide</Link>
 ```
 
 ## Where Links Appear
 
 | Component | Link Target | Type |
 |-----------|------------|------|
-| `MarketingHeader.tsx` | Login, Signup | Native `<a>` → tradehub |
+| `MarketingHeader.tsx` | Login, Signup, Platform Guide | `<a>` to tradehub for auth, `<Link>` for internal |
 | `HomePage.tsx` | Login, Signup, Dashboard | `<a>` for auth, `<Link>` for internal |
-| `EducationPage.tsx` | TradeQuip app home | Native `<a>` → tradehub |
-| `App.tsx` | All internal routes | Wouter `<Route>` |
+| `EducationPage.tsx` | Platform Guide, app home CTA | `<Link>` for guide, native `<a>` for app CTA |
+| `App.tsx` | Catalog, module, lesson, and guide routes | Wouter `<Route>` |
+
+## Content Pipeline Topology
+
+- Authoring inputs live outside the website module in:
+  - `/home/bcodex/PUBLIC WEBSITE/integration_enhancements_framework`
+  - `/home/bcodex/PUBLIC WEBSITE/education_module_development`
+- WEBSITE consumes those inputs only during `npm run content:sync`.
+- Runtime reads only the generated files in `server/content/generated/`.
+- `npm run audit:website-isolation` still enforces that WEBSITE code does not import from outside `WEBSITE/`.
 
 ## Local Runtime
 

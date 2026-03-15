@@ -1,0 +1,52 @@
+{
+  "moduleSlug": "module-8-behavioral-finance",
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "publicTitle": "Module 8: Behavioral Finance",
+  "cardSummary": "Use concrete behavioral scenarios to understand decision-making under uncertainty, bias, loss aversion, and emotional regulation.",
+  "status": "reviewed",
+  "flags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-8-behavioral-finance",
+  "lessonCount": 4,
+  "quizItemCount": 12,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "8.1-decision-making-under-uncertainty",
+      "title": "8.1 Decision Making Under Uncertainty",
+      "summary": "Many people grow up thinking:",
+      "href": "/education/module-8-behavioral-finance/8.1-decision-making-under-uncertainty"
+    },
+    {
+      "lessonSlug": "8.2-cognitive-biases",
+      "title": "8.2 Cognitive Biases",
+      "summary": "Human beings do not make decisions like perfect machines.",
+      "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+    },
+    {
+      "lessonSlug": "8.3-prospect-theory-loss-aversion",
+      "title": "8.3 Prospect Theory and Loss Aversion",
+      "summary": "Many beginners think the hardest part of trading is finding the right setup.",
+      "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+    },
+    {
+      "lessonSlug": "8.4-emotional-regulation-in-trading",
+      "title": "8.4 Emotional Regulation in Trading",
+      "summary": "Traders do not become better by pretending they have no emotions.",
+      "href": "/education/module-8-behavioral-finance/8.4-emotional-regulation-in-trading"
+    }
+  ]
+}

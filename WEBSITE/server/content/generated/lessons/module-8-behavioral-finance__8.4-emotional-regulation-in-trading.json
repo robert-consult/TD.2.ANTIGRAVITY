@@ -1,0 +1,228 @@
+{
+  "moduleSlug": "module-8-behavioral-finance",
+  "moduleTitle": "Module 8: Behavioral Finance",
+  "moduleBaseRoute": "/education/module-8-behavioral-finance",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "8.4-emotional-regulation-in-trading",
+  "title": "8.4 Emotional Regulation in Trading",
+  "summary": "Traders do not become better by pretending they have no emotions.",
+  "bodyHtml": "<h1 id=\"user-content-84-emotional-regulation-in-trading\">8.4 Emotional Regulation in Trading</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Traders do not become better by pretending they have no emotions.</p>\n<p>Real improvement comes from noticing:</p>\n<ul>\n<li>fear;</li>\n<li>frustration;</li>\n<li>urgency;</li>\n<li>excitement;</li>\n<li>tiredness.</li>\n</ul>\n<p>These feelings are normal.</p>\n<p>The problem starts when they begin to control decisions.</p>\n<p>That can show up as:</p>\n<ul>\n<li>revenge trading after a loss;</li>\n<li>rushing into a setup from fear of missing out;</li>\n<li>forcing more trades after a bad session;</li>\n<li>trusting a pressured message, tip, or chat instead of slowing down.</li>\n</ul>\n<p>This lesson is about keeping those moments from taking over the process.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain the difference between emotional regulation and emotional suppression;</li>\n<li>spot warning signs that your discipline is weakening;</li>\n<li>use a simple reset routine when your emotional state becomes unsafe for trading.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-regulation-versus-suppression\">Regulation Versus Suppression</h2>\n<p><strong>Emotional regulation</strong> means:</p>\n<p>you notice the feeling, name it, and use habits that stop it from controlling the next decision.</p>\n<p><strong>Emotional suppression</strong> means:</p>\n<p>you pretend the feeling is not there and keep pushing forward anyway.</p>\n<p>Suppression sounds strong.\nOften it is the weaker choice.</p>\n<p>If you hide frustration instead of managing it, the feeling usually returns through bad decisions.</p>\n<hr>\n<h2 id=\"user-content-common-warning-signs\">Common Warning Signs</h2>\n<table>\n<thead>\n<tr>\n<th>Warning sign</th>\n<th>What it may look like</th>\n<th>Safer response</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Frustration</strong></td>\n<td>Bending rules after a loss in EUR/USD, gold, or another market</td>\n<td>Stop new trades and review the last decision</td>\n</tr>\n<tr>\n<td><strong>Urgency</strong></td>\n<td>Feeling you must chase a fast index or oil move right now</td>\n<td>Pause and ask what would happen if you waited</td>\n</tr>\n<tr>\n<td><strong>Fear of missing out</strong></td>\n<td>Entering late because a breakout in gold or a stock index already started</td>\n<td>Return to your own checklist</td>\n</tr>\n<tr>\n<td><strong>Fatigue</strong></td>\n<td>Sloppy execution or weak attention across several charts</td>\n<td>Reduce size or stop for the session</td>\n</tr>\n<tr>\n<td><strong>Pressure from messages or tips</strong></td>\n<td>Feeling pushed by a group, post, or chat into a market you did not plan to trade</td>\n<td>Use only official information and slow down</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A five-row table listing emotional warning signs, how they appear in trading, and the safer response for each.)</em></p>\n<hr>\n<h2 id=\"user-content-a-simple-reset-routine\">A Simple Reset Routine</h2>\n<p>When you notice a warning sign, use a short reset routine:</p>\n<ol>\n<li>Stop opening new trades for the moment.</li>\n<li>Name the state clearly: <code>frustrated</code>, <code>rushed</code>, <code>tired</code>, or <code>fearful</code>.</li>\n<li>Ask whether your last choice followed the plan.</li>\n<li>Resume only if the process feels stable again.</li>\n</ol>\n<p>If the answer is no, step away.</p>\n<p>That is not weakness.\nThat is protection.</p>\n<hr>\n<h2 id=\"user-content-why-slowing-down-matters\">Why Slowing Down Matters</h2>\n<p>FINRA's investor guidance for turbulent markets encourages people not to make rushed decisions when emotions are high.</p>\n<p>Investor.gov also warns that pressure and urgency can be used in scams.</p>\n<p>That matters for traders because emotional pressure can come from two places:</p>\n<ul>\n<li>from your own account swings;</li>\n<li>from outside people or messages pushing you to act quickly.</li>\n</ul>\n<p>Both can damage judgment.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine a trader takes two losses in a row in FX, then sees a fast stock-index move and a noisy Brent headline.</p>\n<p>The trader starts thinking:</p>\n<p><code>I need to make it back today</code></p>\n<p>That thought creates urgency.</p>\n<p>Then a weak setup appears.\nThe trader wants to take it anyway.</p>\n<p>At that moment, the safest action is not more speed.\nThe safest action is the reset routine:</p>\n<ul>\n<li>pause;</li>\n<li>review the state;</li>\n<li>review the quality of the setup;</li>\n<li>continue only if discipline is still there.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-strong-traders-feel-nothing\">Mistake 1: Thinking Strong Traders Feel Nothing</h3>\n<p>Strong traders manage emotion.\nThey do not erase emotion.</p>\n<h3 id=\"user-content-mistake-2-treating-a-break-as-failure\">Mistake 2: Treating a Break as Failure</h3>\n<p>Sometimes stopping is the most disciplined choice available.</p>\n<h3 id=\"user-content-mistake-3-trying-to-fix-frustration-with-more-trades\">Mistake 3: Trying to Fix Frustration With More Trades</h3>\n<p>More activity can make emotional drift worse.</p>\n<h3 id=\"user-content-mistake-4-trusting-pressure-and-urgency\">Mistake 4: Trusting Pressure and Urgency</h3>\n<p>Pressure from markets, chat groups, or supposed experts should make you slower, not faster.</p>\n<hr>",
+  "learningOutcomes": [
+    "distinguish emotional regulation from pretending emotion does not exist;",
+    "identify common warning signs that discipline is weakening;",
+    "build a simple reset routine for moments of frustration, urgency, or fear."
+  ],
+  "quizItems": [
+    {
+      "id": "8.4-emotional-regulation-in-trading-q1",
+      "prompt": "What is emotional regulation in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Using habits that stop emotion from taking over decisions"
+        },
+        {
+          "label": "B",
+          "text": "Pretending emotion does not exist"
+        },
+        {
+          "label": "C",
+          "text": "Trading only when happy"
+        },
+        {
+          "label": "D",
+          "text": "Avoiding all review"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Using habits that stop emotion from taking over decisions"
+      },
+      "explanation": "The lesson defines regulation as managing state, not denying emotion.",
+      "lessonAnchor": "Regulation versus suppression"
+    },
+    {
+      "id": "8.4-emotional-regulation-in-trading-q2",
+      "prompt": "Which sign suggests the trader should pause?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Rule-bending after frustration or urgency"
+        },
+        {
+          "label": "B",
+          "text": "Calm checklist use"
+        },
+        {
+          "label": "C",
+          "text": "Honest journaling"
+        },
+        {
+          "label": "D",
+          "text": "Smaller size after fatigue"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Rule-bending after frustration or urgency"
+      },
+      "explanation": "The lesson lists rule-bending and urgency as warning signs that discipline is weakening.",
+      "lessonAnchor": "Warning signs"
+    },
+    {
+      "id": "8.4-emotional-regulation-in-trading-q3",
+      "prompt": "What is a reasonable reset response?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Pause, review your state, and resume only if the process is stable"
+        },
+        {
+          "label": "B",
+          "text": "Increase size to recover confidence"
+        },
+        {
+          "label": "C",
+          "text": "Add more trades to feel busy"
+        },
+        {
+          "label": "D",
+          "text": "Keep trading faster so you do not miss out"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Pause, review your state, and resume only if the process is stable"
+      },
+      "explanation": "The lesson teaches a pause-and-review reset routine rather than forced action.",
+      "lessonAnchor": "A simple reset routine"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "12mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "March 12, 2027"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and any derivative CTA"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; emotional pressure and scam pressure can both distort decisions; use only official channels"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adds formal mental-health referral guidance beyond trading education scope."
+  ],
+  "sources": [
+    {
+      "label": "FINRA, Investor Tips for Turbulent Markets",
+      "url": "https://www.finra.org/investors/insights/tips-turbulent-market"
+    },
+    {
+      "label": "FINRA, Financial Tips for New Investors",
+      "url": "https://www.finra.org/investors/insights/tips-new-investors"
+    },
+    {
+      "label": "Investor.gov, Protect Your Money: How to Avoid Investment Scams",
+      "url": "https://www.investor.gov/protect-your-investments/fraud/protect-your-money"
+    },
+    {
+      "label": "Investor.gov, Investor Bulletin: Behavioral Patterns of U.S. Investors",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-72"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "8.3-prospect-theory-loss-aversion",
+    "title": "8.3 Prospect Theory and Loss Aversion",
+    "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "8.1-decision-making-under-uncertainty",
+      "title": "8.1 Decision-Making Under Uncertainty",
+      "href": "/education/module-8-behavioral-finance/8.1-decision-making-under-uncertainty"
+    },
+    {
+      "lessonSlug": "8.2-cognitive-biases",
+      "title": "8.2 Cognitive Biases",
+      "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+    },
+    {
+      "lessonSlug": "8.3-prospect-theory-loss-aversion",
+      "title": "8.3 Prospect Theory and Loss Aversion",
+      "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+    },
+    {
+      "lessonSlug": "8.4-emotional-regulation-in-trading",
+      "title": "8.4 Emotional Regulation in Trading",
+      "href": "/education/module-8-behavioral-finance/8.4-emotional-regulation-in-trading"
+    }
+  ]
+}

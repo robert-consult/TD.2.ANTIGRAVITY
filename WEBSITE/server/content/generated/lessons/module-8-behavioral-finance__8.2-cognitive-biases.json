@@ -1,0 +1,239 @@
+{
+  "moduleSlug": "module-8-behavioral-finance",
+  "moduleTitle": "Module 8: Behavioral Finance",
+  "moduleBaseRoute": "/education/module-8-behavioral-finance",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "8.2-cognitive-biases",
+  "title": "8.2 Cognitive Biases",
+  "summary": "Human beings do not make decisions like perfect machines.",
+  "bodyHtml": "<h1 id=\"user-content-82-cognitive-biases\">8.2 Cognitive Biases</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Human beings do not make decisions like perfect machines.</p>\n<p>We use shortcuts.</p>\n<p>Those shortcuts can be helpful in normal life, but in trading they can create repeated mistakes that feel reasonable in the moment.</p>\n<p>These mistakes are often called <strong>cognitive biases</strong>.</p>\n<p>A bias does not mean someone is stupid.\nIt means the mind is leaning in a predictable direction.</p>\n<p>If you can recognize the lean, you have a better chance of protecting the trade plan.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a cognitive bias is in plain language;</li>\n<li>identify four common biases that affect traders;</li>\n<li>use simple review habits to reduce one-sided decisions.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-four-common-biases\">Four Common Biases</h2>\n<table>\n<thead>\n<tr>\n<th>Bias</th>\n<th>Plain-language meaning</th>\n<th>Trading example</th>\n<th>Simple defense</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Confirmation bias</strong></td>\n<td>Looking mainly for evidence that supports your current idea</td>\n<td>Staying bullish on EUR/USD or gold while ignoring clear warning signs</td>\n<td>Ask what evidence would make the trade weaker</td>\n</tr>\n<tr>\n<td><strong>Recency bias</strong></td>\n<td>Giving too much weight to the most recent result</td>\n<td>Oversizing after a short Nasdaq winning streak or freezing after one bad oil day</td>\n<td>Review a larger sample of trades</td>\n</tr>\n<tr>\n<td><strong>Overconfidence</strong></td>\n<td>Believing you understand more than you really do</td>\n<td>Taking larger risk in an index or Brent trade because recent success feels like proof of skill</td>\n<td>Keep size tied to rules, not mood</td>\n</tr>\n<tr>\n<td><strong>Sunk cost fallacy</strong></td>\n<td>Staying with a bad decision because you already spent time or money on it</td>\n<td>Refusing to exit a weak gold or oil idea because you waited so long for it</td>\n<td>Judge the trade by current evidence, not past effort</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table defining confirmation bias, recency bias, overconfidence, and sunk cost fallacy, with one trading example and one simple defense for each.)</em></p>\n<hr>\n<h2 id=\"user-content-confirmation-bias-in-plain-language\">Confirmation Bias in Plain Language</h2>\n<p>This bias says:</p>\n<p><code>I already have an opinion, so I only want evidence that agrees with it</code></p>\n<p>A trader with confirmation bias may:</p>\n<ul>\n<li>highlight only bullish signals on a long idea;</li>\n<li>ignore a weak market structure change;</li>\n<li>dismiss any evidence that challenges the plan.</li>\n</ul>\n<p>That makes the trade feel more certain than it really is.</p>\n<hr>\n<h2 id=\"user-content-recency-bias-in-plain-language\">Recency Bias in Plain Language</h2>\n<p>This bias says:</p>\n<p><code>what just happened must be the most important thing</code></p>\n<p>A trader may:</p>\n<ul>\n<li>feel unstoppable after three wins;</li>\n<li>feel broken after one sharp loss;</li>\n<li>treat a small recent sample as if it proves the future.</li>\n</ul>\n<p>The problem is not that recent results matter a little.\nThe problem is when they matter too much.</p>\n<hr>\n<h2 id=\"user-content-overconfidence-and-sunk-cost\">Overconfidence and Sunk Cost</h2>\n<p><strong>Overconfidence</strong> can make traders act bigger than their evidence deserves.</p>\n<p>Examples:</p>\n<ul>\n<li>adding size too quickly;</li>\n<li>trading too often;</li>\n<li>thinking rules are no longer necessary.</li>\n</ul>\n<p><strong>Sunk cost fallacy</strong> appears when a trader keeps defending a weak idea because so much time, effort, or money is already tied to it.</p>\n<p>Examples:</p>\n<ul>\n<li>staying in a weak trade because you spent hours planning it;</li>\n<li>refusing to admit the setup is gone because you waited all day.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-a-simple-bias-defense-routine\">A Simple Bias Defense Routine</h2>\n<p>Before entry, ask:</p>\n<ol>\n<li>What evidence supports this trade?</li>\n<li>What evidence weakens this trade?</li>\n<li>Am I reacting to a recent win or loss?</li>\n<li>Am I confident because the evidence is good, or because my ego feels strong today?</li>\n</ol>\n<p>That short routine does not remove bias.\nIt makes bias easier to catch.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine a trader has three winning trades in a row in a stock-index product.</p>\n<p>The next morning, the trader feels:</p>\n<p><code>I am seeing the market perfectly right now</code></p>\n<p>That feeling can create two problems at once:</p>\n<ul>\n<li><strong>recency bias</strong> because the recent wins feel more important than they are;</li>\n<li><strong>overconfidence</strong> because success is starting to feel like certainty.</li>\n</ul>\n<p>If the trader then jumps into a gold breakout or a Brent crude setup and ignores warning signs that weaken the idea, <strong>confirmation bias</strong> joins the problem.</p>\n<p>This is how a small mental shortcut can grow into a large trading mistake.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-bias-only-happens-to-other-people\">Mistake 1: Thinking Bias Only Happens to Other People</h3>\n<p>Bias is a human issue, not a beginner-only issue.</p>\n<h3 id=\"user-content-mistake-2-calling-confidence-the-same-thing-as-evidence\">Mistake 2: Calling Confidence the Same Thing as Evidence</h3>\n<p>Strong feelings are not the same as strong reasons.</p>\n<h3 id=\"user-content-mistake-3-reviewing-too-small-a-sample\">Mistake 3: Reviewing Too Small a Sample</h3>\n<p>One or two trades rarely tell the full story.</p>\n<h3 id=\"user-content-mistake-4-refusing-to-write-down-counter-evidence\">Mistake 4: Refusing to Write Down Counter-Evidence</h3>\n<p>If you never record what weakens the idea, confirmation bias gets stronger.</p>\n<hr>",
+  "learningOutcomes": [
+    "identify common biases that can distort trading decisions;",
+    "connect each bias to a practical trading mistake;",
+    "use simple review habits to reduce one-sided thinking."
+  ],
+  "quizItems": [
+    {
+      "id": "8.2-cognitive-biases-q1",
+      "prompt": "What is confirmation bias in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Looking mainly for evidence that supports the current idea"
+        },
+        {
+          "label": "B",
+          "text": "Using a stop loss"
+        },
+        {
+          "label": "C",
+          "text": "Writing a review note"
+        },
+        {
+          "label": "D",
+          "text": "Waiting for better liquidity"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Looking mainly for evidence that supports the current idea"
+      },
+      "explanation": "The lesson defines confirmation bias as one-sided evidence gathering.",
+      "lessonAnchor": "Four common biases"
+    },
+    {
+      "id": "8.2-cognitive-biases-q2",
+      "prompt": "What does recency bias mean?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Giving too much weight to the most recent result or streak"
+        },
+        {
+          "label": "B",
+          "text": "Ignoring all recent data"
+        },
+        {
+          "label": "C",
+          "text": "Trading only monthly charts"
+        },
+        {
+          "label": "D",
+          "text": "Respecting long-run evidence"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Giving too much weight to the most recent result or streak"
+      },
+      "explanation": "The lesson explains that recent wins or losses can distort present judgment.",
+      "lessonAnchor": "Four common biases"
+    },
+    {
+      "id": "8.2-cognitive-biases-q3",
+      "prompt": "Which habit helps reduce bias before entry?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Ask what evidence would prove the idea weaker"
+        },
+        {
+          "label": "B",
+          "text": "Increase size after a win"
+        },
+        {
+          "label": "C",
+          "text": "Hide losing trades from the journal"
+        },
+        {
+          "label": "D",
+          "text": "Skip the checklist when confident"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Ask what evidence would prove the idea weaker"
+      },
+      "explanation": "The lesson uses a counter-evidence question as a practical defense against one-sided thinking.",
+      "lessonAnchor": "A simple bias defense routine"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "n/a"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and course summary cards"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; recognizing bias helps review but does not create certainty"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adds new source-backed bias examples."
+  ],
+  "sources": [
+    {
+      "label": "Daniel Kahneman, Prize Lecture",
+      "url": "https://www.nobelprize.org/prizes/economic-sciences/2002/kahneman/lecture/"
+    },
+    {
+      "label": "Daniel Kahneman, Facts",
+      "url": "https://www.nobelprize.org/prizes/economic-sciences/2002/kahneman/facts/"
+    },
+    {
+      "label": "Investor.gov, Investor Bulletin: Behavioral Patterns of U.S. Investors",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-72"
+    },
+    {
+      "label": "FINRA, Concentrate on Concentration Risk",
+      "url": "https://www.finra.org/investors/insights/concentration-risk"
+    },
+    {
+      "label": "FINRA, Asset Allocation and Diversification",
+      "url": "https://www.finra.org/investors/investing/investing-basics/asset-allocation-diversification"
+    },
+    {
+      "label": "FINRA, Financial Tips for New Investors",
+      "url": "https://www.finra.org/investors/insights/tips-new-investors"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "8.1-decision-making-under-uncertainty",
+    "title": "8.1 Decision-Making Under Uncertainty",
+    "href": "/education/module-8-behavioral-finance/8.1-decision-making-under-uncertainty"
+  },
+  "nextLesson": {
+    "lessonSlug": "8.3-prospect-theory-loss-aversion",
+    "title": "8.3 Prospect Theory and Loss Aversion",
+    "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "8.1-decision-making-under-uncertainty",
+      "title": "8.1 Decision-Making Under Uncertainty",
+      "href": "/education/module-8-behavioral-finance/8.1-decision-making-under-uncertainty"
+    },
+    {
+      "lessonSlug": "8.2-cognitive-biases",
+      "title": "8.2 Cognitive Biases",
+      "href": "/education/module-8-behavioral-finance/8.2-cognitive-biases"
+    },
+    {
+      "lessonSlug": "8.3-prospect-theory-loss-aversion",
+      "title": "8.3 Prospect Theory and Loss Aversion",
+      "href": "/education/module-8-behavioral-finance/8.3-prospect-theory-loss-aversion"
+    },
+    {
+      "lessonSlug": "8.4-emotional-regulation-in-trading",
+      "title": "8.4 Emotional Regulation in Trading",
+      "href": "/education/module-8-behavioral-finance/8.4-emotional-regulation-in-trading"
+    }
+  ]
+}

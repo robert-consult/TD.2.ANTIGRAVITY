@@ -1,0 +1,219 @@
+{
+  "moduleSlug": "module-5-technical-analysis-process",
+  "moduleTitle": "Module 5: Technical Analysis Process",
+  "moduleBaseRoute": "/education/module-5-technical-analysis-process",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "5.1-moving-averages-momentum",
+  "title": "5.1 Moving Averages and Momentum",
+  "summary": "Charts can feel noisy at first.",
+  "bodyHtml": "<h1 id=\"user-content-51-moving-averages-and-momentum\">5.1 Moving Averages and Momentum</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Charts can feel noisy at first.</p>\n<p>That is one reason many traders use tools such as moving averages, RSI, or MACD. These tools help summarize what price has been doing. The problem starts when beginners treat them like prediction machines.</p>\n<p>In this lesson, the key idea is simple:</p>\n<p><code>an indicator is a tool for context, not a promise about the future</code></p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a moving average does in plain language;</li>\n<li>understand what traders mean by momentum;</li>\n<li>use indicators as support tools instead of treating them as complete strategies.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-a-moving-average-does\">What a Moving Average Does</h2>\n<p>A moving average is a line based on past prices.</p>\n<p>It smooths price data so that the overall direction is easier to see.</p>\n<p>For example:</p>\n<ul>\n<li>if price is mostly rising, the moving average may slope upward;</li>\n<li>if price is mostly falling, the moving average may slope downward;</li>\n<li>if price is moving sideways, the line may flatten.</li>\n</ul>\n<p>That does <strong>not</strong> mean the moving average is leading the market. It is built from past data, so it reacts after price has moved.</p>\n<hr>\n<h2 id=\"user-content-what-momentum-means\">What Momentum Means</h2>\n<p>Momentum is about the <strong>strength or speed</strong> of price movement.</p>\n<p>A market can be:</p>\n<ul>\n<li>moving up with strong momentum;</li>\n<li>moving down with strong momentum;</li>\n<li>drifting with weak momentum.</li>\n</ul>\n<p>Tools such as RSI or MACD try to summarize that behavior. They can be helpful, but they still come from past price data.</p>\n<hr>\n<h2 id=\"user-content-a-simple-comparison\">A Simple Comparison</h2>\n<table>\n<thead>\n<tr>\n<th>Tool idea</th>\n<th>What it helps describe</th>\n<th>What it cannot do</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Moving average</strong></td>\n<td>General trend direction and smoothing</td>\n<td>Guarantee a reversal or a breakout</td>\n</tr>\n<tr>\n<td><strong>Momentum tool</strong></td>\n<td>Strength or weakness of recent movement</td>\n<td>Predict news or force the market to turn</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row table comparing moving averages and momentum tools, showing what each can describe and what each cannot guarantee.)</em></p>\n<hr>\n<h2 id=\"user-content-use-the-tool-after-looking-at-price\">Use the Tool After Looking at Price</h2>\n<p>The safer order is:</p>\n<ol>\n<li>look at the chart structure first;</li>\n<li>identify the trend, range, or key levels;</li>\n<li>then use the indicator to add context.</li>\n</ol>\n<p>If the chart structure and the indicator support the same story, that can be useful.</p>\n<p>If they strongly disagree, slow down and study the chart more carefully.</p>\n<p>Price structure still comes first.</p>\n<hr>\n<h2 id=\"user-content-cross-market-example\">Cross-Market Example</h2>\n<p>The same tool can be used in different markets, but the reading still needs context.</p>\n<table>\n<thead>\n<tr>\n<th>Market</th>\n<th>What the indicator might show</th>\n<th>Disciplined reading</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>EUR/USD</strong></td>\n<td>Price is above a rising moving average and structure is making higher highs</td>\n<td>Trend context looks supportive, but structure still comes first</td>\n</tr>\n<tr>\n<td><strong>S&#x26;P 500 or Nasdaq product</strong></td>\n<td>Price is above the average but sitting under a major resistance zone</td>\n<td>The average looks positive, but the chart still has overhead risk</td>\n</tr>\n<tr>\n<td><strong>Gold</strong></td>\n<td>Price is above the average after a strong breakout</td>\n<td>The tool supports strength, but it does not prove the move cannot pull back</td>\n</tr>\n<tr>\n<td><strong>Brent or WTI crude</strong></td>\n<td>RSI looks overbought during a supply headline move</td>\n<td>Overbought does not mean oil must reverse immediately</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table showing how the same moving-average or momentum clue can appear in FX, stock-index, metals, and energy markets, plus the disciplined way to read each case.)</em></p>\n<p>The lesson is the same in each market:</p>\n<ul>\n<li>the indicator summarizes recent behavior;</li>\n<li>structure and environment still decide the quality of the setup;</li>\n<li>no line or oscillator replaces judgment.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-why-indicator-stacking-becomes-a-problem\">Why Indicator Stacking Becomes a Problem</h2>\n<p>Many beginners add several tools that are all measuring similar things.</p>\n<p>Example:</p>\n<ul>\n<li>one moving average;</li>\n<li>another moving average;</li>\n<li>RSI;</li>\n<li>MACD;</li>\n<li>another momentum oscillator.</li>\n</ul>\n<p>This can create two problems:</p>\n<ol>\n<li><strong>duplicate information</strong>: several tools may be saying almost the same thing;</li>\n<li><strong>screen noise</strong>: the chart becomes harder to read.</li>\n</ol>\n<p>More tools do not automatically mean better analysis.</p>\n<hr>\n<h2 id=\"user-content-overbought-and-oversold-need-caution\">Overbought and Oversold Need Caution</h2>\n<p>Some momentum tools use labels like <strong>overbought</strong> and <strong>oversold</strong>.</p>\n<p>These words do not mean:</p>\n<ul>\n<li>\"the market must fall now\"</li>\n<li>\"the market must rise now\"</li>\n</ul>\n<p>They usually mean price has moved strongly relative to the tool’s recent range. In a strong FX trend, a stock-index melt-up, a gold breakout, or an oil shock move, a market can stay overbought or oversold longer than a beginner expects.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-trading-a-line-cross-by-itself\">Mistake 1: Trading a Line Cross by Itself</h3>\n<p>A moving-average cross can be interesting, but it is not enough on its own.</p>\n<h3 id=\"user-content-mistake-2-adding-too-many-similar-indicators\">Mistake 2: Adding Too Many Similar Indicators</h3>\n<p>Several tools may only repeat the same information with different shapes.</p>\n<h3 id=\"user-content-mistake-3-ignoring-price-structure\">Mistake 3: Ignoring Price Structure</h3>\n<p>If the chart is breaking important levels, the indicator should not overrule that.</p>\n<h3 id=\"user-content-mistake-4-treating-momentum-readings-as-guarantees\">Mistake 4: Treating Momentum Readings as Guarantees</h3>\n<p>A strong or weak reading is context, not certainty.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain what moving averages and momentum tools can and cannot do;",
+    "use them as context aids rather than prediction machines;",
+    "avoid stacking indicators without a clear decision rule."
+  ],
+  "quizItems": [
+    {
+      "id": "5.1-moving-averages-momentum-q1",
+      "prompt": "What is the most disciplined role for a moving average in this module?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Guaranteeing reversals"
+        },
+        {
+          "label": "B",
+          "text": "Adding context to trend and momentum"
+        },
+        {
+          "label": "C",
+          "text": "Replacing price structure"
+        },
+        {
+          "label": "D",
+          "text": "Predicting central-bank decisions"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Adding context to trend and momentum"
+      },
+      "explanation": "Moving averages are support tools, not complete trade plans by themselves.",
+      "lessonAnchor": "Indicator-role section"
+    },
+    {
+      "id": "5.1-moving-averages-momentum-q2",
+      "prompt": "Why is indicator stacking risky for beginners?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "More tools always reduce clarity"
+        },
+        {
+          "label": "B",
+          "text": "Too many tools can duplicate the same information and create noise"
+        },
+        {
+          "label": "C",
+          "text": "Indicators are illegal"
+        },
+        {
+          "label": "D",
+          "text": "Price no longer matters"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Too many tools can duplicate the same information and create noise"
+      },
+      "explanation": "The issue is not the existence of indicators but the lack of a clear decision role.",
+      "lessonAnchor": "Noise versus signal section"
+    },
+    {
+      "id": "5.1-moving-averages-momentum-q3",
+      "prompt": "What should still come first in analysis even when indicators are used?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Social sentiment"
+        },
+        {
+          "label": "B",
+          "text": "Price structure and risk plan"
+        },
+        {
+          "label": "C",
+          "text": "Random entry timing"
+        },
+        {
+          "label": "D",
+          "text": "Leverage selection"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Price structure and risk plan"
+      },
+      "explanation": "Indicators support structure-based decisions rather than replacing them.",
+      "lessonAnchor": "Structure-first rule"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; indicator examples show analytical context and do not guarantee trade outcomes"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adds platform-specific indicator settings."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, Understanding Moving Averages",
+      "url": "https://www.cmegroup.com/education/courses/technical-analysis/understanding-moving-averages.hideHeader.hideSubnav.hideFooter.hideAddThisExt.educationIframe.html"
+    },
+    {
+      "label": "CME Group, Oscillators: MACD, RSI, Stochastics",
+      "url": "https://www.cmegroup.com/education/courses/technical-analysis/oscillators-macd-rsi-stochastics"
+    },
+    {
+      "label": "CMT Association, An Integrated Approach to Fundamental and Technical Analysis",
+      "url": "https://cmtassociation.org/wp-content/uploads/2024/01/0419-cieszynski-1.pdf"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "5.2-volume-profile-order-flow",
+    "title": "5.2 Volume Profile and Order Flow",
+    "href": "/education/module-5-technical-analysis-process/5.2-volume-profile-order-flow"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "5.1-moving-averages-momentum",
+      "title": "5.1 Moving Averages and Momentum",
+      "href": "/education/module-5-technical-analysis-process/5.1-moving-averages-momentum"
+    },
+    {
+      "lessonSlug": "5.2-volume-profile-order-flow",
+      "title": "5.2 Volume Profile and Order Flow",
+      "href": "/education/module-5-technical-analysis-process/5.2-volume-profile-order-flow"
+    },
+    {
+      "lessonSlug": "5.3-confluence-checklist",
+      "title": "5.3 Confluence Checklist",
+      "href": "/education/module-5-technical-analysis-process/5.3-confluence-checklist"
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "moduleSlug": "module-4-risk-and-position-sizing",
+  "moduleTitle": "Module 4: Risk and Position Sizing",
+  "moduleBaseRoute": "/education/module-4-risk-and-position-sizing",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "4.1-mathematics-of-ruin",
+  "title": "4.1 Mathematics of Ruin",
+  "summary": "Risk management starts with one simple truth:",
+  "bodyHtml": "<h1 id=\"user-content-41-mathematics-of-ruin\">4.1 Mathematics of Ruin</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Risk management starts with one simple truth:</p>\n<p>big losses are harder to recover from than they first appear.</p>\n<p>When people talk about the <strong>mathematics of ruin</strong>, they are talking about drawdown and recovery. The idea is not to sound negative. The idea is to understand why survival matters so much.</p>\n<p>If your account takes very deep losses, the work needed to recover becomes much larger.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a drawdown is;</li>\n<li>understand why a large loss needs a larger percentage gain to recover;</li>\n<li>explain why small, fixed risk limits can help protect an account.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-two-key-terms\">Two Key Terms</h2>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Drawdown</strong></td>\n<td>The percentage drop from the highest value of the account to the current value</td>\n</tr>\n<tr>\n<td><strong>Recovery gain</strong></td>\n<td>The percentage gain needed to get back to the previous peak</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A two-row glossary table defining drawdown and recovery gain in simple language.)</em></p>\n<hr>\n<h2 id=\"user-content-why-equal-losses-and-gains-are-not-equal\">Why Equal Losses and Gains Are Not Equal</h2>\n<p>This is the heart of the lesson.</p>\n<p>If an account loses <code>10%</code>, it does <strong>not</strong> need only <code>10%</code> to recover. It needs more.</p>\n<p>Why?</p>\n<p>Because the recovery is being calculated from a smaller base.</p>\n<p>Example with a starting account of <code>1,000</code>:</p>\n<ul>\n<li>lose <code>10%</code> -> account falls to <code>900</code></li>\n<li>to get back to <code>1,000</code>, you need <code>100</code></li>\n<li><code>100</code> is <code>11.1%</code> of <code>900</code></li>\n</ul>\n<p>The deeper the drawdown, the harder the recovery becomes.</p>\n<table>\n<thead>\n<tr>\n<th>Drawdown</th>\n<th>Recovery needed</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code>10%</code></td>\n<td><code>11.1%</code></td>\n</tr>\n<tr>\n<td><code>20%</code></td>\n<td><code>25%</code></td>\n</tr>\n<tr>\n<td><code>30%</code></td>\n<td><code>42.9%</code></td>\n</tr>\n<tr>\n<td><code>50%</code></td>\n<td><code>100%</code></td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row table showing that larger account drawdowns require even larger percentage gains to recover back to the starting level.)</em></p>\n<p>This math works the same way whether you trade FX, indices, metals, energy, or another market.</p>\n<p>For example:</p>\n<ul>\n<li>a <code>10%</code> drawdown after a bad EUR/USD week still needs an <code>11.1%</code> recovery;</li>\n<li>a <code>20%</code> drawdown from oversized stock-index trades still needs <code>25%</code>;</li>\n<li>a <code>30%</code> drawdown from stubborn gold or Brent crude trades still needs <code>42.9%</code>.</li>\n</ul>\n<p>Different markets create different setups and different volatility, but drawdown math does not become easier just because the symbol changed.</p>\n<hr>\n<h2 id=\"user-content-why-small-risk-caps-help\">Why Small Risk Caps Help</h2>\n<p>A fixed risk cap means you decide in advance how much of the account you are willing to lose on one trade.</p>\n<p>Some traders use <code>1%</code>, some use <code>2%</code>, and some use another small number. The exact percentage is a plan choice, not a magic rule.</p>\n<p>The important idea is this:</p>\n<p><code>smaller risk caps slow account damage during losing periods</code></p>\n<p>CME’s risk-management education shows that when risk is kept to a fixed small percentage, each new loss is smaller in cash terms as the account falls. That slows the rate of decay during a losing streak.</p>\n<p>You still lose money during losing streaks. The point is that you lose it more slowly, which gives you more room to recover and learn.</p>\n<hr>\n<h2 id=\"user-content-survival-comes-before-aggression\">Survival Comes Before Aggression</h2>\n<p>This lesson is not saying that losses can be avoided completely.</p>\n<p>Losses are part of trading.</p>\n<p>The lesson is saying:</p>\n<ul>\n<li>do not let one trade do too much damage;</li>\n<li>do not let one bad day destroy the account;</li>\n<li>do not let recovery pressure push you into worse decisions.</li>\n</ul>\n<p>Oversized losses can create three problems at once:</p>\n<ol>\n<li>less capital left to work with;</li>\n<li>much harder recovery math;</li>\n<li>more emotional pressure to force trades.</li>\n</ol>\n<p>That is why survival comes first.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine two traders each start with <code>10,000</code>.</p>\n<ul>\n<li>Trader A takes a <code>10%</code> drawdown and falls to <code>9,000</code>.</li>\n<li>Trader B takes a <code>50%</code> drawdown and falls to <code>5,000</code>.</li>\n</ul>\n<p>Trader A needs an <code>11.1%</code> recovery to return to <code>10,000</code>.</p>\n<p>Trader B needs a <code>100%</code> recovery to return to <code>10,000</code>.</p>\n<p>Both traders lost money, but the second trader now faces a much steeper path back.</p>\n<p>The same comparison works across markets:</p>\n<ul>\n<li>a careful FX trader who caps losses early may stay near Trader A;</li>\n<li>an index trader who doubles size after two losses can drift toward Trader B;</li>\n<li>a metals or energy trader who keeps widening stops can do the same.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-a-high-win-rate-solves-everything\">Mistake 1: Thinking a High Win Rate Solves Everything</h3>\n<p>A strategy can still fail if the losing trades are too large.</p>\n<h3 id=\"user-content-mistake-2-trying-to-recover-fast-by-increasing-size\">Mistake 2: Trying to Recover Fast by Increasing Size</h3>\n<p>After losses, some beginners try to win it back quickly with larger trades. That often makes the drawdown worse.</p>\n<h3 id=\"user-content-mistake-3-averaging-down-without-a-real-risk-plan\">Mistake 3: Averaging Down Without a Real Risk Plan</h3>\n<p>Adding to a losing trade can increase exposure at the worst moment.</p>\n<h3 id=\"user-content-mistake-4-treating-drawdown-as-only-an-emotional-issue\">Mistake 4: Treating Drawdown as Only an Emotional Issue</h3>\n<p>Drawdown is emotional, but it is also mathematical.</p>\n<hr>",
+  "learningOutcomes": [
+    "define drawdown in plain language;",
+    "explain why deeper losses require larger percentage recoveries;",
+    "describe fixed risk caps as a survival tool rather than a prediction tool."
+  ],
+  "quizItems": [
+    {
+      "id": "4.1-mathematics-of-ruin-q1",
+      "prompt": "Why is a 50% drawdown especially damaging?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because it requires a 50% recovery"
+        },
+        {
+          "label": "B",
+          "text": "Because it requires a 100% recovery"
+        },
+        {
+          "label": "C",
+          "text": "Because it guarantees a margin call everywhere"
+        },
+        {
+          "label": "D",
+          "text": "Because drawdowns do not affect size decisions"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because it requires a 100% recovery"
+      },
+      "explanation": "A loss from 100 to 50 requires a gain from 50 back to 100, which is 100%.",
+      "lessonAnchor": "Recovery math section"
+    },
+    {
+      "id": "4.1-mathematics-of-ruin-q2",
+      "prompt": "Why can a small fixed risk cap help during losing streaks?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because it makes losses impossible"
+        },
+        {
+          "label": "B",
+          "text": "Because it slows account decay compared with oversized risk"
+        },
+        {
+          "label": "C",
+          "text": "Because it guarantees a winning strategy"
+        },
+        {
+          "label": "D",
+          "text": "Because it removes the need for stop placement"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because it slows account decay compared with oversized risk"
+      },
+      "explanation": "Smaller fixed-percentage risk means the dollar amount at risk can shrink as the account shrinks, slowing the decline.",
+      "lessonAnchor": "Fixed risk cap section"
+    },
+    {
+      "id": "4.1-mathematics-of-ruin-q3",
+      "prompt": "What is the main lesson of the mathematics of ruin?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Survival comes before aggression"
+        },
+        {
+          "label": "B",
+          "text": "Large losses are easy to recover from"
+        },
+        {
+          "label": "C",
+          "text": "Win rate is the only number that matters"
+        },
+        {
+          "label": "D",
+          "text": "Bigger size is the fastest way back"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Survival comes before aggression"
+      },
+      "explanation": "The lesson is about staying in the game long enough to keep learning and applying the plan.",
+      "lessonAnchor": "Survival-first framing"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "when core formula standards materially change"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; drawdown examples illustrate risk-survival math and do not prescribe universal position-sizing rules"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adds venue-specific margin triggers."
+  ],
+  "sources": [
+    {
+      "label": "CME Group, Controlling Risk",
+      "url": "https://www.cmegroup.com/education/courses/trade-and-risk-management/controlling-risk"
+    },
+    {
+      "label": "CME Group, The 2% Rule",
+      "url": "https://www.cmegroup.com/education/courses/trade-and-risk-management/the-2-percent-rule"
+    },
+    {
+      "label": "Investor.gov, Investor Resilience bulletin",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins/investor-resilience-world-investor-week-2022-investor-bulletin"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "4.2-calculating-position-size",
+    "title": "4.2 Calculating Position Size",
+    "href": "/education/module-4-risk-and-position-sizing/4.2-calculating-position-size"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "4.1-mathematics-of-ruin",
+      "title": "4.1 Mathematics of Ruin",
+      "href": "/education/module-4-risk-and-position-sizing/4.1-mathematics-of-ruin"
+    },
+    {
+      "lessonSlug": "4.2-calculating-position-size",
+      "title": "4.2 Calculating Position Size",
+      "href": "/education/module-4-risk-and-position-sizing/4.2-calculating-position-size"
+    },
+    {
+      "lessonSlug": "4.3-risk-reward-skewing",
+      "title": "4.3 Risk-Reward Skewing",
+      "href": "/education/module-4-risk-and-position-sizing/4.3-risk-reward-skewing"
+    }
+  ]
+}

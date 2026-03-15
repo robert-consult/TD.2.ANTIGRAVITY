@@ -1,0 +1,227 @@
+{
+  "moduleSlug": "module-1-introduction-to-trading",
+  "moduleTitle": "Module 1: Introduction to Trading",
+  "moduleBaseRoute": "/education/module-1-introduction-to-trading",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "1.1-terminology-glossary",
+  "title": "1.1 Terminology Glossary",
+  "summary": "Trading starts to feel confusing when new words arrive faster than understanding. The fix is not to memorize everything at once. The fix is to sort each word into the job it does.",
+  "bodyHtml": "<h1 id=\"user-content-11-terminology-glossary\">1.1 Terminology Glossary</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Trading starts to feel confusing when new words arrive faster than understanding. The fix is not to memorize everything at once. The fix is to sort each word into the job it does.</p>\n<p>This lesson uses a simple rule:</p>\n<ul>\n<li>price words tell you what the market is doing now;</li>\n<li>product words tell you what you are trading;</li>\n<li>account words tell you how much money and risk are involved.</li>\n</ul>\n<p>If you can sort the vocabulary correctly, later lessons become much easier.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain the difference between terms like <code>pip</code>, <code>tick</code>, <code>margin</code>, and <code>equity</code>;</li>\n<li>tell whether a word is about price, the product, or the trading account;</li>\n<li>avoid the most common beginner vocabulary mistakes.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-three-main-buckets\">The Three Main Buckets</h2>\n<h3 id=\"user-content-1-price-words\">1. Price Words</h3>\n<p>These words describe the live market price and how it moves.</p>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Bid</strong></td>\n<td>The price a buyer is willing to pay right now.</td>\n</tr>\n<tr>\n<td><strong>Ask</strong></td>\n<td>The price a seller is willing to accept right now.</td>\n</tr>\n<tr>\n<td><strong>Spread</strong></td>\n<td>The gap between the bid and the ask.</td>\n</tr>\n<tr>\n<td><strong>Pip</strong></td>\n<td>A common FX movement unit.</td>\n</tr>\n<tr>\n<td><strong>Tick</strong></td>\n<td>The smallest allowed price move in many exchange-traded contracts.</td>\n</tr>\n<tr>\n<td><strong>Point</strong></td>\n<td>A larger price move, often used for indices and futures.</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A simple glossary table showing six price-related terms and one-sentence beginner definitions for each.)</em></p>\n<h3 id=\"user-content-2-product-words\">2. Product Words</h3>\n<p>These words describe what kind of thing you are trading.</p>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Spot</strong></td>\n<td>Trading the market price for near-immediate settlement.</td>\n</tr>\n<tr>\n<td><strong>Futures</strong></td>\n<td>Standardized contracts that settle later under exchange rules.</td>\n</tr>\n<tr>\n<td><strong>Option</strong></td>\n<td>A contract that gives a right, but not an obligation, to buy or sell at a set price.</td>\n</tr>\n<tr>\n<td><strong>Strike</strong></td>\n<td>The set price written into an option contract.</td>\n</tr>\n<tr>\n<td><strong>Premium</strong></td>\n<td>The price paid for an option contract.</td>\n</tr>\n<tr>\n<td><strong>Expiry</strong></td>\n<td>The date when a futures or options contract ends.</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A glossary table showing six product-related trading terms and clear beginner explanations.)</em></p>\n<h3 id=\"user-content-3-account-words\">3. Account Words</h3>\n<p>These words describe your money, exposure, and trading capacity.</p>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Margin</strong></td>\n<td>Money set aside as collateral for a leveraged position.</td>\n</tr>\n<tr>\n<td><strong>Leverage</strong></td>\n<td>Using a small amount of money to control a larger position.</td>\n</tr>\n<tr>\n<td><strong>Balance</strong></td>\n<td>The money in your account after closed trades and cash movements are counted.</td>\n</tr>\n<tr>\n<td><strong>Equity</strong></td>\n<td>Your balance plus or minus the result of open trades.</td>\n</tr>\n<tr>\n<td><strong>Free Margin</strong></td>\n<td>Money not currently tied up in open positions.</td>\n</tr>\n<tr>\n<td><strong>Floating P/L</strong></td>\n<td>Profit or loss on a trade that is still open.</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A glossary table showing six account-related trading terms and beginner-friendly definitions.)</em></p>\n<hr>\n<h2 id=\"user-content-one-very-simple-price-example\">One Very Simple Price Example</h2>\n<p>Imagine EUR/USD is showing:</p>\n<ul>\n<li>Bid: <code>1.0850</code></li>\n<li>Ask: <code>1.0851</code></li>\n</ul>\n<p>That means:</p>\n<ul>\n<li>you buy at the ask;</li>\n<li>you sell at the bid;</li>\n<li>the spread is <code>1 pip</code>.</li>\n</ul>\n<p>If you buy and then instantly close the trade, you do not start at zero. You start slightly negative because the spread is a cost.</p>\n<p>This same idea exists in many markets, even if the movement unit changes from pips to ticks or points.</p>\n<hr>\n<h2 id=\"user-content-margin-and-leverage-in-plain-english\">Margin and Leverage in Plain English</h2>\n<p>These two words are related, but they are not the same.</p>\n<ul>\n<li><strong>Leverage</strong> is the bigger exposure.</li>\n<li><strong>Margin</strong> is the money held to support that exposure.</li>\n</ul>\n<p>A simple way to think about it:</p>\n<ul>\n<li>leverage is the size of the position;</li>\n<li>margin is the security deposit that helps hold that position open.</li>\n</ul>\n<p>This matters because beginners often hear “I used 10x leverage” and think it means more opportunity. It also means losses can grow faster.</p>\n<hr>\n<h2 id=\"user-content-balance-equity-and-floating-pl\">Balance, Equity, and Floating P/L</h2>\n<p>These words describe different views of your account.</p>\n<p>Example:</p>\n<ul>\n<li>Account balance: <code>$1,000</code></li>\n<li>One open trade is down: <code>$80</code></li>\n</ul>\n<p>Then:</p>\n<ul>\n<li><strong>Balance</strong> is still <code>$1,000</code> because the trade is not closed yet.</li>\n<li><strong>Floating P/L</strong> is <code>-$80</code>.</li>\n<li><strong>Equity</strong> is <code>$920</code> because it includes the open loss.</li>\n</ul>\n<p>If the trade later closes at that loss, the balance will then fall to <code>$920</code>.</p>\n<hr>\n<h2 id=\"user-content-why-units-can-mislead-you\">Why Units Can Mislead You</h2>\n<p>If someone says, “The market moved 20,” that sentence is incomplete.</p>\n<p>It could mean:</p>\n<ul>\n<li><code>20 pips</code> in a currency pair;</li>\n<li><code>20 ticks</code> in a futures contract;</li>\n<li><code>20 points</code> in an index;</li>\n<li><code>20 cents</code> in a commodity.</li>\n</ul>\n<p>Those are not equal in money terms.</p>\n<p>Global example:</p>\n<ul>\n<li>In <strong>EUR/USD</strong>, traders often speak in pips.</li>\n<li>In <strong>Nikkei futures</strong>, traders often need to think in points or ticks depending on the contract.</li>\n<li>In <strong>Brent crude</strong>, the cash effect depends on the contract and the price increment used by the venue.</li>\n</ul>\n<p>The safe question is always:</p>\n<p><code>20 what?</code></p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-thinking-margin-and-leverage-mean-the-same-thing\">Mistake 1: Thinking Margin and Leverage Mean the Same Thing</h3>\n<p>They are connected, but they describe different things. Margin is collateral. Leverage is amplified exposure.</p>\n<h3 id=\"user-content-mistake-2-thinking-balance-and-equity-always-match\">Mistake 2: Thinking Balance and Equity Always Match</h3>\n<p>They only match when there are no open trades affecting the account.</p>\n<h3 id=\"user-content-mistake-3-thinking-a-pip-tick-and-point-are-interchangeable\">Mistake 3: Thinking a Pip, Tick, and Point Are Interchangeable</h3>\n<p>They are all movement units, but they do not mean the same cash value.</p>\n<h3 id=\"user-content-mistake-4-thinking-spot-futures-and-options-are-just-three-names-for-trading\">Mistake 4: Thinking Spot, Futures, and Options Are Just Three Names for Trading</h3>\n<p>They are different product structures with different rules.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain the difference between common trading terms that are often confused by beginners;",
+    "identify when a term changes meaning across asset classes;",
+    "read basic product descriptions without mistaking vocabulary for strategy."
+  ],
+  "quizItems": [
+    {
+      "id": "1.1-terminology-glossary-q1",
+      "prompt": "Which term describes the collateral required to support leveraged exposure?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Volatility"
+        },
+        {
+          "label": "B",
+          "text": "Margin"
+        },
+        {
+          "label": "C",
+          "text": "Spread"
+        },
+        {
+          "label": "D",
+          "text": "Premium"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Margin"
+      },
+      "explanation": "Margin is collateral. Leverage is the amplified exposure created from using that collateral.",
+      "lessonAnchor": "Leverage and margin section"
+    },
+    {
+      "id": "1.1-terminology-glossary-q2",
+      "prompt": "Which price increment is most commonly used to describe many FX pair movements?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Yield"
+        },
+        {
+          "label": "B",
+          "text": "Tick"
+        },
+        {
+          "label": "C",
+          "text": "Pip"
+        },
+        {
+          "label": "D",
+          "text": "Coupon"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "Pip"
+      },
+      "explanation": "A pip is a common FX price increment, while a tick is the minimum price increment on many exchange-traded contracts.",
+      "lessonAnchor": "Pips, ticks, and points section"
+    },
+    {
+      "id": "1.1-terminology-glossary-q3",
+      "prompt": "What is the best plain-English description of equity?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "The total borrowed amount"
+        },
+        {
+          "label": "B",
+          "text": "Account cash after commissions only"
+        },
+        {
+          "label": "C",
+          "text": "Balance adjusted for open profit and loss"
+        },
+        {
+          "label": "D",
+          "text": "The value of one contract"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "Balance adjusted for open profit and loss"
+      },
+      "explanation": "Equity changes with open positions. Balance usually reflects realized results and cash movements.",
+      "lessonAnchor": "Balance versus equity section"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "review when glossary standards materially change"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "standard education-page risk disclaimer plus elevated caution if crypto examples are shown"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational content only; trading involves risk; product access differs by venue and jurisdiction"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none blocking the lesson draft"
+  ],
+  "sources": [
+    {
+      "label": "Investor.gov glossary",
+      "url": "https://www.investor.gov/introduction-investing/investing-basics/glossary"
+    },
+    {
+      "label": "FINRA margin education",
+      "url": "https://www.finra.org/investors/learn-to-invest/advanced-investing/margin-accounts"
+    },
+    {
+      "label": "CME education",
+      "url": "https://www.cmegroup.com/education.html"
+    },
+    {
+      "label": "BIS FX turnover overview",
+      "url": "https://www.bis.org/statistics/rpfx25_fx.htm"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "1.2-instruments-overview",
+    "title": "1.2 Instruments Overview",
+    "href": "/education/module-1-introduction-to-trading/1.2-instruments-overview"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "1.1-terminology-glossary",
+      "title": "1.1 Terminology Glossary",
+      "href": "/education/module-1-introduction-to-trading/1.1-terminology-glossary"
+    },
+    {
+      "lessonSlug": "1.2-instruments-overview",
+      "title": "1.2 Instruments Overview",
+      "href": "/education/module-1-introduction-to-trading/1.2-instruments-overview"
+    },
+    {
+      "lessonSlug": "1.3-core-calculations",
+      "title": "1.3 Core Calculations",
+      "href": "/education/module-1-introduction-to-trading/1.3-core-calculations"
+    },
+    {
+      "lessonSlug": "1.4-profit-loss-risk-math",
+      "title": "1.4 Profit, Loss, and Risk Math",
+      "href": "/education/module-1-introduction-to-trading/1.4-profit-loss-risk-math"
+    }
+  ]
+}

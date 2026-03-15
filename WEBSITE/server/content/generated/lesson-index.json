@@ -1,0 +1,215 @@
+{
+  "generatedOn": "2026-03-15T06:40:39.312Z",
+  "lessons": {
+    "module-1-introduction-to-trading::1.1-terminology-glossary": {
+      "file": "lessons/module-1-introduction-to-trading__1.1-terminology-glossary.json",
+      "moduleSlug": "module-1-introduction-to-trading",
+      "lessonSlug": "1.1-terminology-glossary",
+      "trackType": "coreCurriculum"
+    },
+    "module-1-introduction-to-trading::1.2-instruments-overview": {
+      "file": "lessons/module-1-introduction-to-trading__1.2-instruments-overview.json",
+      "moduleSlug": "module-1-introduction-to-trading",
+      "lessonSlug": "1.2-instruments-overview",
+      "trackType": "coreCurriculum"
+    },
+    "module-1-introduction-to-trading::1.3-core-calculations": {
+      "file": "lessons/module-1-introduction-to-trading__1.3-core-calculations.json",
+      "moduleSlug": "module-1-introduction-to-trading",
+      "lessonSlug": "1.3-core-calculations",
+      "trackType": "coreCurriculum"
+    },
+    "module-1-introduction-to-trading::1.4-profit-loss-risk-math": {
+      "file": "lessons/module-1-introduction-to-trading__1.4-profit-loss-risk-math.json",
+      "moduleSlug": "module-1-introduction-to-trading",
+      "lessonSlug": "1.4-profit-loss-risk-math",
+      "trackType": "coreCurriculum"
+    },
+    "module-2-market-structure-basics::2.1-defining-the-trend": {
+      "file": "lessons/module-2-market-structure-basics__2.1-defining-the-trend.json",
+      "moduleSlug": "module-2-market-structure-basics",
+      "lessonSlug": "2.1-defining-the-trend",
+      "trackType": "coreCurriculum"
+    },
+    "module-2-market-structure-basics::2.2-support-resistance-key-levels": {
+      "file": "lessons/module-2-market-structure-basics__2.2-support-resistance-key-levels.json",
+      "moduleSlug": "module-2-market-structure-basics",
+      "lessonSlug": "2.2-support-resistance-key-levels",
+      "trackType": "coreCurriculum"
+    },
+    "module-2-market-structure-basics::2.3-session-overlaps-liquidity": {
+      "file": "lessons/module-2-market-structure-basics__2.3-session-overlaps-liquidity.json",
+      "moduleSlug": "module-2-market-structure-basics",
+      "lessonSlug": "2.3-session-overlaps-liquidity",
+      "trackType": "coreCurriculum"
+    },
+    "module-3-chart-platform-workflows::3.1-workspace-setup": {
+      "file": "lessons/module-3-chart-platform-workflows__3.1-workspace-setup.json",
+      "moduleSlug": "module-3-chart-platform-workflows",
+      "lessonSlug": "3.1-workspace-setup",
+      "trackType": "coreCurriculum"
+    },
+    "module-3-chart-platform-workflows::3.2-watchlist-management": {
+      "file": "lessons/module-3-chart-platform-workflows__3.2-watchlist-management.json",
+      "moduleSlug": "module-3-chart-platform-workflows",
+      "lessonSlug": "3.2-watchlist-management",
+      "trackType": "coreCurriculum"
+    },
+    "module-3-chart-platform-workflows::3.3-trade-execution": {
+      "file": "lessons/module-3-chart-platform-workflows__3.3-trade-execution.json",
+      "moduleSlug": "module-3-chart-platform-workflows",
+      "lessonSlug": "3.3-trade-execution",
+      "trackType": "coreCurriculum"
+    },
+    "module-4-risk-and-position-sizing::4.1-mathematics-of-ruin": {
+      "file": "lessons/module-4-risk-and-position-sizing__4.1-mathematics-of-ruin.json",
+      "moduleSlug": "module-4-risk-and-position-sizing",
+      "lessonSlug": "4.1-mathematics-of-ruin",
+      "trackType": "coreCurriculum"
+    },
+    "module-4-risk-and-position-sizing::4.2-calculating-position-size": {
+      "file": "lessons/module-4-risk-and-position-sizing__4.2-calculating-position-size.json",
+      "moduleSlug": "module-4-risk-and-position-sizing",
+      "lessonSlug": "4.2-calculating-position-size",
+      "trackType": "coreCurriculum"
+    },
+    "module-4-risk-and-position-sizing::4.3-risk-reward-skewing": {
+      "file": "lessons/module-4-risk-and-position-sizing__4.3-risk-reward-skewing.json",
+      "moduleSlug": "module-4-risk-and-position-sizing",
+      "lessonSlug": "4.3-risk-reward-skewing",
+      "trackType": "coreCurriculum"
+    },
+    "module-5-technical-analysis-process::5.1-moving-averages-momentum": {
+      "file": "lessons/module-5-technical-analysis-process__5.1-moving-averages-momentum.json",
+      "moduleSlug": "module-5-technical-analysis-process",
+      "lessonSlug": "5.1-moving-averages-momentum",
+      "trackType": "coreCurriculum"
+    },
+    "module-5-technical-analysis-process::5.2-volume-profile-order-flow": {
+      "file": "lessons/module-5-technical-analysis-process__5.2-volume-profile-order-flow.json",
+      "moduleSlug": "module-5-technical-analysis-process",
+      "lessonSlug": "5.2-volume-profile-order-flow",
+      "trackType": "coreCurriculum"
+    },
+    "module-5-technical-analysis-process::5.3-confluence-checklist": {
+      "file": "lessons/module-5-technical-analysis-process__5.3-confluence-checklist.json",
+      "moduleSlug": "module-5-technical-analysis-process",
+      "lessonSlug": "5.3-confluence-checklist",
+      "trackType": "coreCurriculum"
+    },
+    "module-6-macro-and-event-awareness::6.1-federal-reserve-interest-rates": {
+      "file": "lessons/module-6-macro-and-event-awareness__6.1-federal-reserve-interest-rates.json",
+      "moduleSlug": "module-6-macro-and-event-awareness",
+      "lessonSlug": "6.1-federal-reserve-interest-rates",
+      "trackType": "coreCurriculum"
+    },
+    "module-6-macro-and-event-awareness::6.2-nfp-cpi-tactics": {
+      "file": "lessons/module-6-macro-and-event-awareness__6.2-nfp-cpi-tactics.json",
+      "moduleSlug": "module-6-macro-and-event-awareness",
+      "lessonSlug": "6.2-nfp-cpi-tactics",
+      "trackType": "coreCurriculum"
+    },
+    "module-6-macro-and-event-awareness::6.3-correlated-assets": {
+      "file": "lessons/module-6-macro-and-event-awareness__6.3-correlated-assets.json",
+      "moduleSlug": "module-6-macro-and-event-awareness",
+      "lessonSlug": "6.3-correlated-assets",
+      "trackType": "coreCurriculum"
+    },
+    "module-7-performance-review-routine::7.1-journaling-like-risk-manager": {
+      "file": "lessons/module-7-performance-review-routine__7.1-journaling-like-risk-manager.json",
+      "moduleSlug": "module-7-performance-review-routine",
+      "lessonSlug": "7.1-journaling-like-risk-manager",
+      "trackType": "coreCurriculum"
+    },
+    "module-7-performance-review-routine::7.2-win-rate-vs-payoff": {
+      "file": "lessons/module-7-performance-review-routine__7.2-win-rate-vs-payoff.json",
+      "moduleSlug": "module-7-performance-review-routine",
+      "lessonSlug": "7.2-win-rate-vs-payoff",
+      "trackType": "coreCurriculum"
+    },
+    "module-7-performance-review-routine::7.3-psychology-of-drawdowns": {
+      "file": "lessons/module-7-performance-review-routine__7.3-psychology-of-drawdowns.json",
+      "moduleSlug": "module-7-performance-review-routine",
+      "lessonSlug": "7.3-psychology-of-drawdowns",
+      "trackType": "coreCurriculum"
+    },
+    "module-7-performance-review-routine::7.4-self-test-portfolio-review": {
+      "file": "lessons/module-7-performance-review-routine__7.4-self-test-portfolio-review.json",
+      "moduleSlug": "module-7-performance-review-routine",
+      "lessonSlug": "7.4-self-test-portfolio-review",
+      "trackType": "coreCurriculum"
+    },
+    "module-8-behavioral-finance::8.1-decision-making-under-uncertainty": {
+      "file": "lessons/module-8-behavioral-finance__8.1-decision-making-under-uncertainty.json",
+      "moduleSlug": "module-8-behavioral-finance",
+      "lessonSlug": "8.1-decision-making-under-uncertainty",
+      "trackType": "optionalExtension"
+    },
+    "module-8-behavioral-finance::8.2-cognitive-biases": {
+      "file": "lessons/module-8-behavioral-finance__8.2-cognitive-biases.json",
+      "moduleSlug": "module-8-behavioral-finance",
+      "lessonSlug": "8.2-cognitive-biases",
+      "trackType": "optionalExtension"
+    },
+    "module-8-behavioral-finance::8.3-prospect-theory-loss-aversion": {
+      "file": "lessons/module-8-behavioral-finance__8.3-prospect-theory-loss-aversion.json",
+      "moduleSlug": "module-8-behavioral-finance",
+      "lessonSlug": "8.3-prospect-theory-loss-aversion",
+      "trackType": "optionalExtension"
+    },
+    "module-8-behavioral-finance::8.4-emotional-regulation-in-trading": {
+      "file": "lessons/module-8-behavioral-finance__8.4-emotional-regulation-in-trading.json",
+      "moduleSlug": "module-8-behavioral-finance",
+      "lessonSlug": "8.4-emotional-regulation-in-trading",
+      "trackType": "optionalExtension"
+    },
+    "module-9-crypto-and-defi::9.1-clob-vs-amm": {
+      "file": "lessons/module-9-crypto-and-defi__9.1-clob-vs-amm.json",
+      "moduleSlug": "module-9-crypto-and-defi",
+      "lessonSlug": "9.1-clob-vs-amm",
+      "trackType": "optionalExtension"
+    },
+    "module-9-crypto-and-defi::9.2-on-chain-metrics": {
+      "file": "lessons/module-9-crypto-and-defi__9.2-on-chain-metrics.json",
+      "moduleSlug": "module-9-crypto-and-defi",
+      "lessonSlug": "9.2-on-chain-metrics",
+      "trackType": "optionalExtension"
+    },
+    "module-9-crypto-and-defi::9.3-smart-contract-risks": {
+      "file": "lessons/module-9-crypto-and-defi__9.3-smart-contract-risks.json",
+      "moduleSlug": "module-9-crypto-and-defi",
+      "lessonSlug": "9.3-smart-contract-risks",
+      "trackType": "optionalExtension"
+    },
+    "module-9-crypto-and-defi::9.4-settlement-mechanics": {
+      "file": "lessons/module-9-crypto-and-defi__9.4-settlement-mechanics.json",
+      "moduleSlug": "module-9-crypto-and-defi",
+      "lessonSlug": "9.4-settlement-mechanics",
+      "trackType": "optionalExtension"
+    },
+    "module-10-how-to-use-app::10.1-dashboard-layout": {
+      "file": "lessons/module-10-how-to-use-app__10.1-dashboard-layout.json",
+      "moduleSlug": "module-10-how-to-use-app",
+      "lessonSlug": "10.1-dashboard-layout",
+      "trackType": "platformGuide"
+    },
+    "module-10-how-to-use-app::10.2-portfolio-metrics": {
+      "file": "lessons/module-10-how-to-use-app__10.2-portfolio-metrics.json",
+      "moduleSlug": "module-10-how-to-use-app",
+      "lessonSlug": "10.2-portfolio-metrics",
+      "trackType": "platformGuide"
+    },
+    "module-10-how-to-use-app::10.3-executing-trades": {
+      "file": "lessons/module-10-how-to-use-app__10.3-executing-trades.json",
+      "moduleSlug": "module-10-how-to-use-app",
+      "lessonSlug": "10.3-executing-trades",
+      "trackType": "platformGuide"
+    },
+    "module-10-how-to-use-app::10.4-advanced-features": {
+      "file": "lessons/module-10-how-to-use-app__10.4-advanced-features.json",
+      "moduleSlug": "module-10-how-to-use-app",
+      "lessonSlug": "10.4-advanced-features",
+      "trackType": "platformGuide"
+    }
+  }
+}

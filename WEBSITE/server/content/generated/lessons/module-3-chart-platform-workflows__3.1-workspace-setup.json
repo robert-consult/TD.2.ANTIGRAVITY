@@ -1,0 +1,219 @@
+{
+  "moduleSlug": "module-3-chart-platform-workflows",
+  "moduleTitle": "Module 3: Chart and Platform Workflows",
+  "moduleBaseRoute": "/education/module-3-chart-platform-workflows",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "3.1-workspace-setup",
+  "title": "3.1 Workspace Setup",
+  "summary": "A beginner screen often becomes too busy too quickly.",
+  "bodyHtml": "<h1 id=\"user-content-31-workspace-setup\">3.1 Workspace Setup</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>A beginner screen often becomes too busy too quickly.</p>\n<p>People add more charts, more colors, more alerts, and more indicators because they think more information will create better decisions. In practice, too much information often creates confusion.</p>\n<p>A workspace should help you review markets calmly and consistently. It is not supposed to feel exciting. It is supposed to help you notice the important things quickly.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what a clean beginner workspace needs and what it does not need;</li>\n<li>choose a simple chart setup that supports repeatable review;</li>\n<li>understand why standard layouts usually help more than constantly changing screens.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-main-goal-of-a-beginner-workspace\">The Main Goal of a Beginner Workspace</h2>\n<p>The goal is:</p>\n<p><code>clear structure and repeatable review</code></p>\n<p>That means your screen should help you answer questions like:</p>\n<ul>\n<li>What market am I looking at?</li>\n<li>What is the trend or range?</li>\n<li>Where are the key levels?</li>\n<li>Which timeframe am I using for context?</li>\n<li>Which timeframe am I using for the current decision?</li>\n</ul>\n<p>If the layout makes those answers harder to see, the layout is not helping.</p>\n<hr>\n<h2 id=\"user-content-what-a-simple-workspace-usually-includes\">What a Simple Workspace Usually Includes</h2>\n<table>\n<thead>\n<tr>\n<th>Workspace element</th>\n<th>Beginner-friendly version</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Watchlist</strong></td>\n<td>One small list of markets you review regularly</td>\n<td>Keeps attention focused</td>\n</tr>\n<tr>\n<td><strong>Context timeframe</strong></td>\n<td>One higher timeframe such as daily or 4-hour</td>\n<td>Helps you see the bigger picture</td>\n</tr>\n<tr>\n<td><strong>Working timeframe</strong></td>\n<td>One lower timeframe such as 1-hour or 15-minute</td>\n<td>Helps you study the current setup</td>\n</tr>\n<tr>\n<td><strong>Marked levels</strong></td>\n<td>Only the most important support, resistance, and trend points</td>\n<td>Keeps structure visible</td>\n</tr>\n<tr>\n<td><strong>Indicators</strong></td>\n<td>None, or one simple tool you can explain clearly</td>\n<td>Reduces noise</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A five-row table showing the basic parts of a beginner trading workspace and why each part matters.)</em></p>\n<p>This is enough to build a strong routine. You do not need a crowded screen to begin learning.</p>\n<hr>\n<h2 id=\"user-content-keep-the-chart-easy-to-read\">Keep the Chart Easy to Read</h2>\n<p>A clean chart usually has:</p>\n<ul>\n<li>candles or bars that are easy to see;</li>\n<li>a calm color scheme;</li>\n<li>only the most important lines and zones;</li>\n<li>enough empty space to read price properly.</li>\n</ul>\n<p>If your chart is covered by overlapping studies, bright colors, and too many notes, price becomes harder to read.</p>\n<p>Price is the main thing you are studying. Do not hide it.</p>\n<hr>\n<h2 id=\"user-content-use-a-small-timeframe-stack\">Use a Small Timeframe Stack</h2>\n<p>Many beginners jump randomly between very small and very large charts.</p>\n<p>A better habit is to use a simple timeframe stack:</p>\n<ol>\n<li>one timeframe for the bigger picture;</li>\n<li>one timeframe for the current setup.</li>\n</ol>\n<p>Example:</p>\n<ul>\n<li><strong>Daily chart</strong> for trend and important zones</li>\n<li><strong>1-hour chart</strong> for the setup you are studying now</li>\n</ul>\n<p>Some traders also use a third, smaller timeframe for very fine entry timing, but beginners usually learn faster when they keep the stack simple first.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine you are reviewing gold.</p>\n<p>Your workspace could look like this:</p>\n<ul>\n<li>a watchlist with a few markets, including gold;</li>\n<li>a <strong>daily chart</strong> to see the broader trend and major support or resistance zones;</li>\n<li>a <strong>1-hour chart</strong> to see whether price is pulling back, ranging, or breaking out;</li>\n<li>one short note such as: <code>Daily trend up. Price near support. No major event in the next hour.</code></li>\n</ul>\n<p>That is enough information to make the review organized.</p>\n<p>The same layout idea can work for EUR/USD, the DAX, Brent crude, or another market you follow.</p>\n<hr>\n<h2 id=\"user-content-when-an-indicator-helps\">When an Indicator Helps</h2>\n<p>An indicator is not automatically bad.</p>\n<p>It becomes a problem when you add it without a clear purpose.</p>\n<p>A simple rule:</p>\n<p><code>If you cannot explain what the tool does and how it affects your decision, remove it.</code></p>\n<p>For a beginner, one clearly understood tool is usually better than five tools used without a rule.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-changing-the-layout-after-every-loss\">Mistake 1: Changing the Layout After Every Loss</h3>\n<p>If the screen changes every day, it becomes hard to learn what is actually helping.</p>\n<h3 id=\"user-content-mistake-2-adding-too-many-indicators\">Mistake 2: Adding Too Many Indicators</h3>\n<p>Too many tools often create conflicting messages instead of clarity.</p>\n<h3 id=\"user-content-mistake-3-using-too-many-timeframes\">Mistake 3: Using Too Many Timeframes</h3>\n<p>Jumping constantly between very small and very large charts can make the market look more confusing than it is.</p>\n<h3 id=\"user-content-mistake-4-hiding-price-with-markings\">Mistake 4: Hiding Price With Markings</h3>\n<p>If the chart is covered by too many lines and notes, the structure becomes harder to read.</p>\n<hr>",
+  "learningOutcomes": [
+    "build a clean charting workspace that supports decision-making instead of distraction;",
+    "explain why fewer high-signal tools are better than clutter;",
+    "set up a repeatable workflow for reviewing markets."
+  ],
+  "quizItems": [
+    {
+      "id": "3.1-workspace-setup-q1",
+      "prompt": "What is the main goal of a beginner chart workspace?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Maximum visual complexity"
+        },
+        {
+          "label": "B",
+          "text": "Clear structure and repeatable review"
+        },
+        {
+          "label": "C",
+          "text": "Constant notifications"
+        },
+        {
+          "label": "D",
+          "text": "Hidden risk controls"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Clear structure and repeatable review"
+      },
+      "explanation": "A useful workspace reduces noise and makes the same review process easier every day.",
+      "lessonAnchor": "Goal of the workspace"
+    },
+    {
+      "id": "3.1-workspace-setup-q2",
+      "prompt": "Which setup choice usually improves beginner decision quality?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Add every indicator available"
+        },
+        {
+          "label": "B",
+          "text": "Use a small number of tools tied to one process"
+        },
+        {
+          "label": "C",
+          "text": "Change layout every session"
+        },
+        {
+          "label": "D",
+          "text": "Remove all price history"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Use a small number of tools tied to one process"
+      },
+      "explanation": "Tools are useful only when they support a consistent process.",
+      "lessonAnchor": "Less-is-more principle"
+    },
+    {
+      "id": "3.1-workspace-setup-q3",
+      "prompt": "What should be standardized in a workspace?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Timeframes, watchlist logic, and marking process"
+        },
+        {
+          "label": "B",
+          "text": "Emotional reactions"
+        },
+        {
+          "label": "C",
+          "text": "Social-media opinions"
+        },
+        {
+          "label": "D",
+          "text": "Trade outcome"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Timeframes, watchlist logic, and marking process"
+      },
+      "explanation": "Standardization improves review quality and reduces impulsive changes.",
+      "lessonAnchor": "Repeatable routine section"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; workspace examples illustrate process and review habits, not trading recommendations"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless a future packet adds platform-specific UI claims."
+  ],
+  "sources": [
+    {
+      "label": "CME Group technical analysis course",
+      "url": "https://www.cmegroup.com/education/courses/trading-and-analysis/technical-analysis"
+    },
+    {
+      "label": "CME Group chart time frames guide",
+      "url": "https://www.cmegroup.com/education/courses/using-the-trading-simulator/trading-sim-in-30-seconds-chart-time-frames"
+    },
+    {
+      "label": "ASX Course 11 technical analysis",
+      "url": "https://www.asx.com.au/content/dam/asx/investors/investment-options/shares-course-11-technical-analysis.pdf"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "3.2-watchlist-management",
+    "title": "3.2 Watchlist Management",
+    "href": "/education/module-3-chart-platform-workflows/3.2-watchlist-management"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "3.1-workspace-setup",
+      "title": "3.1 Workspace Setup",
+      "href": "/education/module-3-chart-platform-workflows/3.1-workspace-setup"
+    },
+    {
+      "lessonSlug": "3.2-watchlist-management",
+      "title": "3.2 Watchlist Management",
+      "href": "/education/module-3-chart-platform-workflows/3.2-watchlist-management"
+    },
+    {
+      "lessonSlug": "3.3-trade-execution",
+      "title": "3.3 Trade Execution",
+      "href": "/education/module-3-chart-platform-workflows/3.3-trade-execution"
+    }
+  ]
+}

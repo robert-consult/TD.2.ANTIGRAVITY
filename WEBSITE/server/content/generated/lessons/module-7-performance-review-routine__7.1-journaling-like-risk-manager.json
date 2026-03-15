@@ -1,0 +1,228 @@
+{
+  "moduleSlug": "module-7-performance-review-routine",
+  "moduleTitle": "Module 7: Performance Review Routine",
+  "moduleBaseRoute": "/education/module-7-performance-review-routine",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "7.1-journaling-like-risk-manager",
+  "title": "7.1 Journaling Like a Risk Manager",
+  "summary": "Many beginners think a journal is just a place to write:",
+  "bodyHtml": "<h1 id=\"user-content-71-journaling-like-a-risk-manager\">7.1 Journaling Like a Risk Manager</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Many beginners think a journal is just a place to write:</p>\n<p><code>won money today</code></p>\n<p>or</p>\n<p><code>bad day, need to do better</code></p>\n<p>That is not enough.</p>\n<p>A useful trading journal is not mainly about emotion. It is about evidence.</p>\n<p>A risk manager wants records that answer simple questions:</p>\n<ul>\n<li>What was the plan?</li>\n<li>What actually happened?</li>\n<li>Where did the trade follow the rules?</li>\n<li>Where did the trader break the rules?</li>\n</ul>\n<p>If your journal cannot answer those questions, it cannot help you improve.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain why a journal should record process, not just profit or loss;</li>\n<li>identify the minimum fields needed for a useful journal entry;</li>\n<li>use the journal to compare the planned trade with the real trade.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-think-of-a-journal-as-a-verification-tool\">Think of a Journal as a Verification Tool</h2>\n<p>Investor.gov tells investors to review account statements and trade confirmations carefully so they can verify what happened in the account.</p>\n<p>Your personal trading journal should do something similar for your own process.</p>\n<p>It should help you verify:</p>\n<ul>\n<li>the idea you wanted to trade;</li>\n<li>the risk you meant to take;</li>\n<li>the risk you actually took;</li>\n<li>the behavior you showed during the trade.</li>\n</ul>\n<p>That is why a journal is closer to a lab notebook than a diary.</p>\n<hr>\n<h2 id=\"user-content-the-minimum-useful-journal-entry\">The Minimum Useful Journal Entry</h2>\n<table>\n<thead>\n<tr>\n<th>Field</th>\n<th>What to record</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Setup</strong></td>\n<td>Market, wrapper, direction, and basic trade idea</td>\n<td>Shows what you were trying to do</td>\n</tr>\n<tr>\n<td><strong>Risk plan</strong></td>\n<td>Entry, stop, target, size, and planned money risk</td>\n<td>Shows whether the math was clear before entry</td>\n</tr>\n<tr>\n<td><strong>Execution</strong></td>\n<td>Actual entry, actual exit, and any changes made during the trade</td>\n<td>Shows whether you followed the plan</td>\n</tr>\n<tr>\n<td><strong>Context</strong></td>\n<td>Session, event risk, market family, or unusual conditions</td>\n<td>Helps explain timing and volatility</td>\n</tr>\n<tr>\n<td><strong>Behavior</strong></td>\n<td>Emotional state or behavior trigger</td>\n<td>Helps identify revenge trading, hesitation, or boredom trading</td>\n</tr>\n<tr>\n<td><strong>Lesson</strong></td>\n<td>One short note on what to repeat or fix next time</td>\n<td>Turns the entry into an improvement tool</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A six-row table listing the minimum useful parts of a trade journal and why each part matters.)</em></p>\n<hr>\n<h2 id=\"user-content-screenshots-help-your-memory\">Screenshots Help Your Memory</h2>\n<p>Words are helpful, but pictures can reveal details that memory hides.</p>\n<p>If possible, save:</p>\n<ul>\n<li>one chart image near entry;</li>\n<li>one chart image near exit.</li>\n</ul>\n<p>Screenshots help you review:</p>\n<ul>\n<li>whether the setup actually matched your written idea;</li>\n<li>whether the stop was placed where you said it would be;</li>\n<li>whether you exited because of the plan or because of emotion.</li>\n</ul>\n<p>The image does not replace the note.\nIt supports the note.</p>\n<hr>\n<h2 id=\"user-content-one-multi-market-example\">One Multi-Market Example</h2>\n<p>Imagine your journal for one week includes:</p>\n<ul>\n<li><strong>EUR/USD:</strong> long pullback, planned risk <code>USD 50</code>, respected the stop;</li>\n<li><strong>S&#x26;P 500 index product:</strong> long breakout, planned risk <code>USD 60</code>, entered five minutes before a major event;</li>\n<li><strong>Gold:</strong> long trend trade, took profit too early from fear;</li>\n<li><strong>Brent crude:</strong> long setup, widened the stop and doubled the loss.</li>\n</ul>\n<p>If the journal only records money, the week looks like random good and bad luck.</p>\n<p>If the journal records:</p>\n<ul>\n<li>planned risk versus actual risk;</li>\n<li>market family and wrapper;</li>\n<li>event context;</li>\n<li>behavior notes;</li>\n</ul>\n<p>then the real pattern becomes visible.</p>\n<p>Maybe the biggest issue was not chart reading at all. Maybe it was:</p>\n<ul>\n<li>poor timing in the index trade;</li>\n<li>fear in the gold trade;</li>\n<li>rule-breaking in the Brent trade.</li>\n</ul>\n<p>That is the whole point of journaling.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-recording-only-profit-or-loss\">Mistake 1: Recording Only Profit or Loss</h3>\n<p>Money tells you the outcome. It does not tell you the quality of the process.</p>\n<h3 id=\"user-content-mistake-2-journaling-only-the-good-trades\">Mistake 2: Journaling Only the Good Trades</h3>\n<p>Your most valuable entries are often the trades where discipline broke down.</p>\n<h3 id=\"user-content-mistake-3-writing-vague-notes\">Mistake 3: Writing Vague Notes</h3>\n<p><code>bad trade</code> is not useful.\n<code>entered during news and ignored my risk limit</code> is useful.</p>\n<h3 id=\"user-content-mistake-4-skipping-the-review-note\">Mistake 4: Skipping the Review Note</h3>\n<p>If you do not name the lesson, you are less likely to change the behavior.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain why a journal should capture process rather than only profit and loss;",
+    "identify the minimum useful fields for a review-ready journal entry;",
+    "compare planned risk with actual risk after a trade."
+  ],
+  "quizItems": [
+    {
+      "id": "7.1-journaling-like-risk-manager-q1",
+      "prompt": "What makes a trade journal useful in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Only the final profit number"
+        },
+        {
+          "label": "B",
+          "text": "Consistent records of setup, risk, execution, context, and behavior"
+        },
+        {
+          "label": "C",
+          "text": "Motivational quotes only"
+        },
+        {
+          "label": "D",
+          "text": "A list of favorite markets"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Consistent records of setup, risk, execution, context, and behavior"
+      },
+      "explanation": "The lesson treats the journal as an evidence record that captures plan, action, and behavior together.",
+      "lessonAnchor": "The minimum useful journal entry"
+    },
+    {
+      "id": "7.1-journaling-like-risk-manager-q2",
+      "prompt": "Why should screenshots be paired with notes?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because images replace analysis"
+        },
+        {
+          "label": "B",
+          "text": "Because visual context helps you compare the plan with the actual trade"
+        },
+        {
+          "label": "C",
+          "text": "Because screenshots guarantee better trades"
+        },
+        {
+          "label": "D",
+          "text": "Because notes are unnecessary"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because visual context helps you compare the plan with the actual trade"
+      },
+      "explanation": "The lesson explains that screenshots support written review by showing what the chart looked like near entry and exit.",
+      "lessonAnchor": "Screenshots help your memory"
+    },
+    {
+      "id": "7.1-journaling-like-risk-manager-q3",
+      "prompt": "Which journal entry is weakest?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "One with market, stop, size, and lesson"
+        },
+        {
+          "label": "B",
+          "text": "One with only lost money, bad trade"
+        },
+        {
+          "label": "C",
+          "text": "One with a screenshot and behavior note"
+        },
+        {
+          "label": "D",
+          "text": "One with planned risk and actual risk"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "One with only lost money, bad trade"
+      },
+      "explanation": "That entry records pain, but it does not provide enough detail to improve future behavior.",
+      "lessonAnchor": "Common beginner mistakes"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; journal examples illustrate review habits and do not recommend any specific trade"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later adopts a live in-app journal template."
+  ],
+  "sources": [
+    {
+      "label": "Investor.gov, Better Understanding Your Brokerage Account Statement",
+      "url": "https://www.investor.gov/better-understanding-your-brokerage-account-statement"
+    },
+    {
+      "label": "Investor.gov, How to Read Confirmation Statements",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-62"
+    },
+    {
+      "label": "FINRA, Evaluating Performance",
+      "url": "https://www.finra.org/investors/investing/investing-basics/evaluating-performance"
+    },
+    {
+      "label": "FINRA, Financial Tips for New Investors",
+      "url": "https://www.finra.org/investors/insights/tips-new-investors"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "7.2-win-rate-vs-payoff",
+    "title": "7.2 Win Rate vs. Payoff",
+    "href": "/education/module-7-performance-review-routine/7.2-win-rate-vs-payoff"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "7.1-journaling-like-risk-manager",
+      "title": "7.1 Journaling Like a Risk Manager",
+      "href": "/education/module-7-performance-review-routine/7.1-journaling-like-risk-manager"
+    },
+    {
+      "lessonSlug": "7.2-win-rate-vs-payoff",
+      "title": "7.2 Win Rate vs. Payoff",
+      "href": "/education/module-7-performance-review-routine/7.2-win-rate-vs-payoff"
+    },
+    {
+      "lessonSlug": "7.3-psychology-of-drawdowns",
+      "title": "7.3 Psychology of Drawdowns",
+      "href": "/education/module-7-performance-review-routine/7.3-psychology-of-drawdowns"
+    },
+    {
+      "lessonSlug": "7.4-self-test-portfolio-review",
+      "title": "7.4 Self-Test: Portfolio Review",
+      "href": "/education/module-7-performance-review-routine/7.4-self-test-portfolio-review"
+    }
+  ]
+}

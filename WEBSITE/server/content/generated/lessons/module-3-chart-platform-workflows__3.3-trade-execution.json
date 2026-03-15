@@ -1,0 +1,219 @@
+{
+  "moduleSlug": "module-3-chart-platform-workflows",
+  "moduleTitle": "Module 3: Chart and Platform Workflows",
+  "moduleBaseRoute": "/education/module-3-chart-platform-workflows",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "3.3-trade-execution",
+  "title": "3.3 Trade Execution Workflow",
+  "summary": "Finding a setup is only part of the job.",
+  "bodyHtml": "<h1 id=\"user-content-33-trade-execution-workflow\">3.3 Trade Execution Workflow</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Finding a setup is only part of the job.</p>\n<p>The moment you place an order is where a good idea can still go wrong. A beginner may have the chart read correctly but still make a poor trade by using the wrong size, the wrong order instruction, or the wrong timing.</p>\n<p>Good execution is not mainly about speed. It is about accuracy, discipline, and checking the plan before and after the click.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>describe a simple order-execution checklist;</li>\n<li>explain why order type, risk size, and current conditions all matter;</li>\n<li>understand why post-click verification is part of disciplined execution.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-three-basic-order-instructions\">Three Basic Order Instructions</h2>\n<p>Platform labels can vary, but these are three common ideas beginners should know.</p>\n<table>\n<thead>\n<tr>\n<th>Order type</th>\n<th>Plain-English meaning</th>\n<th>Beginner use</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Market order</strong></td>\n<td>An instruction to buy or sell as soon as possible at the best available price</td>\n<td>Used when immediate entry matters more than price precision</td>\n</tr>\n<tr>\n<td><strong>Limit order</strong></td>\n<td>An instruction to buy or sell only at a specified price or better</td>\n<td>Used when price matters more than immediate execution</td>\n</tr>\n<tr>\n<td><strong>Stop order</strong></td>\n<td>An instruction that becomes active after a chosen trigger price is reached</td>\n<td>Often used for entry triggers or risk control, depending on the market and platform</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A three-row table explaining market, limit, and stop orders in simple language for beginners.)</em></p>\n<p>The exact order types available depend on the market and platform. This lesson teaches the general logic, not platform-specific legal or technical rules.</p>\n<hr>\n<h2 id=\"user-content-a-simple-execution-checklist\">A Simple Execution Checklist</h2>\n<p>Before placing a trade, move through the same steps in the same order.</p>\n<table>\n<thead>\n<tr>\n<th>Step</th>\n<th>What you check</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>1. Confirm the setup</strong></td>\n<td>Is the chart still doing what you think it is doing?</td>\n<td>Prevents impulsive entries</td>\n</tr>\n<tr>\n<td><strong>2. Mark invalidation</strong></td>\n<td>Where is the idea clearly wrong?</td>\n<td>Defines the stop distance</td>\n</tr>\n<tr>\n<td><strong>3. Size from risk</strong></td>\n<td>Does the position size match your allowed risk?</td>\n<td>Protects the account</td>\n</tr>\n<tr>\n<td><strong>4. Choose the order type</strong></td>\n<td>Market, limit, or another instruction?</td>\n<td>Matches the plan to the execution method</td>\n</tr>\n<tr>\n<td><strong>5. Check current conditions</strong></td>\n<td>Spread, liquidity, and event timing</td>\n<td>Avoids bad timing and hidden cost</td>\n</tr>\n<tr>\n<td><strong>6. Confirm after entry</strong></td>\n<td>Did the live order match the plan?</td>\n<td>Catches preventable mistakes</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A six-row table showing the full beginner execution workflow from confirming the setup to checking the live order afterward.)</em></p>\n<p>This checklist should become a habit.</p>\n<hr>\n<h2 id=\"user-content-why-order-type-matters\">Why Order Type Matters</h2>\n<p>A beginner should not treat every entry the same way.</p>\n<p>Very simple version:</p>\n<ul>\n<li>use a <strong>market order</strong> when you accept the current available price and want to enter now;</li>\n<li>use a <strong>limit order</strong> when you only want the trade at a chosen price or better;</li>\n<li>understand that a <strong>stop order</strong> works from a trigger level and may behave differently depending on market conditions and venue rules.</li>\n</ul>\n<p>The right question is not:</p>\n<p><code>Which order type sounds advanced?</code></p>\n<p>The right question is:</p>\n<p><code>Which order type fits this plan?</code></p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine gold is in an uptrend and is pulling back toward a support zone you marked earlier.</p>\n<p>Your plan says:</p>\n<ul>\n<li>buy only if price holds the zone;</li>\n<li>place the stop below the recent swing low;</li>\n<li>risk only a fixed amount from the account;</li>\n<li>avoid entry if a major central-bank event is due very soon.</li>\n</ul>\n<p>You now have to decide:</p>\n<ol>\n<li>Is the setup still valid?</li>\n<li>Where exactly is the invalidation point?</li>\n<li>What size keeps risk within the plan?</li>\n<li>Should you use a market order or a limit order?</li>\n<li>Are the spread and current conditions acceptable?</li>\n</ol>\n<p>After the order fills, you check:</p>\n<ul>\n<li>correct direction;</li>\n<li>correct size;</li>\n<li>correct protective order or stop placement, if used by your plan;</li>\n<li>correct market.</li>\n</ul>\n<p>That final check is part of the execution process, not an extra step.</p>\n<p>The same workflow applies if the chart is a EUR/USD breakout, an S&#x26;P 500 pullback, a gold retest, or a Brent crude range trade. The symbol changes. The discipline does not.</p>\n<hr>\n<h2 id=\"user-content-why-speed-is-not-the-main-skill\">Why Speed Is Not the Main Skill</h2>\n<p>Beginners often think fast clicking is a sign of ability.</p>\n<p>Usually, fast clicking without checks is just fast mistake-making.</p>\n<p>Execution errors can include:</p>\n<ul>\n<li>wrong direction;</li>\n<li>wrong size;</li>\n<li>wrong market;</li>\n<li>wrong order type;</li>\n<li>entry just before a high-impact event.</li>\n</ul>\n<p>A slow, correct decision is usually better than a fast, careless one.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-entering-before-calculating-size\">Mistake 1: Entering Before Calculating Size</h3>\n<p>The trade should not go live before the risk math is clear.</p>\n<h3 id=\"user-content-mistake-2-ignoring-order-type\">Mistake 2: Ignoring Order Type</h3>\n<p>Different order instructions behave differently. The choice matters.</p>\n<h3 id=\"user-content-mistake-3-ignoring-spread-liquidity-or-event-risk\">Mistake 3: Ignoring Spread, Liquidity, or Event Risk</h3>\n<p>A chart setup may still be poorly timed.</p>\n<h3 id=\"user-content-mistake-4-failing-to-check-the-live-order\">Mistake 4: Failing to Check the Live Order</h3>\n<p>Even after submission, you still need to confirm the order matched the plan.</p>\n<hr>",
+  "learningOutcomes": [
+    "describe a disciplined execution sequence from idea to order review;",
+    "separate setup quality from button-clicking speed;",
+    "identify the checks that should happen before order submission."
+  ],
+  "quizItems": [
+    {
+      "id": "3.3-trade-execution-q1",
+      "prompt": "What should happen before order submission?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Verify setup, stop, size, order choice, and conditions"
+        },
+        {
+          "label": "B",
+          "text": "Increase size impulsively"
+        },
+        {
+          "label": "C",
+          "text": "Remove the stop to improve flexibility"
+        },
+        {
+          "label": "D",
+          "text": "Ignore event timing"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Verify setup, stop, size, order choice, and conditions"
+      },
+      "explanation": "Execution quality starts before the button is pressed, including matching the order instruction to the plan.",
+      "lessonAnchor": "Pre-execution checklist"
+    },
+    {
+      "id": "3.3-trade-execution-q2",
+      "prompt": "What is the main risk of treating execution as speed alone?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Faster clicks always improve price"
+        },
+        {
+          "label": "B",
+          "text": "Speed without checks leads to avoidable mistakes"
+        },
+        {
+          "label": "C",
+          "text": "Execution is only for advanced traders"
+        },
+        {
+          "label": "D",
+          "text": "It removes slippage entirely"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Speed without checks leads to avoidable mistakes"
+      },
+      "explanation": "A trader can be fast and still be careless.",
+      "lessonAnchor": "Discipline over speed"
+    },
+    {
+      "id": "3.3-trade-execution-q3",
+      "prompt": "Which action belongs after order submission?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Pretend the risk plan no longer matters"
+        },
+        {
+          "label": "B",
+          "text": "Confirm the order matched the original plan"
+        },
+        {
+          "label": "C",
+          "text": "Add random indicators"
+        },
+        {
+          "label": "D",
+          "text": "Switch products immediately"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Confirm the order matched the original plan"
+      },
+      "explanation": "Post-click confirmation catches preventable errors.",
+      "lessonAnchor": "Post-entry verification"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "6mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "September 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; execution examples illustrate workflow discipline and risk checks, not trade recommendations or platform-specific promises"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless a later revision turns this into a product-specific platform guide."
+  ],
+  "sources": [
+    {
+      "label": "Investor.gov types of orders",
+      "url": "https://www.investor.gov/introduction-investing/investing-basics/how-stock-markets-work/types-orders"
+    },
+    {
+      "label": "Investor bulletin on order types and timing restrictions",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-14"
+    },
+    {
+      "label": "FINRA order types overview",
+      "url": "https://syndication.finra.org/content/understanding-order-types-can-save-time-and-money"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "3.2-watchlist-management",
+    "title": "3.2 Watchlist Management",
+    "href": "/education/module-3-chart-platform-workflows/3.2-watchlist-management"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "3.1-workspace-setup",
+      "title": "3.1 Workspace Setup",
+      "href": "/education/module-3-chart-platform-workflows/3.1-workspace-setup"
+    },
+    {
+      "lessonSlug": "3.2-watchlist-management",
+      "title": "3.2 Watchlist Management",
+      "href": "/education/module-3-chart-platform-workflows/3.2-watchlist-management"
+    },
+    {
+      "lessonSlug": "3.3-trade-execution",
+      "title": "3.3 Trade Execution",
+      "href": "/education/module-3-chart-platform-workflows/3.3-trade-execution"
+    }
+  ]
+}

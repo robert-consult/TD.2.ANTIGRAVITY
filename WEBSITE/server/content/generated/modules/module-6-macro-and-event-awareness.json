@@ -1,0 +1,57 @@
+{
+  "moduleSlug": "module-6-macro-and-event-awareness",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 6: Macro and Event Awareness",
+  "cardSummary": "Track rate policy, economic releases, and cross-asset relationships so event risk becomes visible before volatility arrives.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner",
+    "Freshness Reviewed March 12, 2026",
+    "Re-review by June 12, 2026"
+  ],
+  "baseRoute": "/education/module-6-macro-and-event-awareness",
+  "lessonCount": 3,
+  "quizItemCount": 9,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "macroFreshness",
+      "title": "Freshness Notice",
+      "tone": "warning",
+      "body": "This lesson contains time-sensitive market context verified on March 12, 2026. Review again by June 12, 2026 before publication or reuse.",
+      "placements": [
+        "top"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "6.1-federal-reserve-interest-rates",
+      "title": "6.1 Federal Reserve and Interest Rates",
+      "summary": "Macro news can sound far away from the chart in front of you.",
+      "href": "/education/module-6-macro-and-event-awareness/6.1-federal-reserve-interest-rates"
+    },
+    {
+      "lessonSlug": "6.2-nfp-cpi-tactics",
+      "title": "6.2 NFP, CPI, and Event-Risk Tactics",
+      "summary": "Many beginners see a huge one-minute candle during a news release and think:",
+      "href": "/education/module-6-macro-and-event-awareness/6.2-nfp-cpi-tactics"
+    },
+    {
+      "lessonSlug": "6.3-correlated-assets",
+      "title": "6.3 Correlated Assets",
+      "summary": "Beginners often think:",
+      "href": "/education/module-6-macro-and-event-awareness/6.3-correlated-assets"
+    }
+  ]
+}

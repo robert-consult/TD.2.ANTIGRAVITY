@@ -89,3 +89,30 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-500;
 }
+
+.lesson-prose {
+  @apply prose-headings:text-foreground prose-p:text-muted-foreground prose-li:text-muted-foreground prose-strong:text-foreground prose-a:text-primary prose-hr:border-border prose-th:text-foreground prose-td:text-muted-foreground prose-code:text-foreground prose-pre:bg-neutral-950;
+}
+
+.lesson-prose table {
+  @apply w-full border-collapse overflow-hidden rounded-xl border border-border;
+}
+
+.lesson-prose thead {
+  @apply bg-card;
+}
+
+.lesson-prose th,
+.lesson-prose td {
+  @apply border border-border px-3 py-2;
+}
+
+.education-sidebar {
+  align-self: start;
+}
+
+.screenshot-placeholder-card {
+  background-image:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.03)),
+    radial-gradient(circle at top right, rgba(250, 204, 21, 0.18), transparent 45%);
+}

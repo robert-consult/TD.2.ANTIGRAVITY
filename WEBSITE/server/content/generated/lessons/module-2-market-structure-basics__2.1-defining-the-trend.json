@@ -1,0 +1,218 @@
+{
+  "moduleSlug": "module-2-market-structure-basics",
+  "moduleTitle": "Module 2: Market Structure Basics",
+  "moduleBaseRoute": "/education/module-2-market-structure-basics",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "2.1-defining-the-trend",
+  "title": "2.1 Defining the Trend",
+  "summary": "Beginners often use the word \"trend\" to mean \"price moved fast.\"",
+  "bodyHtml": "<h1 id=\"user-content-21-defining-the-trend\">2.1 Defining the Trend</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Beginners often use the word \"trend\" to mean \"price moved fast.\"</p>\n<p>That is not careful enough.</p>\n<p>In trading, a trend is a way of describing how price is building its path over time. The goal is not to guess the future with certainty. The goal is to read the structure on the chart clearly enough to understand whether price is generally moving up, moving down, or moving sideways.</p>\n<p>The same idea works across many markets:</p>\n<ul>\n<li>a currency pair such as EUR/USD;</li>\n<li>an index such as the Nikkei 225 or the DAX;</li>\n<li>a metal such as gold;</li>\n<li>an energy market such as Brent crude.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>describe an uptrend, downtrend, and range in plain language;</li>\n<li>explain the difference between a pullback and a reversal;</li>\n<li>understand why trend is a description of current behavior, not a guarantee of what happens next.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-two-basic-building-blocks\">Two Basic Building Blocks</h2>\n<p>Before defining a trend, you need two simple chart terms:</p>\n<ul>\n<li><strong>Swing high:</strong> a local peak before price pulls back.</li>\n<li><strong>Swing low:</strong> a local low point before price rises again.</li>\n</ul>\n<p>You do not need to find the perfect peak or low on every candle. You only need to notice the important turning points that shape the chart.</p>\n<hr>\n<h2 id=\"user-content-the-three-main-market-states\">The Three Main Market States</h2>\n<table>\n<thead>\n<tr>\n<th>Market state</th>\n<th>What it usually looks like</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Uptrend</strong></td>\n<td>Higher highs and higher lows</td>\n<td>Buyers keep stepping in at higher levels.</td>\n</tr>\n<tr>\n<td><strong>Downtrend</strong></td>\n<td>Lower highs and lower lows</td>\n<td>Sellers keep stepping in at lower levels.</td>\n</tr>\n<tr>\n<td><strong>Range</strong></td>\n<td>Similar highs and similar lows</td>\n<td>Neither side is clearly taking control.</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A three-row table comparing uptrend, downtrend, and range using simple structure rules and plain-English explanations.)</em></p>\n<p>One useful habit is to ask:</p>\n<p><code>Is the market climbing, falling, or rotating sideways?</code></p>\n<p>That question is more useful than asking:</p>\n<p><code>Can I predict the next candle?</code></p>\n<hr>\n<h2 id=\"user-content-uptrend-in-plain-english\">Uptrend in Plain English</h2>\n<p>An <strong>uptrend</strong> means price is generally climbing in a stair-step pattern.</p>\n<p>What usually happens:</p>\n<ol>\n<li>Price moves up and creates a swing high.</li>\n<li>Price pulls back.</li>\n<li>The pullback stops above the previous important swing low.</li>\n<li>Price pushes up again and creates a new swing high.</li>\n</ol>\n<p>That is why traders summarize an uptrend as:</p>\n<ul>\n<li><strong>higher highs</strong></li>\n<li><strong>higher lows</strong></li>\n</ul>\n<p>The important point is not that price goes up every minute. It is that the pullbacks are still being defended at higher levels.</p>\n<hr>\n<h2 id=\"user-content-downtrend-in-plain-english\">Downtrend in Plain English</h2>\n<p>A <strong>downtrend</strong> is the opposite pattern.</p>\n<p>What usually happens:</p>\n<ol>\n<li>Price drops and creates a swing low.</li>\n<li>Price bounces.</li>\n<li>The bounce stops below the previous important swing high.</li>\n<li>Price falls again and makes a new swing low.</li>\n</ol>\n<p>That is why traders summarize a downtrend as:</p>\n<ul>\n<li><strong>lower highs</strong></li>\n<li><strong>lower lows</strong></li>\n</ul>\n<p>Again, the market does not fall in a straight line. It falls in waves.</p>\n<hr>\n<h2 id=\"user-content-what-a-range-means\">What a Range Means</h2>\n<p>A <strong>range</strong> happens when price is mostly moving between an upper area and a lower area without clear expansion in one direction.</p>\n<p>In a range:</p>\n<ul>\n<li>buyers keep reacting near one lower zone;</li>\n<li>sellers keep reacting near one upper zone;</li>\n<li>price keeps turning back instead of building a clear staircase up or down.</li>\n</ul>\n<p>This matters because a range requires different expectations. A range is not a weak trend. It is a different market condition.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine you are looking at a 1-hour EUR/USD chart.</p>\n<ol>\n<li>Price rises from <code>1.0800</code> to <code>1.0850</code>.</li>\n<li>It pulls back to <code>1.0820</code>.</li>\n<li>It rises again to <code>1.0890</code>.</li>\n<li>It pulls back again, but this time it stops at <code>1.0845</code>.</li>\n</ol>\n<p>What do we notice?</p>\n<ul>\n<li>The second high is above the first high.</li>\n<li>The second low is above the first low.</li>\n</ul>\n<p>That is an <strong>uptrend</strong>.</p>\n<p>Now imagine price later drops below <code>1.0820</code>, which was the earlier important low. That would be a sign that the previous uptrend structure has been damaged. At that point, the chart may be moving into a range or a reversal.</p>\n<p>The exact numbers do not matter. The structure does.</p>\n<hr>\n<h2 id=\"user-content-pullback-vs-reversal\">Pullback vs. Reversal</h2>\n<p>This is one of the most important beginner ideas in the whole course.</p>\n<h3 id=\"user-content-pullback\">Pullback</h3>\n<p>A <strong>pullback</strong> is a move against the current trend that does <strong>not</strong> yet break the key structure.</p>\n<p>Example:</p>\n<ul>\n<li>the market is in an uptrend;</li>\n<li>price falls for a while;</li>\n<li>but it still holds above the prior important swing low.</li>\n</ul>\n<p>The uptrend may still be intact.</p>\n<h3 id=\"user-content-reversal\">Reversal</h3>\n<p>A <strong>reversal</strong> means the old structure is no longer holding.</p>\n<p>Example:</p>\n<ul>\n<li>the market had been making higher highs and higher lows;</li>\n<li>then price breaks below an important prior swing low;</li>\n<li>later rallies also start failing at lower levels.</li>\n</ul>\n<p>Now the structure is changing.</p>\n<p>The short version:</p>\n<ul>\n<li>a pullback is a pause or setback inside the trend;</li>\n<li>a reversal is a structural change.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-trend-is-a-description-not-a-promise\">Trend Is a Description, Not a Promise</h2>\n<p>If a market is in an uptrend, that does <strong>not</strong> mean it must keep rising.</p>\n<p>It only means that, so far, buyers have been strong enough to keep producing higher lows and higher highs.</p>\n<p>This is why serious educational material avoids sentences like:</p>\n<ul>\n<li>\"The market will definitely continue.\"</li>\n<li>\"An uptrend means buying is safe.\"</li>\n</ul>\n<p>A trend helps you describe current behavior. It does not remove risk.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-calling-one-fast-candle-a-trend\">Mistake 1: Calling One Fast Candle a Trend</h3>\n<p>One sudden price jump can show strong momentum, but one candle alone does not prove a full trend.</p>\n<h3 id=\"user-content-mistake-2-confusing-a-pullback-with-a-full-reversal\">Mistake 2: Confusing a Pullback with a Full Reversal</h3>\n<p>Markets often move against the current direction for a while. That alone does not mean the trend is over.</p>\n<h3 id=\"user-content-mistake-3-ignoring-the-range\">Mistake 3: Ignoring the Range</h3>\n<p>Beginners sometimes force every chart into \"uptrend\" or \"downtrend\" even when the market is simply moving sideways.</p>\n<h3 id=\"user-content-mistake-4-treating-trend-as-certainty\">Mistake 4: Treating Trend as Certainty</h3>\n<p>Trend helps with structure. It does not remove the need for patience, discipline, or risk control.</p>\n<hr>",
+  "learningOutcomes": [
+    "identify an uptrend, downtrend, and range using simple structure language;",
+    "explain why trend is a description of behavior, not a prediction of what must happen next;",
+    "avoid calling every strong move a trend."
+  ],
+  "quizItems": [
+    {
+      "id": "2.1-defining-the-trend-q1",
+      "prompt": "Which pattern best describes an uptrend?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Lower highs and lower lows"
+        },
+        {
+          "label": "B",
+          "text": "Higher highs and higher lows"
+        },
+        {
+          "label": "C",
+          "text": "Flat highs and falling lows"
+        },
+        {
+          "label": "D",
+          "text": "Random candles with no structure"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Higher highs and higher lows"
+      },
+      "explanation": "An uptrend is defined by structure, not by one large candle.",
+      "lessonAnchor": "Basic structure definition"
+    },
+    {
+      "id": "2.1-defining-the-trend-q2",
+      "prompt": "What is the most disciplined way to describe a strong one-candle move?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Guaranteed trend"
+        },
+        {
+          "label": "B",
+          "text": "Evidence of momentum that still needs structure confirmation"
+        },
+        {
+          "label": "C",
+          "text": "A permanent reversal"
+        },
+        {
+          "label": "D",
+          "text": "Proof the market cannot pull back"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Evidence of momentum that still needs structure confirmation"
+      },
+      "explanation": "One strong move can start a trend, but structure confirmation comes from follow-through.",
+      "lessonAnchor": "Momentum versus structure"
+    },
+    {
+      "id": "2.1-defining-the-trend-q3",
+      "prompt": "Why is trend a description rather than a promise?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because market structure can change"
+        },
+        {
+          "label": "B",
+          "text": "Because candles are illegal"
+        },
+        {
+          "label": "C",
+          "text": "Because spreads never matter"
+        },
+        {
+          "label": "D",
+          "text": "Because every pullback ends a market"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because market structure can change"
+      },
+      "explanation": "Trend describes current behavior. It does not guarantee continuation.",
+      "lessonAnchor": "Trend as current condition"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "when structure standards materially change"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; trend examples describe price behavior and do not guarantee continuation"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the course changes its structure vocabulary."
+  ],
+  "sources": [
+    {
+      "label": "CME Group technical analysis education",
+      "url": "https://www.cmegroup.com/education/courses/technical-analysis"
+    },
+    {
+      "label": "ASX technical analysis course",
+      "url": "https://www.asx.com.au/content/dam/asx/investors/investment-tools-and-resources/online-courses/shares/shares-course-10.pdf"
+    },
+    {
+      "label": "CMT Association reference on higher highs and higher lows",
+      "url": "https://cmtassociation.org/wp-content/uploads/2021/02/TechnicalPerspectives_December2020.pdf"
+    }
+  ],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "2.2-support-resistance-key-levels",
+    "title": "2.2 Support, Resistance, and Key Levels",
+    "href": "/education/module-2-market-structure-basics/2.2-support-resistance-key-levels"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "2.1-defining-the-trend",
+      "title": "2.1 Defining the Trend",
+      "href": "/education/module-2-market-structure-basics/2.1-defining-the-trend"
+    },
+    {
+      "lessonSlug": "2.2-support-resistance-key-levels",
+      "title": "2.2 Support, Resistance, and Key Levels",
+      "href": "/education/module-2-market-structure-basics/2.2-support-resistance-key-levels"
+    },
+    {
+      "lessonSlug": "2.3-session-overlaps-liquidity",
+      "title": "2.3 Session Overlaps and Liquidity",
+      "href": "/education/module-2-market-structure-basics/2.3-session-overlaps-liquidity"
+    }
+  ]
+}

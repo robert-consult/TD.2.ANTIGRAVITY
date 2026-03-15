@@ -1,0 +1,272 @@
+{
+  "moduleSlug": "module-9-crypto-and-defi",
+  "moduleTitle": "Module 9: Crypto and DeFi",
+  "moduleBaseRoute": "/education/module-9-crypto-and-defi",
+  "moduleFlags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "trackType": "optionalExtension",
+  "catalogGroup": "optionalExtensions",
+  "lessonSlug": "9.2-on-chain-metrics",
+  "title": "9.2 On-Chain Metrics",
+  "summary": "Crypto markets create a lot of public data.",
+  "bodyHtml": "<h1 id=\"user-content-92-on-chain-metrics\">9.2 On-Chain Metrics</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Crypto markets create a lot of public data.</p>\n<p>People can track things like:</p>\n<ul>\n<li>active addresses;</li>\n<li>new addresses;</li>\n<li>wallet activity;</li>\n<li>transfers linked to known exchange addresses.</li>\n</ul>\n<p>That sounds powerful, and it is useful.</p>\n<p>But beginners often make a serious mistake:</p>\n<p>they treat public blockchain data like a machine that tells the future.</p>\n<p>It does not.</p>\n<p>On-chain metrics can add context.\nThey do not remove uncertainty.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain what an on-chain metric is;</li>\n<li>describe what common blockchain activity metrics try to measure;</li>\n<li>explain why those metrics should support a trading process instead of replacing it.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-is-an-on-chain-metric\">What Is an On-Chain Metric?</h2>\n<p>An <strong>on-chain metric</strong> is a summary of activity that happened on a public blockchain.</p>\n<p>Examples include:</p>\n<ul>\n<li>how many addresses were active;</li>\n<li>how many new addresses appeared;</li>\n<li>how much activity involved known exchange addresses;</li>\n<li>how many wallets or entities seem to be active.</li>\n</ul>\n<p>These metrics are useful because blockchains are public systems.</p>\n<p>But public does not mean simple.</p>\n<p>You can see movement.\nYou cannot automatically see motive.</p>\n<hr>\n<h2 id=\"user-content-three-simple-examples\">Three Simple Examples</h2>\n<table>\n<thead>\n<tr>\n<th>Metric example</th>\n<th>What it tries to measure</th>\n<th>What it cannot prove by itself</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Active addresses</strong></td>\n<td>How many unique addresses took part in ledger activity</td>\n<td>How many human users were active</td>\n</tr>\n<tr>\n<td><strong>New addresses</strong></td>\n<td>How many addresses appeared for the first time</td>\n<td>Whether those addresses reflect meaningful economic demand</td>\n</tr>\n<tr>\n<td><strong>Exchange-related flows</strong></td>\n<td>Activity involving addresses identified as exchanges</td>\n<td>Why the transfer happened or what the owner will do next</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A three-row table showing active addresses, new addresses, and exchange-related flows, plus a warning that each metric has interpretation limits.)</em></p>\n<hr>\n<h2 id=\"user-content-why-addresses-are-not-the-same-as-people\">Why Addresses Are Not the Same as People</h2>\n<p>Coin Metrics explains that address metrics are a <strong>proxy</strong> for users.</p>\n<p>That word matters.</p>\n<p>A proxy is a rough stand-in, not a perfect count.</p>\n<p>One person can control:</p>\n<ul>\n<li>many addresses;</li>\n<li>many wallets;</li>\n<li>many exchange accounts.</li>\n</ul>\n<p>Also, some blockchain activity may not reflect a strong economic decision at all.</p>\n<p>For example:</p>\n<ul>\n<li>a smart contract may create new addresses;</li>\n<li>a service may move funds internally;</li>\n<li>a user may spread funds across several wallets.</li>\n</ul>\n<p>So if active addresses rise, you can say:</p>\n<p><code>network activity increased</code></p>\n<p>You usually cannot say:</p>\n<p><code>exactly this many new investors entered and price must rise</code></p>\n<hr>\n<h2 id=\"user-content-why-exchange-flows-can-mislead\">Why Exchange Flows Can Mislead</h2>\n<p>If coins move to a known exchange address, beginners often think:</p>\n<p><code>someone is about to sell</code></p>\n<p>Sometimes that may be true.\nSometimes it may not.</p>\n<p>The transfer could reflect:</p>\n<ul>\n<li>a possible future sale;</li>\n<li>an internal reshuffle;</li>\n<li>a transfer between business units;</li>\n<li>collateral movement;</li>\n<li>operational handling by the platform.</li>\n</ul>\n<p>Coin Metrics also notes that exchange-address identification is incomplete, so some exchange-related measures should be treated as a minimum visible footprint, not perfect coverage.</p>\n<p>This is why exchange-flow data is <strong>context</strong>, not a guaranteed signal.</p>\n<hr>\n<h2 id=\"user-content-context-not-certainty\">Context, Not Certainty</h2>\n<p>The safest use of on-chain metrics is as one more layer in a wider process.</p>\n<p>That process may include:</p>\n<ul>\n<li>trend structure;</li>\n<li>support and resistance;</li>\n<li>event risk;</li>\n<li>position size;</li>\n<li>stop placement;</li>\n<li>venue risk.</li>\n</ul>\n<p>If on-chain data supports your broader reading, it may strengthen your confidence a little.</p>\n<p>If it conflicts with your broader reading, it may tell you to slow down.</p>\n<p>Either way, it does not remove the need for risk discipline.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine you see a large transfer into a known exchange wallet.</p>\n<p>A weak conclusion is:</p>\n<p><code>large holder moved coins to an exchange, so price will definitely crash now</code></p>\n<p>A stronger conclusion is:</p>\n<p><code>this may be relevant context, but I still do not know the intent, timing, or broader market conditions</code></p>\n<p>The second conclusion is less exciting.\nIt is also much safer.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-confusing-visibility-with-certainty\">Mistake 1: Confusing Visibility With Certainty</h3>\n<p>Just because you can see a transfer does not mean you know why it happened.</p>\n<h3 id=\"user-content-mistake-2-treating-addresses-as-people\">Mistake 2: Treating Addresses as People</h3>\n<p>Addresses and wallets are not the same thing as unique human users.</p>\n<h3 id=\"user-content-mistake-3-taking-one-metric-in-isolation\">Mistake 3: Taking One Metric in Isolation</h3>\n<p>A single chart or alert should not replace a full risk process.</p>\n<h3 id=\"user-content-mistake-4-using-data-to-ignore-position-size\">Mistake 4: Using Data to Ignore Position Size</h3>\n<p>No metric makes bad risk control acceptable.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain what on-chain metrics try to measure;",
+    "identify why addresses, wallets, and exchange flows are context rather than certainty;",
+    "avoid treating one metric as a direct buy or sell signal."
+  ],
+  "quizItems": [
+    {
+      "id": "9.2-on-chain-metrics-q1",
+      "prompt": "What is the safest way to use on-chain metrics in this lesson?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "As one context layer that still needs risk control and other evidence"
+        },
+        {
+          "label": "B",
+          "text": "As guaranteed entry signals"
+        },
+        {
+          "label": "C",
+          "text": "As a replacement for stop-loss rules"
+        },
+        {
+          "label": "D",
+          "text": "As proof that price must move immediately"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "As one context layer that still needs risk control and other evidence"
+      },
+      "explanation": "The lesson teaches that on-chain data can be informative, but it does not remove uncertainty.",
+      "lessonAnchor": "Context, not certainty"
+    },
+    {
+      "id": "9.2-on-chain-metrics-q2",
+      "prompt": "Why is it risky to treat active addresses as the same thing as human users?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because one person can control multiple addresses and some addresses may reflect non-economic activity"
+        },
+        {
+          "label": "B",
+          "text": "Because blockchains hide all addresses"
+        },
+        {
+          "label": "C",
+          "text": "Because active addresses measure stock earnings"
+        },
+        {
+          "label": "D",
+          "text": "Because active addresses always equal exchange volume"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because one person can control multiple addresses and some addresses may reflect non-economic activity"
+      },
+      "explanation": "The lesson explains that addresses are a proxy, not a perfect headcount of people.",
+      "lessonAnchor": "What the metric can and cannot tell you"
+    },
+    {
+      "id": "9.2-on-chain-metrics-q3",
+      "prompt": "What is the main caution when reading exchange-related on-chain activity?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "A move to an exchange may matter, but it does not reveal intent by itself"
+        },
+        {
+          "label": "B",
+          "text": "Every transfer to an exchange is a guaranteed sell"
+        },
+        {
+          "label": "C",
+          "text": "Exchange data is useless in all cases"
+        },
+        {
+          "label": "D",
+          "text": "It always identifies every exchange address perfectly"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "A move to an exchange may matter, but it does not reveal intent by itself"
+      },
+      "explanation": "The lesson teaches that transfer data can suggest context but does not prove motivation or timing.",
+      "lessonAnchor": "Why exchange flows can mislead"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    },
+    {
+      "id": "cryptoElevatedRisk",
+      "title": "Crypto And DeFi Risk Warning",
+      "tone": "danger",
+      "body": "Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. This material is educational only and is not a recommendation to buy, sell, or hold any instrument.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "antiImpersonation",
+      "title": "Anti-Impersonation Notice",
+      "tone": "danger",
+      "body": "TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and will never ask users to send funds, crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Optional Extension",
+    "Beginner",
+    "Crypto/DeFi",
+    "Elevated Risk",
+    "Compliance Review Pending",
+    "Re-review by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "periodically-verified",
+    "cadence": "3mo",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "lesson footer and any summary card"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "This material is provided for general educational and informational purposes only. It is not investment, legal, tax, or accounting advice, and it is not a recommendation or solicitation to buy, sell, or hold any instrument. Digital-asset and DeFi activity can involve extreme volatility, irreversible transactions, custody loss, smart-contract failure, operational error, and fraud risk. On-chain metrics are interpretive tools, not guaranteed signals. TradeQuip does not provide personalized investment recommendations through unsolicited calls, texts, DMs, or group chats, and it will never ask users to send crypto assets, passwords, seed phrases, or verification codes through those channels. Verify all communications through official channels before taking action."
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": true
+    }
+  ],
+  "openQuestions": [
+    "Module 9 still requires elevated compliance review before publication, and any new metric source should be re-checked against primary documentation."
+  ],
+  "sources": [
+    {
+      "label": "Coin Metrics, Addresses overview",
+      "url": "https://gitbook-docs.coinmetrics.io/network-data/network-data-overview/addresses"
+    },
+    {
+      "label": "Coin Metrics, Active Addresses",
+      "url": "https://gitbook-docs.coinmetrics.io/network-data/network-data-overview/addresses/active-addresses"
+    },
+    {
+      "label": "Coin Metrics, Active Wallets",
+      "url": "https://gitbook-docs.coinmetrics.io/network-data/network-data-overview/wallets/active-wallets"
+    },
+    {
+      "label": "Coin Metrics, New Addresses",
+      "url": "https://gitbook-docs.coinmetrics.io/network-data/network-data-overview/addresses/new-addresses"
+    },
+    {
+      "label": "Coin Metrics, Exchange overview",
+      "url": "https://gitbook-docs.coinmetrics.io/network-data/network-data-overview/exchange"
+    },
+    {
+      "label": "Coin Metrics, Exchange Transaction Count",
+      "url": "https://gitbook-docs.coinmetrics.io/network-data/network-data-overview/exchange/transaction-count"
+    },
+    {
+      "label": "Investor.gov, Exercise Caution with Crypto Asset Securities",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-alerts/crypto-asset-securities"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "9.1-clob-vs-amm",
+    "title": "9.1 CLOB vs. AMM",
+    "href": "/education/module-9-crypto-and-defi/9.1-clob-vs-amm"
+  },
+  "nextLesson": {
+    "lessonSlug": "9.3-smart-contract-risks",
+    "title": "9.3 Smart Contract Risks",
+    "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "9.1-clob-vs-amm",
+      "title": "9.1 CLOB vs. AMM",
+      "href": "/education/module-9-crypto-and-defi/9.1-clob-vs-amm"
+    },
+    {
+      "lessonSlug": "9.2-on-chain-metrics",
+      "title": "9.2 On-Chain Metrics",
+      "href": "/education/module-9-crypto-and-defi/9.2-on-chain-metrics"
+    },
+    {
+      "lessonSlug": "9.3-smart-contract-risks",
+      "title": "9.3 Smart Contract Risks",
+      "href": "/education/module-9-crypto-and-defi/9.3-smart-contract-risks"
+    },
+    {
+      "lessonSlug": "9.4-settlement-mechanics",
+      "title": "9.4 Settlement Mechanics",
+      "href": "/education/module-9-crypto-and-defi/9.4-settlement-mechanics"
+    }
+  ]
+}

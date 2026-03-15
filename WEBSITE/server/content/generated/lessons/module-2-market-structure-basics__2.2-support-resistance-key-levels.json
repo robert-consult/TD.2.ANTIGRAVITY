@@ -1,0 +1,222 @@
+{
+  "moduleSlug": "module-2-market-structure-basics",
+  "moduleTitle": "Module 2: Market Structure Basics",
+  "moduleBaseRoute": "/education/module-2-market-structure-basics",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "2.2-support-resistance-key-levels",
+  "title": "2.2 Support, Resistance, and Key Levels",
+  "summary": "Many beginners fill a chart with lines and then expect every line to act like a wall.",
+  "bodyHtml": "<h1 id=\"user-content-22-support-resistance-and-key-levels\">2.2 Support, Resistance, and Key Levels</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Many beginners fill a chart with lines and then expect every line to act like a wall.</p>\n<p>That is not how markets work.</p>\n<p>Support and resistance are best understood as <strong>areas of interest</strong> where price reacted before. They matter because buyers and sellers previously made important decisions there. That does not mean the market must react the same way every time.</p>\n<p>If you learn this lesson well, your chart becomes cleaner and your decisions become calmer.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain support and resistance in plain English;</li>\n<li>describe why good traders think in zones, not laser-precise lines;</li>\n<li>judge whether a level looks meaningful or weak.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-key-terms-in-plain-english\">The Key Terms in Plain English</h2>\n<table>\n<thead>\n<tr>\n<th>Term</th>\n<th>Plain-English meaning</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Support</strong></td>\n<td>An area below current price where buyers showed enough interest to slow or stop a fall before.</td>\n</tr>\n<tr>\n<td><strong>Resistance</strong></td>\n<td>An area above current price where sellers showed enough interest to slow or stop a rise before.</td>\n</tr>\n<tr>\n<td><strong>Zone</strong></td>\n<td>A small price area around a level, not one perfect number.</td>\n</tr>\n<tr>\n<td><strong>Role reversal</strong></td>\n<td>When old resistance later acts like support, or old support later acts like resistance.</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A four-row beginner glossary table defining support, resistance, zone, and role reversal in simple language.)</em></p>\n<hr>\n<h2 id=\"user-content-why-these-levels-matter\">Why These Levels Matter</h2>\n<p>When price returns to an area where it reacted strongly before, traders pay attention.</p>\n<p>That happens in many markets:</p>\n<ul>\n<li>FX traders may watch a prior turning area in EUR/USD.</li>\n<li>Index traders may watch an old breakout area in the Nikkei 225 or FTSE 100.</li>\n<li>Metals traders may watch a prior gold rejection zone.</li>\n<li>Energy traders may watch a Brent crude level that price failed to break several times.</li>\n</ul>\n<p>The market remembers important areas because many participants noticed them before and may react again.</p>\n<hr>\n<h2 id=\"user-content-think-in-zones-not-exact-lines\">Think in Zones, Not Exact Lines</h2>\n<p>This is the single most important beginner habit in this lesson.</p>\n<p>A support or resistance area is usually <strong>not</strong> one perfect price. It is more often a zone.</p>\n<p>For example, if gold repeatedly turns around near <code>3,000</code>, the useful idea is not:</p>\n<p><code>3,000.00 is magic.</code></p>\n<p>The useful idea is:</p>\n<p><code>The area around 3,000 has attracted attention before.</code></p>\n<p>Why zones work better:</p>\n<ul>\n<li>spreads and price increments exist;</li>\n<li>different traders place orders at slightly different prices;</li>\n<li>price often moves a little beyond the area before reacting.</li>\n</ul>\n<p>That is why a level can still matter even if price briefly trades through it.</p>\n<hr>\n<h2 id=\"user-content-how-to-judge-the-quality-of-a-level\">How to Judge the Quality of a Level</h2>\n<p>Not every line on a chart deserves attention.</p>\n<p>A more useful level usually has one or more of these features:</p>\n<h3 id=\"user-content-1-repeated-reactions\">1. Repeated Reactions</h3>\n<p>If price has turned there several times, more traders are likely to notice it.</p>\n<h3 id=\"user-content-2-visibility-on-a-higher-timeframe\">2. Visibility on a Higher Timeframe</h3>\n<p>A level visible on a 4-hour, daily, or weekly chart usually matters more than a tiny level from a very short chart.</p>\n<h3 id=\"user-content-3-clear-change-in-behavior\">3. Clear Change in Behavior</h3>\n<p>If price reached the area and then moved away clearly, that area is more meaningful than a random pause in the middle of nowhere.</p>\n<h3 id=\"user-content-4-role-reversal\">4. Role Reversal</h3>\n<p>Sometimes old resistance becomes new support after a breakout. The opposite can also happen.</p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine Brent crude has been trading between <code>70</code> and <code>73</code>.</p>\n<ul>\n<li>Around <code>70</code>, buyers keep stepping in.</li>\n<li>Around <code>73</code>, sellers keep stepping in.</li>\n</ul>\n<p>That gives you:</p>\n<ul>\n<li>a support zone near <code>70</code>;</li>\n<li>a resistance zone near <code>73</code>.</li>\n</ul>\n<p>Now imagine price breaks above <code>73</code> and later comes back down to test that same area.</p>\n<p>If buyers step in around <code>73</code> and price rises again, the old resistance zone may now be acting as support. That is <strong>role reversal</strong>.</p>\n<p>The lesson is not \"buy every retest.\"</p>\n<p>The lesson is:</p>\n<p><code>Watch how price behaves when it returns to an important area.</code></p>\n<hr>\n<h2 id=\"user-content-a-useful-reminder-about-round-numbers\">A Useful Reminder About Round Numbers</h2>\n<p>Round numbers often attract attention:</p>\n<ul>\n<li><code>1.1000</code> in EUR/USD</li>\n<li><code>40,000</code> on a major equity index</li>\n<li><code>100</code> in oil</li>\n</ul>\n<p>These numbers can matter because many people notice them, not because they are magic.</p>\n<p>Always treat them as possible zones of interest, not automatic turning points.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-drawing-too-many-levels\">Mistake 1: Drawing Too Many Levels</h3>\n<p>If every small twitch becomes a line, the chart stops being useful.</p>\n<h3 id=\"user-content-mistake-2-treating-support-like-a-guarantee\">Mistake 2: Treating Support Like a Guarantee</h3>\n<p>Support can break. Resistance can break. These are areas to study, not promises.</p>\n<h3 id=\"user-content-mistake-3-forgetting-the-bigger-context\">Mistake 3: Forgetting the Bigger Context</h3>\n<p>A small support zone may matter less if the broader market is in a strong downtrend. A small resistance zone may matter less if the broader market is in a strong uptrend.</p>\n<h3 id=\"user-content-mistake-4-forgetting-that-a-zone-has-width\">Mistake 4: Forgetting That a Zone Has Width</h3>\n<p>Beginners sometimes act as if a level should hold at one exact price. Real markets are usually less tidy than that.</p>\n<hr>",
+  "learningOutcomes": [
+    "identify support and resistance as areas rather than exact magical prices;",
+    "explain why levels matter because participants have reacted there before;",
+    "avoid treating every line on a chart as equally important."
+  ],
+  "quizItems": [
+    {
+      "id": "2.2-support-resistance-key-levels-q1",
+      "prompt": "What is the best beginner definition of support?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "A guaranteed reversal point"
+        },
+        {
+          "label": "B",
+          "text": "An area where buyers have shown interest before"
+        },
+        {
+          "label": "C",
+          "text": "A place where spreads always disappear"
+        },
+        {
+          "label": "D",
+          "text": "A line that only works in stocks"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "An area where buyers have shown interest before"
+      },
+      "explanation": "Support is an area of prior interest, not a promise.",
+      "lessonAnchor": "Definition section"
+    },
+    {
+      "id": "2.2-support-resistance-key-levels-q2",
+      "prompt": "Why is it better to think in areas rather than exact prices?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because charting platforms cannot draw lines"
+        },
+        {
+          "label": "B",
+          "text": "Because markets often react around zones, not one perfect number"
+        },
+        {
+          "label": "C",
+          "text": "Because exact prices are illegal"
+        },
+        {
+          "label": "D",
+          "text": "Because only options use exact strikes"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Because markets often react around zones, not one perfect number"
+      },
+      "explanation": "Support and resistance are better taught as zones where decisions cluster.",
+      "lessonAnchor": "Areas versus exact lines"
+    },
+    {
+      "id": "2.2-support-resistance-key-levels-q3",
+      "prompt": "Which behavior makes a level more useful?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "It has never been touched before"
+        },
+        {
+          "label": "B",
+          "text": "Price has reacted there more than once and the area lines up with current structure"
+        },
+        {
+          "label": "C",
+          "text": "It is the cheapest instrument on the watchlist"
+        },
+        {
+          "label": "D",
+          "text": "It appears only on one very small candle"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Price has reacted there more than once and the area lines up with current structure"
+      },
+      "explanation": "Repeated reaction and structural relevance make levels more meaningful.",
+      "lessonAnchor": "Level quality section"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "when structure standards materially change"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; support and resistance examples describe prior reactions and do not guarantee future turning points"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the course changes its level-drawing standard."
+  ],
+  "sources": [
+    {
+      "label": "CME Group support and resistance lesson",
+      "url": "https://www.cmegroup.com/education/courses/trading-and-analysis/support-and-resistance"
+    },
+    {
+      "label": "CME Group technical analysis course",
+      "url": "https://www.cmegroup.com/education/courses/technical-analysis"
+    },
+    {
+      "label": "ASX Course 11 technical analysis",
+      "url": "https://www.asx.com.au/content/dam/asx/investors/investment-options/shares-course-11-technical-analysis.pdf"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "2.1-defining-the-trend",
+    "title": "2.1 Defining the Trend",
+    "href": "/education/module-2-market-structure-basics/2.1-defining-the-trend"
+  },
+  "nextLesson": {
+    "lessonSlug": "2.3-session-overlaps-liquidity",
+    "title": "2.3 Session Overlaps and Liquidity",
+    "href": "/education/module-2-market-structure-basics/2.3-session-overlaps-liquidity"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "2.1-defining-the-trend",
+      "title": "2.1 Defining the Trend",
+      "href": "/education/module-2-market-structure-basics/2.1-defining-the-trend"
+    },
+    {
+      "lessonSlug": "2.2-support-resistance-key-levels",
+      "title": "2.2 Support, Resistance, and Key Levels",
+      "href": "/education/module-2-market-structure-basics/2.2-support-resistance-key-levels"
+    },
+    {
+      "lessonSlug": "2.3-session-overlaps-liquidity",
+      "title": "2.3 Session Overlaps and Liquidity",
+      "href": "/education/module-2-market-structure-basics/2.3-session-overlaps-liquidity"
+    }
+  ]
+}

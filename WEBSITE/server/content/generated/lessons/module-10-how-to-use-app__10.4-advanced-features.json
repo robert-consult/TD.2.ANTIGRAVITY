@@ -1,0 +1,308 @@
+{
+  "moduleSlug": "module-10-how-to-use-app",
+  "moduleTitle": "Module 10: How to Use the App",
+  "moduleBaseRoute": "/platform-guide",
+  "moduleFlags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "trackType": "platformGuide",
+  "catalogGroup": "platformGuide",
+  "lessonSlug": "10.4-advanced-features",
+  "title": "10.4 Journal, Profile Settings, Talent, and Supporting Workflows",
+  "summary": "Trading is not only about clicking `Buy` or `Sell`.",
+  "bodyHtml": "<h1 id=\"user-content-104-journal-profile-settings-talent-and-supporting-workflows\">10.4 Journal, Profile Settings, Talent, and Supporting Workflows</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Trading is not only about clicking <code>Buy</code> or <code>Sell</code>.</p>\n<p>A complete beginner also needs to know:</p>\n<ul>\n<li>where to review thoughts and mistakes</li>\n<li>where to secure the account</li>\n<li>where to manage devices and verification</li>\n<li>where supporting screens like <code>Talent</code> fit into the platform</li>\n</ul>\n<p>This lesson covers those routes using the exact wording currently shown inside the app.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>create and edit entries in <code>Trading Journal</code>;</li>\n<li>move through every section chip in <code>Profile Settings</code>;</li>\n<li>recognize the <code>Identity Verification</code> and <code>Devices &#x26; Activity</code> workflows;</li>\n<li>understand what <code>Talent</code> is and which labels appear there.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-trading-journal\">Trading Journal</h2>\n<p>The journal route is <code>/journal</code>.</p>\n<p>When you open it, the page title is <code>Trading Journal</code> and the subtitle is:</p>\n<p><code>Track your thoughts, emotions, and lessons</code></p>\n<p>The main create button is:</p>\n<ul>\n<li><code>New Entry</code></li>\n</ul>\n<p>When you open the entry dialog, you see:</p>\n<ul>\n<li><code>New Journal Entry</code></li>\n<li><code>Your thoughts</code></li>\n<li><code>Link to Trade(s) (Optional)</code></li>\n<li><code>Current Mood</code></li>\n<li><code>Tags</code></li>\n<li><code>Cancel</code></li>\n<li><code>Save Entry</code></li>\n</ul>\n<p>The edit version uses:</p>\n<ul>\n<li><code>Edit Journal Entry</code></li>\n<li><code>Update Entry</code></li>\n</ul>\n<p>Useful search and filter labels include:</p>\n<ul>\n<li><code>Search entries...</code></li>\n<li><code>All Moods</code></li>\n</ul>\n<p>If there are no entries yet, you can see:</p>\n<ul>\n<li><code>No journal entries yet</code></li>\n<li><code>Create Your First Entry</code></li>\n</ul>\n<p>If you are not signed in, the page can show:</p>\n<ul>\n<li><code>Please log in to view your trading journal.</code></li>\n<li><code>Go to Login</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-journal-moods-and-tags\">Journal Moods and Tags</h2>\n<p>The <code>Current Mood</code> menu includes these exact mood labels:</p>\n<ul>\n<li><code>Confident</code></li>\n<li><code>Calm</code></li>\n<li><code>Anxious</code></li>\n<li><code>Frustrated</code></li>\n<li><code>Fearful</code></li>\n<li><code>Greedy</code></li>\n<li><code>Neutral</code></li>\n</ul>\n<p>The common tag set includes labels such as:</p>\n<ul>\n<li><code>Breakout</code></li>\n<li><code>Trend following</code></li>\n<li><code>Reversal</code></li>\n<li><code>Scalp</code></li>\n<li><code>Swing</code></li>\n<li><code>News-driven</code></li>\n<li><code>Technical</code></li>\n<li><code>Fundamental</code></li>\n<li><code>Lesson learned</code></li>\n<li><code>Mistake</code></li>\n<li><code>Over trading</code></li>\n<li><code>Profitable</code></li>\n<li><code>Loss</code></li>\n</ul>\n<p>You can also type a custom tag using <code>Add custom tag...</code> and the <code>Add</code> button.</p>\n<hr>\n<h2 id=\"user-content-profile-settings\">Profile Settings</h2>\n<p>The profile route is <code>/profile</code>.</p>\n<p>The page title is <code>Profile Settings</code>, and the subtitle says:</p>\n<p><code>Manage your account information and security</code></p>\n<p>The section chips across the page are:</p>\n<ul>\n<li><code>My Profile</code></li>\n<li><code>Security &#x26; Login</code></li>\n<li><code>Identity Verification</code></li>\n<li><code>Devices &#x26; Activity</code></li>\n<li><code>Preferences</code></li>\n</ul>\n<p>Those five chips are the main beginner map for the whole settings page.</p>\n<hr>\n<h2 id=\"user-content-my-profile\">My Profile</h2>\n<p>Inside <code>My Profile</code>, the main card heading is <code>Account Information</code>.</p>\n<p>Important field labels are:</p>\n<ul>\n<li><code>Email</code></li>\n<li><code>Username</code></li>\n<li><code>Full Name</code></li>\n<li><code>Phone Number</code></li>\n</ul>\n<p>The save button is:</p>\n<ul>\n<li><code>Save Changes</code></li>\n</ul>\n<p>The page also tells you:</p>\n<ul>\n<li><code>Email cannot be changed</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-security--login\">Security &#x26; Login</h2>\n<p>Inside <code>Security &#x26; Login</code>, a beginner will see several important cards.</p>\n<h3 id=\"user-content-account-security\">Account Security</h3>\n<p>This area includes:</p>\n<ul>\n<li><code>Account Security</code></li>\n<li><code>Account Status</code></li>\n<li><code>Member Since</code></li>\n<li><code>Two-Factor Authentication</code></li>\n<li><code>Enable 2FA</code></li>\n<li><code>Disable</code></li>\n</ul>\n<h3 id=\"user-content-trusted-devices\">Trusted Devices</h3>\n<p>This card is titled:</p>\n<ul>\n<li><code>Trusted Devices</code></li>\n</ul>\n<p>It can also show:</p>\n<ul>\n<li><code>Revoke All</code></li>\n<li><code>No trusted devices</code></li>\n</ul>\n<p>Each stored device has a red icon button for one-device removal.</p>\n<h3 id=\"user-content-change-password\">Change Password</h3>\n<p>The password card uses:</p>\n<ul>\n<li><code>Change Password</code></li>\n<li><code>Current Password</code></li>\n<li><code>New Password</code></li>\n<li><code>Confirm New Password</code></li>\n</ul>\n<p>The page also has eye buttons to show or hide the password text.</p>\n<h3 id=\"user-content-account-deactivation--deletion\">Account Deactivation &#x26; Deletion</h3>\n<p>This section includes:</p>\n<ul>\n<li><code>Deactivate Account</code></li>\n<li><code>Delete Account</code></li>\n</ul>\n<p>Its confirmation dialog uses:</p>\n<ul>\n<li><code>Reason</code></li>\n<li><code>Additional details (optional)</code></li>\n<li><code>Password</code></li>\n<li><code>Type DELETE to confirm</code></li>\n<li><code>Type DEACTIVATE to confirm</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-identity-verification\">Identity Verification</h2>\n<p>Inside <code>Identity Verification</code>, the section heading is:</p>\n<ul>\n<li><code>Verification &#x26; Security</code></li>\n</ul>\n<p>The verified cards inside it are:</p>\n<ul>\n<li><code>Email Verification</code></li>\n<li><code>Phone Verification</code></li>\n<li><code>KYC Verification</code></li>\n<li><code>Payout Settings</code></li>\n</ul>\n<p>Important visible actions can include:</p>\n<ul>\n<li><code>Send Verification Email</code></li>\n<li><code>Send Code</code></li>\n<li><code>Verify</code></li>\n<li><code>Start KYC Process</code></li>\n<li><code>Request Payout</code></li>\n</ul>\n<p>Status wording can include:</p>\n<ul>\n<li><code>Verified</code></li>\n<li><code>Pending</code></li>\n<li><code>Not Verified</code></li>\n<li><code>Available for selected traders only</code></li>\n<li><code>Available after KYC approval</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-devices--activity\">Devices &#x26; Activity</h2>\n<p>This section is where beginners manage sessions and recent access.</p>\n<p>Important headings and actions include:</p>\n<ul>\n<li><code>Active Sessions</code></li>\n<li><code>Terminate All Others</code></li>\n<li><code>Current</code></li>\n<li><code>Recent Login Activity</code></li>\n</ul>\n<p>Inside login activity, status labels can include:</p>\n<ul>\n<li><code>Successful login</code></li>\n<li><code>Failed login attempt</code></li>\n<li><code>Success</code></li>\n<li><code>Failed</code></li>\n</ul>\n<p>If there is nothing to show, the page can display:</p>\n<ul>\n<li><code>No active sessions</code></li>\n<li><code>No login history available</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-preferences\">Preferences</h2>\n<p>The <code>Preferences</code> section contains three main cards:</p>\n<ul>\n<li><code>Regional Preferences</code></li>\n<li><code>Notification Preferences</code></li>\n<li><code>Trading Preferences</code></li>\n</ul>\n<h3 id=\"user-content-regional-preferences\">Regional Preferences</h3>\n<p>Important labels include:</p>\n<ul>\n<li><code>Timezone</code></li>\n<li><code>Language</code></li>\n<li><code>Country / Region</code></li>\n<li><code>Save Preferences</code></li>\n</ul>\n<p>You may also see:</p>\n<ul>\n<li><code>Timezone editing is disabled by an administrator.</code></li>\n<li><code>Country is locked to your signup jurisdiction.</code></li>\n</ul>\n<h3 id=\"user-content-notification-preferences\">Notification Preferences</h3>\n<p>The switch labels are:</p>\n<ul>\n<li><code>Trade Executed</code></li>\n<li><code>Margin Warning</code></li>\n<li><code>Stop Loss / Take Profit Hit</code></li>\n<li><code>Daily Summary</code></li>\n<li><code>Promotions &#x26; Updates</code></li>\n</ul>\n<h3 id=\"user-content-trading-preferences\">Trading Preferences</h3>\n<p>This card explains account-level settings such as leverage and trade limits, and it currently shows:</p>\n<ul>\n<li><code>Leverage</code></li>\n<li><code>Max Trades</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-talent\">Talent</h2>\n<p>The dashboard tab labeled <code>Leaderboard</code> on desktop opens a page titled <code>Talent</code>.</p>\n<p>The visible sub-tabs can include:</p>\n<ul>\n<li><code>Leaderboard</code></li>\n<li><code>My Resume</code></li>\n<li><code>Compete</code></li>\n<li><code>Community</code></li>\n</ul>\n<p>Inside the main leaderboard view, beginners should recognize:</p>\n<ul>\n<li><code>Top Traders</code></li>\n<li><code>My Rank</code></li>\n<li>the column labels <code>Rank</code>, <code>Trader</code>, <code>P/L</code>, and <code>Win Rate</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-notifications-as-a-supporting-workflow\">Notifications as a Supporting Workflow</h2>\n<p>The header bell is also part of the normal user experience.</p>\n<p>Its panel title is:</p>\n<ul>\n<li><code>Notifications</code></li>\n</ul>\n<p>Inside the panel, the main text action is:</p>\n<ul>\n<li><code>Mark all</code></li>\n</ul>\n<p>This belongs in the public guide because it is trader-facing and visible in normal use.</p>\n<hr>",
+  "learningOutcomes": [
+    "use the dedicated `Trading Journal` route and its create/edit tools confidently;",
+    "navigate every `Profile Settings` section chip and understand the key cards and action labels inside each;",
+    "recognize the `Talent` screen and its optional sub-tabs;",
+    "understand the difference between trader-facing workflows and admin-only controls that must stay out of the public guide."
+  ],
+  "quizItems": [
+    {
+      "id": "10.4-advanced-features-q1",
+      "prompt": "Which route opens the dedicated journal workflow?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "`/journal`"
+        },
+        {
+          "label": "B",
+          "text": "`/wallet`"
+        },
+        {
+          "label": "C",
+          "text": "`/trade-history`"
+        },
+        {
+          "label": "D",
+          "text": "`/support/journal`"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "`/journal`"
+      },
+      "explanation": "The authenticated journal lives on the dedicated `/journal` route.",
+      "lessonAnchor": "Trading Journal route"
+    },
+    {
+      "id": "10.4-advanced-features-q2",
+      "prompt": "Which section chip appears inside `Profile Settings`?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Devices & Activity"
+        },
+        {
+          "label": "B",
+          "text": "Admin Ops"
+        },
+        {
+          "label": "C",
+          "text": "White-Label Setup"
+        },
+        {
+          "label": "D",
+          "text": "Billing Console"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Devices & Activity"
+      },
+      "explanation": "`Devices & Activity` is one of the verified section chips in the trader-facing profile page.",
+      "lessonAnchor": "Profile Settings section chips"
+    },
+    {
+      "id": "10.4-advanced-features-q3",
+      "prompt": "What is the correct public-guide treatment of admin controls?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Present them as normal beginner features"
+        },
+        {
+          "label": "B",
+          "text": "Exclude them from the public trader guide"
+        },
+        {
+          "label": "C",
+          "text": "Rename them as safety tools"
+        },
+        {
+          "label": "D",
+          "text": "Hide all profile actions too"
+        }
+      ],
+      "correctAnswer": {
+        "label": "B",
+        "text": "Exclude them from the public trader guide"
+      },
+      "explanation": "The app has trader-facing and admin-only controls. This guide teaches the trader-facing side only.",
+      "lessonAnchor": "Scope and role boundary"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "platformGuide",
+      "title": "Product Guide Notice",
+      "tone": "info",
+      "body": "This public guide explains the current authenticated TradeQuip product using verified user-facing labels. It is instructional documentation, not a trading recommendation, and app labels or flows may change over time.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "screenshotPending",
+      "title": "Screenshots Pending",
+      "tone": "warning",
+      "body": "This lesson is intentionally publishing with screenshot placeholders until current captures are collected and verified against the live trader-facing app.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "time-sensitive",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": true
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational product-guide disclaimer near screenshots and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational product guide only; verification, messaging, and profile actions must be completed through official TradeQuip channels and current app screens"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "supporting-workflow screenshots remain required before publication, and optional talent sub-tabs should be re-checked if configuration changes."
+  ],
+  "sources": [],
+  "previousLesson": {
+    "lessonSlug": "10.3-executing-trades",
+    "title": "10.3 Executing Trades and Managing Orders",
+    "href": "/platform-guide/10.3-executing-trades"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "10.1-dashboard-layout",
+      "title": "10.1 Dashboard Navigation, Header, and Layout",
+      "href": "/platform-guide/10.1-dashboard-layout"
+    },
+    {
+      "lessonSlug": "10.2-portfolio-metrics",
+      "title": "10.2 Portfolio and Account Metrics",
+      "href": "/platform-guide/10.2-portfolio-metrics"
+    },
+    {
+      "lessonSlug": "10.3-executing-trades",
+      "title": "10.3 Executing Trades and Managing Orders",
+      "href": "/platform-guide/10.3-executing-trades"
+    },
+    {
+      "lessonSlug": "10.4-advanced-features",
+      "title": "10.4 Advanced Features",
+      "href": "/platform-guide/10.4-advanced-features"
+    }
+  ],
+  "screenshotPlaceholders": [
+    {
+      "placeholderId": "10.4-advanced-features-history",
+      "surface": "History screen",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Trade History"
+      ],
+      "sourcePath": "client/src/pages/HistoryScreen.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the Trade History screen with its main title and table or filter state."
+    },
+    {
+      "placeholderId": "10.4-advanced-features-talent",
+      "surface": "Talent or leaderboard screen",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Talent",
+        "Leaderboard",
+        "My Resume",
+        "Compete",
+        "Community"
+      ],
+      "sourcePath": "client/src/pages/LeaderboardScreen.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the Talent screen showing the visible trader-facing tabs."
+    },
+    {
+      "placeholderId": "10.4-advanced-features-journal-create",
+      "surface": "Journal create state",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Trading Journal",
+        "New Entry",
+        "Current Mood",
+        "Tags",
+        "Save Entry"
+      ],
+      "sourcePath": "client/src/pages/JournalPage.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the trading journal create flow with the New Entry form state."
+    },
+    {
+      "placeholderId": "10.4-advanced-features-journal-edit",
+      "surface": "Journal edit state",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Update Entry"
+      ],
+      "sourcePath": "client/src/pages/JournalPage.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the trading journal edit flow showing the Update Entry action."
+    },
+    {
+      "placeholderId": "10.4-advanced-features-profile-settings",
+      "surface": "Profile settings overview",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Profile Settings",
+        "My Profile",
+        "Security & Login",
+        "Identity Verification",
+        "Preferences"
+      ],
+      "sourcePath": "client/src/pages/ProfileSettings.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the profile settings overview with the top-level settings tabs."
+    },
+    {
+      "placeholderId": "10.4-advanced-features-identity-states",
+      "surface": "Identity and verification states",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Verify",
+        "Verify & Enable",
+        "Verify before"
+      ],
+      "sourcePath": "client/src/pages/ProfileSettings.tsx; client/src/components/VerificationCards.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the identity verification states showing the Verify and Verify and Enable actions."
+    }
+  ]
+}

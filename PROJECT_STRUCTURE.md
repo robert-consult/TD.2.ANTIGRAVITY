@@ -10,6 +10,7 @@
 
 | Component | Path | Technology | Dependencies Location |
 |-----------|------|------------|----------------------|
+| Public Website | `WEBSITE/` | React 18 + Vite + Express + build-time markdown sync | `WEBSITE/node_modules/` |
 | Web Frontend | `client/` | React 18 + Vite | `node_modules/` (root) |
 | Backend API | `server/` | Express + Node | `node_modules/` (root) |
 | Shared Types & Schemas | `shared/` | TypeScript + Zod + Drizzle | `node_modules/` (root) |
@@ -44,6 +45,26 @@ TD.2.ANTIGRAVITY/                        ← Root workspace
 │   └── security/                        ← Repo-local security
 │       ├── AGENTS.md                    # Security agent guidance
 │       └── vuln-db/                     # Vulnerability database (YAML files)
+│
+├── 🌍 PUBLIC WEBSITE MODULE
+│   └── WEBSITE/                         ← Standalone marketing + education site
+│       ├── AGENTS.md                    # Website-specific isolation guidance
+│       ├── README.md                    # Runtime/build routes + content pipeline
+│       ├── WIRING.md                    # Domain topology + route map
+│       ├── package.json                 # Website build, sync, verify scripts
+│       ├── client/                      # Public-only React SPA
+│       │   └── src/
+│       │       ├── App.tsx              # Website router (`/education`, `/platform-guide`, etc.)
+│       │       ├── components/education/ # GitBook-style lesson UI + quiz/disclosure components
+│       │       ├── lib/educationApi.ts  # Typed website content API paths
+│       │       ├── lib/educationTypes.ts # Website content payload types
+│       │       └── pages/               # Catalog, module, lesson, and platform-guide pages
+│       ├── server/
+│       │   └── content/
+│       │       ├── contentStore.ts      # Runtime loader for generated education JSON
+│       │       ├── generated/           # Website-owned generated catalog/module/lesson payloads
+│       │       └── types.ts             # Server content contracts
+│       └── scripts/                     # `content:sync` and `content:validate` pipeline
 │
 ├── 🌐 WEB APPLICATION — CLIENT
 │   └── client/                          ← React frontend (Vite)

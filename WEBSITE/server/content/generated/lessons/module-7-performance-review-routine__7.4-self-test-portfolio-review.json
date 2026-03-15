@@ -1,0 +1,226 @@
+{
+  "moduleSlug": "module-7-performance-review-routine",
+  "moduleTitle": "Module 7: Performance Review Routine",
+  "moduleBaseRoute": "/education/module-7-performance-review-routine",
+  "moduleFlags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "lessonSlug": "7.4-self-test-portfolio-review",
+  "title": "7.4 Self-Test Portfolio Review",
+  "summary": "Reviewing one trade at a time is useful.",
+  "bodyHtml": "<h1 id=\"user-content-74-self-test-portfolio-review\">7.4 Self-Test Portfolio Review</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>Reviewing one trade at a time is useful.</p>\n<p>But after a week or month, you also need to zoom out.</p>\n<p>A portfolio review asks:</p>\n<ul>\n<li>What patterns kept repeating?</li>\n<li>Which mistakes showed up more than once?</li>\n<li>Were several trades actually the same idea in different markets?</li>\n<li>Did my behavior change after wins or losses?</li>\n</ul>\n<p>This lesson brings the earlier modules together into one review loop.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>explain the difference between a single-trade review and a portfolio review;</li>\n<li>check for theme overlap, timing problems, and repeated behavior;</li>\n<li>turn your review into one clear rule or adjustment for the next period.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-what-a-portfolio-review-looks-for\">What a Portfolio Review Looks For</h2>\n<table>\n<thead>\n<tr>\n<th>Review area</th>\n<th>What you ask</th>\n<th>Why it matters</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Results</strong></td>\n<td>What happened over the full sample?</td>\n<td>Stops you from judging yourself by one trade</td>\n</tr>\n<tr>\n<td><strong>Theme overlap</strong></td>\n<td>Were several trades really the same macro idea?</td>\n<td>Helps reveal hidden concentration</td>\n</tr>\n<tr>\n<td><strong>Timing</strong></td>\n<td>Did losses cluster around certain times or events?</td>\n<td>Helps identify avoidable conditions</td>\n</tr>\n<tr>\n<td><strong>Execution</strong></td>\n<td>Did position size, entries, and exits follow the plan?</td>\n<td>Shows whether process quality stayed stable</td>\n</tr>\n<tr>\n<td><strong>Behavior</strong></td>\n<td>Did fear, boredom, or revenge trading appear repeatedly?</td>\n<td>Connects results to decision-making</td>\n</tr>\n<tr>\n<td><strong>Next rule</strong></td>\n<td>What should be repeated, reduced, or removed next period?</td>\n<td>Turns review into action</td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A six-row table showing the main parts of a portfolio review and why each part matters.)</em></p>\n<hr>\n<h2 id=\"user-content-one-simple-example\">One Simple Example</h2>\n<p>Imagine your losing trades for the month include:</p>\n<ul>\n<li>long EUR/USD;</li>\n<li>long a Nasdaq or S&#x26;P 500 product;</li>\n<li>long gold;</li>\n<li>long Brent crude.</li>\n</ul>\n<p>At first, that looks like four different trades in four different markets.</p>\n<p>But if you learned Module 6 carefully, you should ask:</p>\n<p><code>were these really separate ideas, or were they all leaning into the same softer-dollar, easier-policy, or growth-sensitive story?</code></p>\n<p>If the answer is <code>mostly one repeated theme</code>, your portfolio review found something important:</p>\n<ul>\n<li>the issue may be concentration, not just bad luck;</li>\n<li>different symbols did not create true diversification by themselves;</li>\n<li>your next rule might be to reduce size when trades share the same macro story.</li>\n</ul>\n<p>That is the value of zooming out.</p>\n<hr>\n<h2 id=\"user-content-a-simple-review-sequence\">A Simple Review Sequence</h2>\n<ol>\n<li>Gather the full trade sample for the week or month.</li>\n<li>Count wins, losses, and breakeven trades.</li>\n<li>Group the trades by theme, market, setup type, or session.</li>\n<li>Check whether losses cluster around one pattern.</li>\n<li>Read the behavior notes from your journal.</li>\n<li>Write one or two specific adjustments for the next period.</li>\n</ol>\n<p>A good review does not end with:</p>\n<p><code>I need to be better</code></p>\n<p>It ends with something testable, such as:</p>\n<ul>\n<li><code>No new trades within 15 minutes of a Tier 1 event</code></li>\n<li><code>No more than two positions tied to the same macro theme</code></li>\n<li><code>Cut size in half after three losses in a row</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-why-this-matters-more-than-one-big-winner\">Why This Matters More Than One Big Winner</h2>\n<p>FINRA recommends evaluating performance over time, using a single spreadsheet if needed, and rebalancing as needed.</p>\n<p>That logic matters here too.</p>\n<p>One large winning trade can hide a messy month.\nOne ugly losing trade can hide a solid process.</p>\n<p>The portfolio review helps you judge:</p>\n<ul>\n<li>the full sample;</li>\n<li>the repeated pattern;</li>\n<li>the actual habit.</li>\n</ul>\n<p>That is more useful than staring at the single biggest winner or loser.</p>\n<hr>\n<h2 id=\"user-content-common-beginner-mistakes\">Common Beginner Mistakes</h2>\n<h3 id=\"user-content-mistake-1-reviewing-trades-one-by-one-only\">Mistake 1: Reviewing Trades One by One Only</h3>\n<p>Single-trade notes matter, but repeated patterns matter more.</p>\n<h3 id=\"user-content-mistake-2-ignoring-hidden-overlap\">Mistake 2: Ignoring Hidden Overlap</h3>\n<p>Different symbols can still carry the same theme risk.</p>\n<h3 id=\"user-content-mistake-3-writing-vague-action-items\">Mistake 3: Writing Vague Action Items</h3>\n<p><code>Trade better next month</code> is not a review rule.</p>\n<h3 id=\"user-content-mistake-4-changing-everything-at-once\">Mistake 4: Changing Everything at Once</h3>\n<p>A good review usually produces a small number of clear adjustments, not a full reset.</p>\n<hr>",
+  "learningOutcomes": [
+    "conduct a structured weekly or monthly review across themes, timing, execution, and behavior;",
+    "identify hidden overlap between positions or setups;",
+    "write a small number of clear, testable adjustments for the next review period."
+  ],
+  "quizItems": [
+    {
+      "id": "7.4-self-test-portfolio-review-q1",
+      "prompt": "What should a portfolio-style review look for beyond individual trade results?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Hidden theme overlap and repeated behavior patterns"
+        },
+        {
+          "label": "B",
+          "text": "Only the single biggest winning trade"
+        },
+        {
+          "label": "C",
+          "text": "Indicator colors"
+        },
+        {
+          "label": "D",
+          "text": "How busy the week felt"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Hidden theme overlap and repeated behavior patterns"
+      },
+      "explanation": "The lesson says portfolio review should reveal repeated patterns across the full sample, not just single trade outcomes.",
+      "lessonAnchor": "What a portfolio review looks for"
+    },
+    {
+      "id": "7.4-self-test-portfolio-review-q2",
+      "prompt": "Which question belongs in a serious monthly self-review?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Did several trades really express the same macro idea?"
+        },
+        {
+          "label": "B",
+          "text": "Did my charts look nice?"
+        },
+        {
+          "label": "C",
+          "text": "Did I stay entertained?"
+        },
+        {
+          "label": "D",
+          "text": "Did I avoid taking notes?"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Did several trades really express the same macro idea?"
+      },
+      "explanation": "Theme overlap is a core portfolio-review question because hidden concentration can distort results.",
+      "lessonAnchor": "One simple example"
+    },
+    {
+      "id": "7.4-self-test-portfolio-review-q3",
+      "prompt": "Why does this lesson sit at the end of the core curriculum?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Because it combines structure, risk, macro context, execution, and behavior into one review loop"
+        },
+        {
+          "label": "B",
+          "text": "Because review is easier than all earlier lessons"
+        },
+        {
+          "label": "C",
+          "text": "Because earlier modules do not matter anymore"
+        },
+        {
+          "label": "D",
+          "text": "Because only advanced professionals should review trades"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Because it combines structure, risk, macro context, execution, and behavior into one review loop"
+      },
+      "explanation": "This lesson is the integration point for the full course.",
+      "lessonAnchor": "A simple review sequence"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "freshness": {
+    "classification": "timeless",
+    "lastVerifiedOn": "March 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational disclaimer near examples and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational only; portfolio-review examples illustrate self-audit logic and do not provide personalized investment advice"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "none after the March 12, 2026 sync unless the lesson later incorporates live leaderboard or social-comparison data."
+  ],
+  "sources": [
+    {
+      "label": "FINRA, Evaluating Performance",
+      "url": "https://www.finra.org/investors/investing/investing-basics/evaluating-performance"
+    },
+    {
+      "label": "FINRA, Concentration Risk",
+      "url": "https://www.finra.org/investors/insights/concentration-risk"
+    },
+    {
+      "label": "FINRA, Asset Allocation and Diversification",
+      "url": "https://www.finra.org/investors/investing/investing-basics/asset-allocation-diversification"
+    },
+    {
+      "label": "Investor.gov, Better Understanding Your Brokerage Account Statement",
+      "url": "https://www.investor.gov/better-understanding-your-brokerage-account-statement"
+    }
+  ],
+  "previousLesson": {
+    "lessonSlug": "7.3-psychology-of-drawdowns",
+    "title": "7.3 Psychology of Drawdowns",
+    "href": "/education/module-7-performance-review-routine/7.3-psychology-of-drawdowns"
+  },
+  "nextLesson": null,
+  "sidebarLessons": [
+    {
+      "lessonSlug": "7.1-journaling-like-risk-manager",
+      "title": "7.1 Journaling Like a Risk Manager",
+      "href": "/education/module-7-performance-review-routine/7.1-journaling-like-risk-manager"
+    },
+    {
+      "lessonSlug": "7.2-win-rate-vs-payoff",
+      "title": "7.2 Win Rate vs. Payoff",
+      "href": "/education/module-7-performance-review-routine/7.2-win-rate-vs-payoff"
+    },
+    {
+      "lessonSlug": "7.3-psychology-of-drawdowns",
+      "title": "7.3 Psychology of Drawdowns",
+      "href": "/education/module-7-performance-review-routine/7.3-psychology-of-drawdowns"
+    },
+    {
+      "lessonSlug": "7.4-self-test-portfolio-review",
+      "title": "7.4 Self-Test: Portfolio Review",
+      "href": "/education/module-7-performance-review-routine/7.4-self-test-portfolio-review"
+    }
+  ]
+}

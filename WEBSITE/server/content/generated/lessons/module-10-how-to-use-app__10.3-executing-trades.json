@@ -1,0 +1,278 @@
+{
+  "moduleSlug": "module-10-how-to-use-app",
+  "moduleTitle": "Module 10: How to Use the App",
+  "moduleBaseRoute": "/platform-guide",
+  "moduleFlags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "trackType": "platformGuide",
+  "catalogGroup": "platformGuide",
+  "lessonSlug": "10.3-executing-trades",
+  "title": "10.3 Trading on the Trade Screen",
+  "summary": "The trade screen is where beginners can make the most expensive platform mistakes.",
+  "bodyHtml": "<h1 id=\"user-content-103-trading-on-the-trade-screen\">10.3 Trading on the Trade Screen</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>The trade screen is where beginners can make the most expensive platform mistakes.</p>\n<p>Usually, the problem is not that the screen is impossible. The problem is that the user clicks before understanding the layout.</p>\n<p>This lesson slows the process down and teaches the exact labels you will see on the screen before you press anything.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>move between <code>Place Order</code>, <code>Active Positions</code>, and <code>Pending Orders</code>;</li>\n<li>use the order form with the exact on-screen field names;</li>\n<li>understand the difference between live positions and waiting orders;</li>\n<li>know where <code>Edit</code>, <code>Close</code>, and <code>Cancel</code> appear.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-the-top-of-the-trade-screen\">The Top of the Trade Screen</h2>\n<p>The top of the trade screen shows the selected symbol and live market context.</p>\n<p>Important labels you can see there include:</p>\n<ul>\n<li>the symbol name</li>\n<li><code>Bid</code></li>\n<li><code>Ask</code></li>\n<li><code>Spread</code></li>\n<li><code>Account</code></li>\n<li><code>Balance</code></li>\n<li><code>Equity</code></li>\n<li><code>Free Margin</code></li>\n<li><code>Used Margin</code></li>\n</ul>\n<p>This is important because the trade screen is not only an order form. It also shows the live environment around the order.</p>\n<hr>\n<h2 id=\"user-content-the-three-main-tabs\">The Three Main Tabs</h2>\n<p>The trade screen is organized into three tabs:</p>\n<ul>\n<li><code>Place Order</code></li>\n<li><code>Active Positions</code></li>\n<li><code>Pending Orders</code></li>\n</ul>\n<p>On tighter screens, the tab text can shorten to:</p>\n<ul>\n<li><code>Order</code></li>\n<li><code>Positions</code></li>\n<li><code>Pending</code></li>\n</ul>\n<p>The purpose stays the same.</p>\n<hr>\n<h2 id=\"user-content-the-place-order-tab\">The Place Order Tab</h2>\n<p>The order-entry form uses these exact labels:</p>\n<ul>\n<li><code>Order Type</code></li>\n<li><code>Market</code></li>\n<li><code>Limit</code></li>\n<li><code>Stop</code></li>\n<li><code>Time In Force</code></li>\n<li><code>Good Till</code></li>\n<li><code>Position Size (Lots)</code></li>\n<li><code>Limit Price</code></li>\n<li><code>Stop Price</code></li>\n<li><code>Take Profit / Stop Loss</code></li>\n</ul>\n<p>If you use pending orders, the side buttons change to the exact combinations:</p>\n<ul>\n<li><code>Buy Limit</code></li>\n<li><code>Sell Limit</code></li>\n<li><code>Buy Stop</code></li>\n<li><code>Sell Stop</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-time-in-force\">Time In Force</h2>\n<p>The screen does not show every time-in-force option in every situation.</p>\n<p>For <code>Market</code> orders, the available values are:</p>\n<ul>\n<li><code>GTC</code></li>\n<li><code>IOC</code></li>\n<li><code>FOK</code></li>\n</ul>\n<p>For pending orders, the available values are:</p>\n<ul>\n<li><code>GTC</code></li>\n<li><code>DAY</code></li>\n<li><code>GTD</code></li>\n</ul>\n<p>The screen also explains:</p>\n<ul>\n<li><code>IOC/FOK are accepted for immediate fills; pending-only expiries are hidden here.</code></li>\n<li><code>DAY expires at the end of the UTC day. GTD expires at the time you choose below.</code></li>\n</ul>\n<p>If you choose <code>GTD</code>, the <code>Good Till</code> field appears so you can set the expiry time.</p>\n<hr>\n<h2 id=\"user-content-position-size\">Position Size</h2>\n<p>The position-size section is labeled <code>Position Size (Lots)</code>.</p>\n<p>It includes:</p>\n<ul>\n<li>a lot dropdown</li>\n<li>preset lot buttons</li>\n<li>a live helper note such as <code>1 lot = $100,000</code></li>\n</ul>\n<p>The validation message is also important:</p>\n<p><code>Lots must be a whole number between 1 and 50</code></p>\n<p>That means the app is checking lot size before the order is sent.</p>\n<hr>\n<h2 id=\"user-content-take-profit-and-stop-loss\">Take Profit and Stop Loss</h2>\n<p>The risk area is grouped under:</p>\n<p><code>Take Profit / Stop Loss</code></p>\n<p>Inside it, the short labels are:</p>\n<ul>\n<li><code>TP</code></li>\n<li><code>SL</code></li>\n</ul>\n<p>The screen can also warn you if the target is on the wrong side of the entry price. Examples include:</p>\n<ul>\n<li><code>Warning: For Buy, TP should be above entry.</code></li>\n<li><code>Warning: For Buy, SL should be below entry.</code></li>\n<li><code>Warning: For Sell, TP should be below entry.</code></li>\n<li><code>Warning: For Sell, SL should be above entry.</code></li>\n</ul>\n<p>Beginners should treat those warnings seriously.</p>\n<hr>\n<h2 id=\"user-content-the-bottom-action-bar\">The Bottom Action Bar</h2>\n<p>The buttons at the bottom depend on the order type.</p>\n<h3 id=\"user-content-for-market-orders\">For Market Orders</h3>\n<p>You see:</p>\n<ul>\n<li><code>Sell</code></li>\n<li><code>Buy</code></li>\n</ul>\n<p>Each button also shows the live price.</p>\n<h3 id=\"user-content-for-limit-or-stop-orders\">For Limit or Stop Orders</h3>\n<p>The main action button changes to a more specific instruction, such as:</p>\n<ul>\n<li><code>Place Buy Limit</code></li>\n<li><code>Place Sell Limit</code></li>\n<li><code>Place Buy Stop</code></li>\n<li><code>Place Sell Stop</code></li>\n</ul>\n<p>This helps beginners confirm what kind of order they are actually submitting.</p>\n<hr>\n<h2 id=\"user-content-the-active-positions-tab\">The Active Positions Tab</h2>\n<p><code>Active Positions</code> shows trades that are already open.</p>\n<p>Common column labels include:</p>\n<ul>\n<li><code>Symbol</code></li>\n<li><code>Type</code></li>\n<li><code>Size</code></li>\n<li><code>Open Time</code></li>\n<li><code>Open Price</code></li>\n<li><code>Current</code></li>\n<li><code>TP</code></li>\n<li><code>SL</code></li>\n<li><code>P/L</code></li>\n<li><code>Action</code></li>\n</ul>\n<p>The action buttons are:</p>\n<ul>\n<li><code>Edit</code></li>\n<li><code>Close</code></li>\n</ul>\n<p>If there are no open trades, the screen says:</p>\n<p><code>No active positions. Place an order to open a position.</code></p>\n<hr>\n<h2 id=\"user-content-the-pending-orders-tab\">The Pending Orders Tab</h2>\n<p><code>Pending Orders</code> shows instructions that are waiting for price conditions.</p>\n<p>Common column labels include:</p>\n<ul>\n<li><code>Symbol</code></li>\n<li><code>Type</code></li>\n<li><code>Order</code></li>\n<li><code>Size</code></li>\n<li><code>Price</code></li>\n<li><code>TP</code></li>\n<li><code>SL</code></li>\n<li><code>Action</code></li>\n</ul>\n<p>The action buttons are:</p>\n<ul>\n<li><code>Edit</code></li>\n<li><code>Cancel</code></li>\n</ul>\n<p>If there are no waiting orders, the screen says:</p>\n<p><code>No pending orders. Place a limit or stop order to see it here.</code></p>\n<hr>\n<h2 id=\"user-content-mobile-and-smaller-screens\">Mobile and Smaller Screens</h2>\n<p>On smaller screens, not every column stays visible at once.</p>\n<p>Rows can expand to reveal hidden details such as:</p>\n<ul>\n<li><code>Current Price</code></li>\n<li><code>Take Profit</code></li>\n<li><code>Stop Loss</code></li>\n<li><code>Time In Force</code></li>\n</ul>\n<p>The important beginner point is that the action labels do not change:</p>\n<ul>\n<li>live trades still use <code>Edit</code> and <code>Close</code></li>\n<li>waiting orders still use <code>Edit</code> and <code>Cancel</code></li>\n</ul>\n<hr>",
+  "learningOutcomes": [
+    "identify every main trade-screen tab and action area using the exact live labels;",
+    "place market and pending orders using the correct form fields and button wording;",
+    "manage `Active Positions` and `Pending Orders` with the correct action buttons;",
+    "understand the meaning of account-strip values, target warnings, and empty states."
+  ],
+  "quizItems": [
+    {
+      "id": "10.3-executing-trades-q1",
+      "prompt": "Which three tabs organize the main trade screen?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Place Order, Active Positions, Pending Orders"
+        },
+        {
+          "label": "B",
+          "text": "Watchlist, Journal, Resume"
+        },
+        {
+          "label": "C",
+          "text": "Signals, Alerts, Coach"
+        },
+        {
+          "label": "D",
+          "text": "Account, Mailbox, Profile"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Place Order, Active Positions, Pending Orders"
+      },
+      "explanation": "Those are the current verified trade-screen tabs.",
+      "lessonAnchor": "Main trade-screen tabs"
+    },
+    {
+      "id": "10.3-executing-trades-q2",
+      "prompt": "Which field only appears for pending orders using `GTD`?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Good Till"
+        },
+        {
+          "label": "B",
+          "text": "Username"
+        },
+        {
+          "label": "C",
+          "text": "Ticket"
+        },
+        {
+          "label": "D",
+          "text": "Rank"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Good Till"
+      },
+      "explanation": "The `Good Till` field appears when a non-market order uses `GTD`.",
+      "lessonAnchor": "Order-entry form"
+    },
+    {
+      "id": "10.3-executing-trades-q3",
+      "prompt": "What is the difference between the action buttons in the two management tabs?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "`Active Positions` uses `Edit` and `Close`, while `Pending Orders` uses `Edit` and `Cancel`"
+        },
+        {
+          "label": "B",
+          "text": "Both tabs only show `Save`"
+        },
+        {
+          "label": "C",
+          "text": "Both tabs only show `Delete`"
+        },
+        {
+          "label": "D",
+          "text": "Pending orders cannot be edited"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "`Active Positions` uses `Edit` and `Close`, while `Pending Orders` uses `Edit` and `Cancel`"
+      },
+      "explanation": "The two tabs manage different states, so the action labels are intentionally different.",
+      "lessonAnchor": "Managing live positions and waiting orders"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "platformGuide",
+      "title": "Product Guide Notice",
+      "tone": "info",
+      "body": "This public guide explains the current authenticated TradeQuip product using verified user-facing labels. It is instructional documentation, not a trading recommendation, and app labels or flows may change over time.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "screenshotPending",
+      "title": "Screenshots Pending",
+      "tone": "warning",
+      "body": "This lesson is intentionally publishing with screenshot placeholders until current captures are collected and verified against the live trader-facing app.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "time-sensitive",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational product-guide disclaimer near screenshots and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational product guide only; order-entry examples explain current controls and warnings, not trade recommendations or execution guarantees"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "trade-screen screenshots remain required before publication and must be re-captured if the tab labels or field set changes."
+  ],
+  "sources": [],
+  "previousLesson": {
+    "lessonSlug": "10.2-portfolio-metrics",
+    "title": "10.2 Portfolio and Account Metrics",
+    "href": "/platform-guide/10.2-portfolio-metrics"
+  },
+  "nextLesson": {
+    "lessonSlug": "10.4-advanced-features",
+    "title": "10.4 Advanced Features",
+    "href": "/platform-guide/10.4-advanced-features"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "10.1-dashboard-layout",
+      "title": "10.1 Dashboard Navigation, Header, and Layout",
+      "href": "/platform-guide/10.1-dashboard-layout"
+    },
+    {
+      "lessonSlug": "10.2-portfolio-metrics",
+      "title": "10.2 Portfolio and Account Metrics",
+      "href": "/platform-guide/10.2-portfolio-metrics"
+    },
+    {
+      "lessonSlug": "10.3-executing-trades",
+      "title": "10.3 Executing Trades and Managing Orders",
+      "href": "/platform-guide/10.3-executing-trades"
+    },
+    {
+      "lessonSlug": "10.4-advanced-features",
+      "title": "10.4 Advanced Features",
+      "href": "/platform-guide/10.4-advanced-features"
+    }
+  ],
+  "screenshotPlaceholders": [
+    {
+      "placeholderId": "10.3-executing-trades-place-order",
+      "surface": "Place-order tab",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Place Order",
+        "Order",
+        "Buy",
+        "Sell",
+        "Order Type",
+        "Time In Force",
+        "Good Till",
+        "Position Size (Lots)"
+      ],
+      "sourcePath": "client/src/pages/TradeScreen.tsx; client/src/pages/trade-screen/OrderPanel.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the order-entry tab showing the main buy and sell controls and order form labels."
+    },
+    {
+      "placeholderId": "10.3-executing-trades-active-positions",
+      "surface": "Active positions tab",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Active Positions",
+        "Positions",
+        "Edit",
+        "Close"
+      ],
+      "sourcePath": "client/src/pages/TradeScreen.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the active positions tab showing the Edit and Close actions."
+    },
+    {
+      "placeholderId": "10.3-executing-trades-pending-orders",
+      "surface": "Pending orders tab",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Pending Orders",
+        "Pending",
+        "Edit",
+        "Cancel"
+      ],
+      "sourcePath": "client/src/pages/TradeScreen.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the pending orders tab showing the Edit and Cancel actions."
+    }
+  ]
+}

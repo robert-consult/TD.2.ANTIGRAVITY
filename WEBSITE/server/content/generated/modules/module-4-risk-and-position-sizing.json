@@ -1,0 +1,46 @@
+{
+  "moduleSlug": "module-4-risk-and-position-sizing",
+  "trackType": "coreCurriculum",
+  "catalogGroup": "core",
+  "publicTitle": "Module 4: Risk and Position Sizing",
+  "cardSummary": "Translate conviction into controlled size, explicit ruin avoidance, and risk-reward thinking that protects downside first.",
+  "status": "reviewed",
+  "flags": [
+    "Core Curriculum",
+    "Beginner"
+  ],
+  "baseRoute": "/education/module-4-risk-and-position-sizing",
+  "lessonCount": 3,
+  "quizItemCount": 9,
+  "disclosures": [
+    {
+      "id": "baselineEducation",
+      "title": "Educational Content Only",
+      "tone": "info",
+      "body": "For educational and informational purposes only. This material is not investment advice or a recommendation. Trading and investing involve risk, including possible loss of principal.",
+      "placements": [
+        "bottom"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "lessonSlug": "4.1-mathematics-of-ruin",
+      "title": "4.1 Mathematics of Ruin",
+      "summary": "Risk management starts with one simple truth:",
+      "href": "/education/module-4-risk-and-position-sizing/4.1-mathematics-of-ruin"
+    },
+    {
+      "lessonSlug": "4.2-calculating-position-size",
+      "title": "4.2 Calculating Position Size",
+      "summary": "Position size should come from math, not mood.",
+      "href": "/education/module-4-risk-and-position-sizing/4.2-calculating-position-size"
+    },
+    {
+      "lessonSlug": "4.3-risk-reward-skewing",
+      "title": "4.3 Risk-Reward Skewing",
+      "summary": "Reward-to-risk is useful, but it is easy to misuse.",
+      "href": "/education/module-4-risk-and-position-sizing/4.3-risk-reward-skewing"
+    }
+  ]
+}

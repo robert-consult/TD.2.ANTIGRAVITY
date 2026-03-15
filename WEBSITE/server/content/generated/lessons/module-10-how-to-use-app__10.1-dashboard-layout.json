@@ -1,0 +1,287 @@
+{
+  "moduleSlug": "module-10-how-to-use-app",
+  "moduleTitle": "Module 10: How to Use the App",
+  "moduleBaseRoute": "/platform-guide",
+  "moduleFlags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "trackType": "platformGuide",
+  "catalogGroup": "platformGuide",
+  "lessonSlug": "10.1-dashboard-layout",
+  "title": "10.1 Dashboard Navigation, Header, and Layout",
+  "summary": "A beginner can feel lost if a trading app looks like many different tools at once.",
+  "bodyHtml": "<h1 id=\"user-content-101-dashboard-navigation-header-and-layout\">10.1 Dashboard Navigation, Header, and Layout</h1>\n<h2 id=\"user-content-why-this-matters\">Why This Matters</h2>\n<p>A beginner can feel lost if a trading app looks like many different tools at once.</p>\n<p>TradeQuip is easier to use when you understand one basic idea first: most day-to-day activity happens inside one main app shell. You move between tabs instead of leaving the app for a completely different product each time.</p>\n<p>This lesson shows you the exact labels you will see on screen so you can move around without guessing.</p>\n<hr>\n<h2 id=\"user-content-what-you-should-understand-after-this-lesson\">What You Should Understand After This Lesson</h2>\n<p>By the end of this lesson, you should be able to:</p>\n<ul>\n<li>tell the difference between the public website and the signed-in app;</li>\n<li>move between the main dashboard tabs on desktop and mobile;</li>\n<li>understand what the header bell, balance pill, and user menu do;</li>\n<li>know how <code>Quotes</code>, <code>Chart</code>, and <code>Account</code> connect to each other.</li>\n</ul>\n<hr>\n<h2 id=\"user-content-public-website-versus-signed-in-app\">Public Website Versus Signed-In App</h2>\n<p>The public website is where people read about the product.</p>\n<p>The signed-in app is where you actually use it.</p>\n<p>For a normal trader, the main signed-in pages are:</p>\n<ul>\n<li><code>/</code> for the main dashboard shell</li>\n<li><code>/journal</code> for <code>Trading Journal</code></li>\n<li><code>/profile</code> for <code>Profile Settings</code></li>\n<li><code>/verify-email</code> for email verification when needed</li>\n</ul>\n<p>This guide focuses on the trader-facing app. It does not teach admin-only tools.</p>\n<hr>\n<h2 id=\"user-content-the-main-dashboard-tabs\">The Main Dashboard Tabs</h2>\n<p>Inside the main dashboard shell, the platform uses these exact tab labels:</p>\n<table>\n<thead>\n<tr>\n<th>Desktop</th>\n<th>Mobile</th>\n<th>What it opens</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code>Quotes</code></td>\n<td><code>Quotes</code></td>\n<td>The <code>Live Quotes</code> screen</td>\n</tr>\n<tr>\n<td><code>Chart</code></td>\n<td><code>Chart</code></td>\n<td>The chart screen for the selected instrument</td>\n</tr>\n<tr>\n<td><code>Trade</code></td>\n<td><code>Trade</code></td>\n<td>The order-entry and position-management screen</td>\n</tr>\n<tr>\n<td><code>History</code></td>\n<td><code>History</code></td>\n<td><code>Trade History</code></td>\n</tr>\n<tr>\n<td><code>Leaderboard</code></td>\n<td><code>Leaders</code></td>\n<td>The page titled <code>Talent</code></td>\n</tr>\n<tr>\n<td><code>Account</code></td>\n<td><code>Account</code></td>\n<td>Account information and <code>Mailbox</code></td>\n</tr>\n</tbody>\n</table>\n<p><em>(Table alt-text: A six-row table showing the exact dashboard tab labels on desktop and mobile, plus what each tab opens.)</em></p>\n<p>The important beginner detail is that desktop and mobile are almost the same. The one label you should notice is:</p>\n<ul>\n<li>desktop says <code>Leaderboard</code></li>\n<li>mobile says <code>Leaders</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-how-navigation-looks-on-each-device\">How Navigation Looks on Each Device</h2>\n<h3 id=\"user-content-on-desktop\">On Desktop</h3>\n<p>You use the left-side navigation.</p>\n<h3 id=\"user-content-on-mobile-or-in-the-capacitor-app\">On Mobile or in the Capacitor App</h3>\n<p>You use the bottom navigation bar.</p>\n<p>The Capacitor app uses the same screens and the same wording as the web app. The main difference is layout, not product behavior.</p>\n<hr>\n<h2 id=\"user-content-the-header-area\">The Header Area</h2>\n<p>At the top of the dashboard, you will see the header.</p>\n<p>Important live labels and controls include:</p>\n<ul>\n<li>the bell opens <code>Notifications</code></li>\n<li>the balance pill can show <code>BAL:</code> or <code>BL:</code></li>\n<li>stale account data can show <code>Updating</code></li>\n<li>the menu card can show <code>Online</code></li>\n<li>the menu card can show <code>Real-time Data</code></li>\n</ul>\n<p>From the normal trader menu, the main actions are:</p>\n<ul>\n<li><code>Profile Settings</code></li>\n<li><code>Sign out</code></li>\n</ul>\n<p>This guide does not include admin-only menu actions.</p>\n<hr>\n<h2 id=\"user-content-using-the-notifications-panel\">Using the Notifications Panel</h2>\n<p>When you open the bell, the panel title is <code>Notifications</code>.</p>\n<p>Inside it, a beginner should know these visible controls:</p>\n<ul>\n<li><code>Mark all</code></li>\n<li>the speaker icon, which toggles notification sound</li>\n</ul>\n<p>You may also see messages such as:</p>\n<ul>\n<li><code>Loading notifications…</code></li>\n<li><code>No notifications yet.</code></li>\n<li><code>Notifications are currently disabled by admin.</code></li>\n</ul>\n<hr>\n<h2 id=\"user-content-using-the-quotes-tab\">Using the Quotes Tab</h2>\n<p>When you open <code>Quotes</code>, the page title is <code>Live Quotes</code>.</p>\n<p>Important controls on this screen include:</p>\n<ul>\n<li>the search box with the placeholder <code>Search instruments...</code></li>\n<li>sort buttons <code>Symbol</code>, <code>Price</code>, and <code>Change</code></li>\n<li>status text such as <code>Real-time Data</code>, <code>Market Closed</code>, <code>Cached Prices</code>, <code>Connecting...</code>, or <code>Offline</code></li>\n</ul>\n<p>If quote customization is enabled for your account, the icon buttons open:</p>\n<ul>\n<li><code>Add Symbols</code></li>\n<li><code>Manage Symbols</code></li>\n</ul>\n<p>Those dialogs are optional features. The main beginner skill is simpler: use <code>Live Quotes</code> to find an instrument and tap it.</p>\n<hr>\n<h2 id=\"user-content-what-happens-when-you-tap-a-symbol\">What Happens When You Tap a Symbol</h2>\n<p>If you select a symbol while you are not already on <code>Chart</code> or <code>Trade</code>, the app moves you into <code>Chart</code>.</p>\n<p>That means the app is connected on purpose:</p>\n<ul>\n<li><code>Quotes</code> helps you choose the instrument</li>\n<li><code>Chart</code> helps you inspect it</li>\n<li><code>Trade</code> helps you act on it</li>\n</ul>\n<p>This is one workflow, not three unrelated pages.</p>\n<hr>\n<h2 id=\"user-content-using-the-chart-tab\">Using the Chart Tab</h2>\n<p>The <code>Chart</code> tab opens the chart for the selected instrument.</p>\n<p>The live chart screen currently includes:</p>\n<ul>\n<li>period buttons <code>1D</code>, <code>1H</code>, <code>1W</code>, and <code>1M</code></li>\n<li>a floating quote box with <code>Ask</code>, <code>Bid</code>, and <code>Spread</code></li>\n<li>quick trade controls <code>Sell</code>, <code>Lots</code>, and <code>Buy</code></li>\n</ul>\n<p>If the embedded chart fails to load, you can see:</p>\n<ul>\n<li><code>Chart unavailable</code></li>\n<li><code>Retry</code></li>\n</ul>\n<p>On chart-enabled screens, the quick buttons are useful for speed, but beginners should still check the symbol and price carefully before doing anything.</p>\n<hr>\n<h2 id=\"user-content-using-the-account-tab\">Using the Account Tab</h2>\n<p>The <code>Account</code> tab has two internal panels:</p>\n<ul>\n<li><code>Account</code></li>\n<li><code>Mailbox</code></li>\n</ul>\n<p>The platform can also route directly to <code>Mailbox</code> from a link or notification. In URL form, that looks like:</p>\n<p><code>/?tab=account&#x26;panel=mailbox</code></p>\n<p>You do not need to memorize the URL. The point is that <code>Mailbox</code> is part of <code>Account</code>, not a separate dashboard tab.</p>\n<hr>\n<h2 id=\"user-content-web-and-capacitor-app-alignment\">Web and Capacitor App Alignment</h2>\n<p>The Capacitor app is not a different trading product.</p>\n<p>It uses the same trader-facing screens and wording as the web app:</p>\n<ul>\n<li>the same dashboard tabs</li>\n<li>the same <code>Trading Journal</code></li>\n<li>the same <code>Profile Settings</code></li>\n<li>the same trade-screen labels</li>\n</ul>\n<p>So once you learn the web app, the mobile wrapper should feel familiar.</p>\n<hr>",
+  "learningOutcomes": [
+    "explain the difference between the public website and the authenticated app;",
+    "navigate the main dashboard tabs using the exact labels users see on screen;",
+    "understand what the header controls do and what the user menu contains;",
+    "explain how symbol selection, account-panel routing, and the Capacitor wrapper affect navigation."
+  ],
+  "quizItems": [
+    {
+      "id": "10.1-dashboard-layout-q1",
+      "prompt": "Which main dashboard tabs are available to a standard signed-in trader?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Quotes, Chart, Trade, History, Leaderboard, Account"
+        },
+        {
+          "label": "B",
+          "text": "Dashboard, Portfolio, Learn, Vault"
+        },
+        {
+          "label": "C",
+          "text": "Quotes, News, Coach, Wallet"
+        },
+        {
+          "label": "D",
+          "text": "Trade, Journal, Profile, Admin only"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Quotes, Chart, Trade, History, Leaderboard, Account"
+      },
+      "explanation": "Those are the verified tab labels in the authenticated dashboard shell.",
+      "lessonAnchor": "Main dashboard tabs"
+    },
+    {
+      "id": "10.1-dashboard-layout-q2",
+      "prompt": "What label appears on mobile for the leaderboard tab?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Community"
+        },
+        {
+          "label": "B",
+          "text": "Talent"
+        },
+        {
+          "label": "C",
+          "text": "Leaders"
+        },
+        {
+          "label": "D",
+          "text": "Ranking"
+        }
+      ],
+      "correctAnswer": {
+        "label": "C",
+        "text": "Leaders"
+      },
+      "explanation": "Desktop shows `Leaderboard`, but the mobile bottom navigation shortens that label to `Leaders`.",
+      "lessonAnchor": "Desktop versus mobile navigation"
+    },
+    {
+      "id": "10.1-dashboard-layout-q3",
+      "prompt": "Which two non-admin actions are visible in the standard user menu?",
+      "choices": [
+        {
+          "label": "A",
+          "text": "Profile Settings and Sign out"
+        },
+        {
+          "label": "B",
+          "text": "Admin Dashboard and Sign out"
+        },
+        {
+          "label": "C",
+          "text": "Enable Admin Mode and Delete Data"
+        },
+        {
+          "label": "D",
+          "text": "Partner Portal and Support Console"
+        }
+      ],
+      "correctAnswer": {
+        "label": "A",
+        "text": "Profile Settings and Sign out"
+      },
+      "explanation": "The public guide should teach the normal trader menu and exclude admin-only controls.",
+      "lessonAnchor": "Header and user menu"
+    }
+  ],
+  "disclosures": [
+    {
+      "id": "platformGuide",
+      "title": "Product Guide Notice",
+      "tone": "info",
+      "body": "This public guide explains the current authenticated TradeQuip product using verified user-facing labels. It is instructional documentation, not a trading recommendation, and app labels or flows may change over time.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    },
+    {
+      "id": "screenshotPending",
+      "title": "Screenshots Pending",
+      "tone": "warning",
+      "body": "This lesson is intentionally publishing with screenshot placeholders until current captures are collected and verified against the live trader-facing app.",
+      "placements": [
+        "top",
+        "bottom"
+      ]
+    }
+  ],
+  "flags": [
+    "Platform Guide",
+    "Screenshots Pending",
+    "UI verified March 12, 2026",
+    "Re-verify by June 12, 2026"
+  ],
+  "freshness": {
+    "classification": "time-sensitive",
+    "lastVerifiedOn": "March 12, 2026",
+    "nextReviewOn": "June 12, 2026"
+  },
+  "complianceChecklist": [
+    {
+      "key": "Requires CFTC Rule 4.41 hypothetical performance disclosures",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Blurs the line between educational mechanics and a trade recommendation",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any hypothetical / simulated / backtested / projected / extracted performance",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any testimonial / endorsement / ranking / leaderboard or social proof",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Contains any crypto / DeFi / digital-asset material that requires elevated cautionary language",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Requires anti-impersonation / no-unsolicited-contact notice",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Channel-specific placement plan for disclosures",
+      "type": "text",
+      "value": "on-page educational product-guide disclaimer near screenshots and at the lesson footer"
+    },
+    {
+      "key": "Required disclaimers to append",
+      "type": "text",
+      "value": "educational product guide only; UI labels and screenshots may change as the app evolves"
+    },
+    {
+      "key": "Legal / compliance review required before publication",
+      "type": "boolean",
+      "value": false
+    },
+    {
+      "key": "Jurisdiction-specific counsel review needed",
+      "type": "boolean",
+      "value": false
+    }
+  ],
+  "openQuestions": [
+    "desktop and mobile screenshot capture remains required before publication; re-open if navigation labels or panel routing change."
+  ],
+  "sources": [],
+  "previousLesson": null,
+  "nextLesson": {
+    "lessonSlug": "10.2-portfolio-metrics",
+    "title": "10.2 Portfolio and Account Metrics",
+    "href": "/platform-guide/10.2-portfolio-metrics"
+  },
+  "sidebarLessons": [
+    {
+      "lessonSlug": "10.1-dashboard-layout",
+      "title": "10.1 Dashboard Navigation, Header, and Layout",
+      "href": "/platform-guide/10.1-dashboard-layout"
+    },
+    {
+      "lessonSlug": "10.2-portfolio-metrics",
+      "title": "10.2 Portfolio and Account Metrics",
+      "href": "/platform-guide/10.2-portfolio-metrics"
+    },
+    {
+      "lessonSlug": "10.3-executing-trades",
+      "title": "10.3 Executing Trades and Managing Orders",
+      "href": "/platform-guide/10.3-executing-trades"
+    },
+    {
+      "lessonSlug": "10.4-advanced-features",
+      "title": "10.4 Advanced Features",
+      "href": "/platform-guide/10.4-advanced-features"
+    }
+  ],
+  "screenshotPlaceholders": [
+    {
+      "placeholderId": "10.1-dashboard-layout-desktop-shell",
+      "surface": "Desktop dashboard shell",
+      "device": "desktop",
+      "expectedLabels": [
+        "Quotes",
+        "Chart",
+        "Trade",
+        "History",
+        "Leaderboard",
+        "Account",
+        "Notifications",
+        "Profile Settings"
+      ],
+      "sourcePath": "client/src/pages/Dashboard.tsx; client/src/components/Navigation.tsx; client/src/components/Header.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the desktop dashboard shell showing the main trader navigation, header actions, and account entry points."
+    },
+    {
+      "placeholderId": "10.1-dashboard-layout-mobile-shell",
+      "surface": "Mobile dashboard shell",
+      "device": "mobile",
+      "expectedLabels": [
+        "Quotes",
+        "Chart",
+        "Trade",
+        "History",
+        "Leaders",
+        "Account"
+      ],
+      "sourcePath": "client/src/components/Navigation.tsx; client/src/components/MobileWrapperBridge.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the mobile trader shell showing the bottom navigation and the shortened Leaders label."
+    },
+    {
+      "placeholderId": "10.1-dashboard-layout-quotes-screen",
+      "surface": "Quotes screen",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "Live Quotes"
+      ],
+      "sourcePath": "client/src/pages/QuotesScreen.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the Live Quotes screen with symbol selection visible."
+    },
+    {
+      "placeholderId": "10.1-dashboard-layout-chart-screen",
+      "surface": "Chart screen",
+      "device": "desktop or mobile",
+      "expectedLabels": [
+        "1H",
+        "1D",
+        "1W",
+        "1M"
+      ],
+      "sourcePath": "client/src/pages/ChartScreen.tsx",
+      "status": "pending capture",
+      "altText": "Placeholder for the chart screen showing the selected symbol title and the 1H, 1D, 1W, and 1M controls."
+    }
+  ]
+}

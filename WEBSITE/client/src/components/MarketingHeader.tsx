@@ -40,6 +40,9 @@ export function MarketingHeader() {
           <Link href="/education" className="hover:text-primary transition-colors">
             Education
           </Link>
+          <Link href="/platform-guide" className="hover:text-primary transition-colors">
+            Platform Guide
+          </Link>
           <Link href="/contact" className="hover:text-primary transition-colors">
             Contact
           </Link>
@@ -80,6 +83,9 @@ export function MarketingHeader() {
             </Link>
             <Link href="/education" className="hover:text-primary transition-colors" onClick={() => setMobileMenuOpen(false)}>
               Education
+            </Link>
+            <Link href="/platform-guide" className="hover:text-primary transition-colors" onClick={() => setMobileMenuOpen(false)}>
+              Platform Guide
             </Link>
             <Link href="/contact" className="hover:text-primary transition-colors" onClick={() => setMobileMenuOpen(false)}>
               Contact

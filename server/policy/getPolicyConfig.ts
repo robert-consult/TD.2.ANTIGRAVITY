@@ -2,11 +2,23 @@ import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { systemConfig } from "@shared/schema";
 import { DEFAULT_POLICY_CONFIG, type PolicyConfig } from "@shared/policyDecision";
+import { onLiveEvent } from "../services/liveBus";
 
 type ConfigRow = Partial<typeof systemConfig.$inferSelect> | undefined;
 
 const CACHE_TTL_MS = 30_000;
 let cached: { at: number; value: PolicyConfig } | null = null;
+
+export function invalidatePolicyConfigCache() {
+  cached = null;
+}
+
+onLiveEvent((event) => {
+  if (!event || typeof event !== "object") return;
+  if (event.type === "system-config:updated") {
+    invalidatePolicyConfigCache();
+  }
+});
 
 function toNumber(value: unknown, fallback: number): number {
   const n = typeof value === "number" ? value : Number(value);

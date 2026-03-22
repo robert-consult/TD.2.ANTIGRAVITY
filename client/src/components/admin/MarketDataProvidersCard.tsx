@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import type { EffectiveProviderSelection } from "@shared/runtimeConfig";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -62,9 +63,13 @@ export function MarketDataProvidersCard() {
   const { data, isLoading } = useQuery<ProvidersResp>({
     queryKey: ["/api/admin/market-data/providers"],
   });
+  const { data: effectiveData } = useQuery<EffectiveProviderSelection>({
+    queryKey: ["/api/admin/market-data/providers/effective"],
+  });
 
   const providers = useMemo(() => (data?.rows || []).filter((p) => !p.deletedAt), [data?.rows]);
   const activeKey = data?.activeKey ?? null;
+  const fallbackKeys = data?.fallbackKeys ?? [];
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadProviderKey, setUploadProviderKey] = useState("");
@@ -82,6 +87,7 @@ export function MarketDataProvidersCard() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers/effective"] });
       toast({ title: "Provider activated", description: "Market data provider selection updated." });
     },
     onError: (e: any) => {
@@ -113,6 +119,7 @@ export function MarketDataProvidersCard() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers/effective"] });
       toast({ title: "Provider deleted", description: "Provider removed from the registry." });
     },
     onError: (e: any) => {
@@ -173,6 +180,7 @@ export function MarketDataProvidersCard() {
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers/effective"] });
       setReloadOpen(false);
       toast({
         title: data?.ok ? "Reloaded provider files" : "Reload completed with errors",
@@ -200,6 +208,7 @@ export function MarketDataProvidersCard() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers/effective"] });
       setUploadOpen(false);
       toast({ title: "Provider uploaded", description: "Provider configuration saved." });
     },
@@ -235,10 +244,22 @@ export function MarketDataProvidersCard() {
         <div>
           <CardTitle className="text-base">Providers</CardTitle>
           <CardDescription>
-            Switch market data providers instantly. Upload JSON configs for new providers (secrets should be `env:...` references).
+            Configure provider rows here, but watch the effective state separately. Provider changes are applied through a controlled reload and secrets remain deploy-managed via `env:...` references.
           </CardDescription>
-          <div className="mt-2 text-xs text-gray-300">
-            Active: <span className="font-mono">{activeKey ?? "—"}</span>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-300">
+            <Badge variant="outline">Configured active: {activeKey ?? "—"}</Badge>
+            <Badge variant="outline">
+              Fallbacks: {fallbackKeys.length ? fallbackKeys.join(", ") : "—"}
+            </Badge>
+            <Badge variant={effectiveData?.reloadStatus.status === "failed" ? "destructive" : effectiveData?.reloadStatus.status === "pending" ? "secondary" : "outline"}>
+              Reload: {effectiveData?.reloadStatus.status ?? "idle"}
+            </Badge>
+            {effectiveData?.reloadStatus.requestedVersion ? (
+              <Badge variant="outline">Version {effectiveData.reloadStatus.requestedVersion}</Badge>
+            ) : null}
+            {effectiveData?.reloadStatus.requiredScope ? (
+              <Badge variant="outline">Scope: {effectiveData.reloadStatus.requiredScope}</Badge>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
@@ -267,6 +288,30 @@ export function MarketDataProvidersCard() {
       </CardHeader>
 
       <CardContent className="space-y-3">
+        {effectiveData ? (
+          <div className="rounded-md border border-blue-700/40 bg-blue-950/20 p-3 text-xs text-blue-100/90">
+            <div className="flex flex-wrap gap-2">
+              <span>Effective: <span className="font-mono">{effectiveData.effectiveProviderKey ?? "—"}</span></span>
+              {effectiveData.effectiveProviderDisplayName ? (
+                <span>{effectiveData.effectiveProviderDisplayName}</span>
+              ) : null}
+              {effectiveData.effectiveProviderDriver ? (
+                <Badge variant="outline">{effectiveData.effectiveProviderDriver}</Badge>
+              ) : null}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-blue-100/80">
+              <span>Cache TTL: {effectiveData.diagnostics.providerCacheTtlMs}ms</span>
+              <span>Env fallback: {effectiveData.diagnostics.envFallbackMode}</span>
+              <span>Order: {effectiveData.candidateOrder.length ? effectiveData.candidateOrder.join(" -> ") : "—"}</span>
+              {effectiveData.diagnostics.legacyEnvCandidateKeys.length ? (
+                <span>Env refs present: {effectiveData.diagnostics.legacyEnvCandidateKeys.join(", ")}</span>
+              ) : null}
+            </div>
+            {effectiveData.reloadStatus.lastError ? (
+              <div className="mt-2 text-xs text-red-200">{effectiveData.reloadStatus.lastError}</div>
+            ) : null}
+          </div>
+        ) : null}
         {isLoading ? (
           <div className="text-sm text-gray-300">Loading providers…</div>
         ) : providers.length === 0 ? (
@@ -276,19 +321,25 @@ export function MarketDataProvidersCard() {
             {providers.map((p) => {
               const isActive = Boolean(activeKey && p.providerKey === activeKey);
               const isBuiltin = p.providerKey === "twelvedata" || p.providerKey === "1forge";
+              const effectiveCandidate = effectiveData?.candidates.find((candidate) => candidate.providerKey === p.providerKey) ?? null;
+              const isEffective = Boolean(effectiveData?.effectiveProviderKey && effectiveData.effectiveProviderKey === p.providerKey);
               return (
                 <div key={p.providerKey} className="flex flex-col md:flex-row md:items-center justify-between gap-2 p-3 rounded border border-gray-600 bg-neutral-800/40">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold truncate">{p.displayName}</span>
                       <Badge variant="outline" className="font-mono">{p.providerKey}</Badge>
-                      {isActive && <Badge className="bg-emerald-700">Active</Badge>}
+                      {isActive && <Badge className="bg-emerald-700">Configured</Badge>}
+                      {isEffective && <Badge className="bg-cyan-700">Effective</Badge>}
                       {!p.isEnabled && <Badge variant="destructive">Disabled</Badge>}
                       {p.configUsable === false && (
                         <Badge variant="destructive" title={(p.missingSecrets || []).join(", ")}>
                           Secrets missing
                         </Badge>
                       )}
+                      {effectiveCandidate?.skippedReason ? (
+                        <Badge variant="secondary">Skipped: {effectiveCandidate.skippedReason}</Badge>
+                      ) : null}
                     </div>
                     <div className="text-xs text-gray-400 mt-1">
                       Driver: <span className="font-mono">{p.driver}</span>
@@ -309,6 +360,14 @@ export function MarketDataProvidersCard() {
                         </>
                       ) : null}
                     </div>
+                    {effectiveCandidate?.missingSecrets?.length ? (
+                      <div className="mt-1 text-xs text-amber-300">
+                        Missing secrets: {effectiveCandidate.missingSecrets.join(", ")}
+                      </div>
+                    ) : null}
+                    {effectiveCandidate?.error ? (
+                      <div className="mt-1 text-xs text-red-300">{effectiveCandidate.error}</div>
+                    ) : null}
                   </div>
 
                   <div className="flex flex-wrap gap-2 justify-end">

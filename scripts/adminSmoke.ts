@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { CSRF_HEADER_NAME, CSRF_TOKEN_ENDPOINT } from "../shared/security/csrf";
 
 type SymbolRow = {
   symbol: string;
@@ -55,6 +56,40 @@ function getCookieFromResponse(res: Response): string {
   return selectSessionPair(pairs);
 }
 
+function getCookiePairsFromResponse(res: Response): string[] {
+  const getSetCookie = (res.headers as any)?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    const values = getSetCookie.call(res.headers);
+    if (Array.isArray(values) && values.length > 0) {
+      return values.map(extractCookiePair).filter(Boolean);
+    }
+  }
+
+  const fallback = res.headers.get("set-cookie");
+  if (!fallback) return [];
+  return splitCombinedSetCookieHeader(fallback).map(extractCookiePair).filter(Boolean);
+}
+
+function mergeCookiePairs(...groups: Array<string[] | string>): string {
+  const jar = new Map<string, string>();
+  for (const group of groups) {
+    const pairs = Array.isArray(group) ? group : String(group || "").split(/;\s*/g);
+    for (const pair of pairs) {
+      const trimmed = String(pair || "").trim();
+      if (!trimmed) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim();
+      if (!key || !value) continue;
+      jar.set(key, value);
+    }
+  }
+  return Array.from(jar.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join("; ");
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
@@ -66,6 +101,27 @@ async function fetchJson(url: string, options: RequestInit = {}) {
     throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
   }
   return res.json();
+}
+
+async function fetchCsrfSession(cookie: string): Promise<{ cookie: string; csrfToken: string }> {
+  const res = await fetch(`${BASE_URL}${CSRF_TOKEN_ENDPOINT}`, {
+    method: "GET",
+    headers: {
+      Cookie: cookie,
+      accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`CSRF fetch failed: HTTP ${res.status} ${res.statusText}: ${text}`);
+  }
+  const body = (await res.json().catch(() => ({}))) as { csrfToken?: string };
+  const csrfToken = String(body?.csrfToken || "");
+  if (!csrfToken) throw new Error("CSRF fetch failed: missing csrfToken");
+  return {
+    csrfToken,
+    cookie: mergeCookiePairs(cookie, getCookiePairsFromResponse(res)),
+  };
 }
 
 async function loginAdmin(): Promise<string> {
@@ -99,7 +155,13 @@ async function loginAdmin(): Promise<string> {
       });
       if (verifyRes.ok) {
         const payload = (await verifyRes.json().catch(() => ({}))) as { isAdmin?: boolean };
-        if (payload?.isAdmin) return cookie;
+        if (payload?.isAdmin) {
+          const csrfSession = await fetchCsrfSession(cookie);
+          return mergeCookiePairs(
+            csrfSession.cookie,
+            `${CSRF_HEADER_NAME}=${encodeURIComponent(csrfSession.csrfToken)}`,
+          );
+        }
         lastError = "Admin login failed: authenticated user is not admin";
         break;
       }
@@ -231,6 +293,151 @@ async function verifyWebSocket(symbols: string[], cookie: string) {
   });
 }
 
+async function postJson(url: string, body: unknown, cookie: string) {
+  const csrfCookiePrefix = `${CSRF_HEADER_NAME}=`;
+  const csrfToken = cookie
+    .split(/;\s*/g)
+    .find((pair) => pair.startsWith(csrfCookiePrefix))
+    ?.slice(csrfCookiePrefix.length);
+  if (!csrfToken) throw new Error("Missing CSRF token in smoke session cookie jar");
+  return fetchJson(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [CSRF_HEADER_NAME]: decodeURIComponent(csrfToken),
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function verifyAdminConfigWrites(cookie: string) {
+  if (!cookie) {
+    log("Skipping admin config smoke because no admin session is available");
+    return;
+  }
+
+  const policyResponse = (await fetchJson(`${BASE_URL}/api/admin/system-config/policy`, {
+    headers: { Cookie: cookie },
+  })) as { config?: Record<string, any> | null };
+  const originalPolicy = (policyResponse?.config ?? {}) as Record<string, any>;
+  const originalPolicyUpdatedAt = Number(originalPolicy.updatedAt ?? 0);
+  if (!Number.isFinite(originalPolicyUpdatedAt) || originalPolicyUpdatedAt <= 0) {
+    throw new Error("Policy config missing updatedAt");
+  }
+
+  const originalEmailCooldown = Number(originalPolicy.policyEmailResendCooldownSec ?? 60);
+  const nextEmailCooldown =
+    originalEmailCooldown >= 86_400 ? Math.max(1, originalEmailCooldown - 1) : originalEmailCooldown + 1;
+
+  try {
+    await postJson(
+      `${BASE_URL}/api/admin/system-config/policy`,
+      {
+        ...originalPolicy,
+        policyEmailResendCooldownSec: nextEmailCooldown,
+        expectedUpdatedAt: originalPolicyUpdatedAt,
+      },
+      cookie,
+    );
+
+    const updatedPolicyResponse = (await fetchJson(`${BASE_URL}/api/admin/system-config/policy`, {
+      headers: { Cookie: cookie },
+    })) as { config?: Record<string, any> | null };
+    const updatedPolicy = (updatedPolicyResponse?.config ?? {}) as Record<string, any>;
+    if (Number(updatedPolicy.policyEmailResendCooldownSec) !== nextEmailCooldown) {
+      throw new Error("Policy config did not persist the smoke update");
+    }
+
+    await postJson(
+      `${BASE_URL}/api/admin/system-config/policy`,
+      {
+        ...originalPolicy,
+        expectedUpdatedAt: Number(updatedPolicy.updatedAt ?? 0),
+      },
+      cookie,
+    );
+  } finally {
+    const latestPolicyResponse = (await fetchJson(`${BASE_URL}/api/admin/system-config/policy`, {
+      headers: { Cookie: cookie },
+    })) as { config?: Record<string, any> | null };
+    const latestPolicy = (latestPolicyResponse?.config ?? {}) as Record<string, any>;
+    if (Number(latestPolicy.policyEmailResendCooldownSec) !== originalEmailCooldown) {
+      await postJson(
+        `${BASE_URL}/api/admin/system-config/policy`,
+        {
+          ...originalPolicy,
+          expectedUpdatedAt: Number(latestPolicy.updatedAt ?? 0),
+        },
+        cookie,
+      );
+    }
+  }
+  log("Policy config write/read/rollback OK");
+
+  const restrictionsResponse = (await fetchJson(`${BASE_URL}/api/admin/system-config/jurisdiction-restrictions`, {
+    headers: { Cookie: cookie },
+  })) as {
+    restrictedCountriesCsv?: string;
+    restrictedMessage?: string;
+  };
+  const originalCountriesCsv = String(restrictionsResponse?.restrictedCountriesCsv ?? "");
+  const originalRestrictedMessage = String(restrictionsResponse?.restrictedMessage ?? "");
+  const smokeSuffix = " [smoke]";
+  const nextRestrictedMessage = originalRestrictedMessage.endsWith(smokeSuffix)
+    ? `${originalRestrictedMessage}#`
+    : `${originalRestrictedMessage}${smokeSuffix}`;
+
+  try {
+    await postJson(
+      `${BASE_URL}/api/admin/system-config/jurisdiction-restrictions`,
+      {
+        restrictedCountriesCsv: originalCountriesCsv,
+        restrictedMessage: nextRestrictedMessage,
+      },
+      cookie,
+    );
+
+    const updatedRestrictions = (await fetchJson(`${BASE_URL}/api/admin/system-config/jurisdiction-restrictions`, {
+      headers: { Cookie: cookie },
+    })) as {
+      restrictedCountriesCsv?: string;
+      restrictedMessage?: string;
+    };
+
+    if (String(updatedRestrictions.restrictedMessage ?? "") !== nextRestrictedMessage) {
+      throw new Error("Jurisdiction restriction message did not persist the smoke update");
+    }
+
+    await postJson(
+      `${BASE_URL}/api/admin/system-config/jurisdiction-restrictions`,
+      {
+        restrictedCountriesCsv: originalCountriesCsv,
+        restrictedMessage: originalRestrictedMessage,
+      },
+      cookie,
+    );
+  } finally {
+    const latestRestrictions = (await fetchJson(`${BASE_URL}/api/admin/system-config/jurisdiction-restrictions`, {
+      headers: { Cookie: cookie },
+    })) as {
+      restrictedCountriesCsv?: string;
+      restrictedMessage?: string;
+    };
+    if (String(latestRestrictions.restrictedMessage ?? "") !== originalRestrictedMessage) {
+      await postJson(
+        `${BASE_URL}/api/admin/system-config/jurisdiction-restrictions`,
+        {
+          restrictedCountriesCsv: originalCountriesCsv,
+          restrictedMessage: originalRestrictedMessage,
+        },
+        cookie,
+      );
+    }
+  }
+  log("Jurisdiction restriction write/read/rollback OK");
+}
+
 async function main() {
   log(`Base URL: ${BASE_URL}`);
   let cookie = await loginAdmin();
@@ -261,6 +468,7 @@ async function main() {
   }
   await runWithReauth((sessionCookie) => verifyQuotes(symbols, sessionCookie));
   await runWithReauth((sessionCookie) => verifyWebSocket(symbols, sessionCookie));
+  await runWithReauth((sessionCookie) => verifyAdminConfigWrites(sessionCookie));
   log("Smoke test OK");
 }
 

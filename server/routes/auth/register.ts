@@ -66,6 +66,7 @@ import { ensureRequestAuthenticated } from "../../middleware/auth";
 import { computeEmailGracePeriod } from "../../utils/computeEmailGracePeriod";
 import { maybeRecalcAccountForCurrentUser } from "../../services/currentUserRecalc";
 import { applyAdminScopeSession } from "../../security/adminScopeSession";
+import { buildServerVerifyEmailUrl } from "../../services/appLinks";
 import crypto from "crypto";
 import type { AuthRouterDeps } from "./types";
 
@@ -339,7 +340,7 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
       let emailSent = false;
 
       if (resendApiKey) {
-        const verifyUrl = `${process.env.APP_URL || "http://localhost:5000"}/api/verification/email/verify?token=${token}`;
+        const verifyUrl = buildServerVerifyEmailUrl(token);
 
         try {
           const emailResponse = await fetch("https://api.resend.com/emails", {

@@ -1,39 +1,18 @@
 import { useSyncExternalStore } from "react";
+import {
+  DEFAULT_RESOLVED_PERFORMANCE_SETTINGS,
+  PERFORMANCE_TIERS as SHARED_PERFORMANCE_TIERS,
+  flushIntervalForTier as resolveFlushIntervalForTier,
+  pollIntervalForTier as resolvePollIntervalForTier,
+  resolvePerformanceSettings as resolveSharedPerformanceSettings,
+  type PrefetchStrategy,
+  type ResolvedPerformanceSettings,
+  type PerformanceTier,
+} from "@shared/performanceSettings";
 import { PREFETCH_ROUTE_KEYS } from "@/lib/prefetchCatalog";
 
 export type NetEffectiveType = "slow-2g" | "2g" | "3g" | "4g" | "unknown";
-export type PerformanceTier = "INSTANT" | "FAST" | "MODERATE" | "CONSTRAINED" | "MINIMAL";
-export type PrefetchStrategy = "all" | "critical" | "none";
-
-export type PerformanceSettings = {
-  restFallbackPollMs: number;
-  wsPushFrequencyMs: number;
-  quoteFlushIntervalMs: number;
-  maxWsReconnectAttempts: number;
-  wsReconnectBaseDelayMs: number;
-  prefetchStrategy: PrefetchStrategy;
-  prefetchMaxConcurrency: number;
-  prefetchStartDelayMs: number;
-  prefetchFastConcurrencyCap: number;
-  prefetchModerateConcurrencyCap: number;
-  prefetchConstrainedConcurrencyCap: number;
-  prefetchNetworkFastStartDelayMs: number;
-  prefetchNetworkModerateStartDelayMs: number;
-  prefetchNetworkConstrainedStartDelayMs: number;
-  prefetchDeviceModerateStartDelayMs: number;
-  prefetchDeviceConstrainedStartDelayMs: number;
-  prefetchDeviceMinimalStartDelayMs: number;
-  pollInstantMs: number;
-  pollFastMs: number;
-  pollModerateMs: number;
-  pollConstrainedMs: number;
-  pollMinimalMs: number;
-  flushInstantMs: number;
-  flushFastMs: number;
-  flushModerateMs: number;
-  flushConstrainedMs: number;
-  flushMinimalMs: number;
-};
+export type PerformanceSettings = ResolvedPerformanceSettings;
 
 export type PerfHints = {
   effectiveType: NetEffectiveType;
@@ -74,13 +53,7 @@ type NetworkInfoLike = {
   removeEventListener?: (event: "change", listener: () => void) => void;
 };
 
-export const PERFORMANCE_TIERS: readonly PerformanceTier[] = [
-  "INSTANT",
-  "FAST",
-  "MODERATE",
-  "CONSTRAINED",
-  "MINIMAL",
-] as const;
+export const PERFORMANCE_TIERS: readonly PerformanceTier[] = SHARED_PERFORMANCE_TIERS;
 
 const TIER_RANK: Record<PerformanceTier, number> = {
   INSTANT: 0,
@@ -93,35 +66,7 @@ const TIER_RANK: Record<PerformanceTier, number> = {
 const NETWORK_CHANGE_EVENT = "change";
 export const MAX_PREFETCH_CONCURRENCY = 12;
 
-export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
-  restFallbackPollMs: 500,
-  wsPushFrequencyMs: 0,
-  quoteFlushIntervalMs: 50,
-  maxWsReconnectAttempts: 30,
-  wsReconnectBaseDelayMs: 1500,
-  prefetchStrategy: "all",
-  prefetchMaxConcurrency: 4,
-  prefetchStartDelayMs: 0,
-  prefetchFastConcurrencyCap: 3,
-  prefetchModerateConcurrencyCap: 2,
-  prefetchConstrainedConcurrencyCap: 1,
-  prefetchNetworkFastStartDelayMs: 75,
-  prefetchNetworkModerateStartDelayMs: 200,
-  prefetchNetworkConstrainedStartDelayMs: 450,
-  prefetchDeviceModerateStartDelayMs: 50,
-  prefetchDeviceConstrainedStartDelayMs: 150,
-  prefetchDeviceMinimalStartDelayMs: 300,
-  pollInstantMs: 200,
-  pollFastMs: 500,
-  pollModerateMs: 1500,
-  pollConstrainedMs: 4000,
-  pollMinimalMs: 6000,
-  flushInstantMs: 50,
-  flushFastMs: 150,
-  flushModerateMs: 300,
-  flushConstrainedMs: 500,
-  flushMinimalMs: 1000,
-};
+export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = DEFAULT_RESOLVED_PERFORMANCE_SETTINGS;
 
 function getNavigatorLike(): NavigatorLike | undefined {
   if (typeof navigator === "undefined") return undefined;
@@ -328,174 +273,7 @@ export function usePerformanceTier(): PerformanceTier {
 }
 
 export function resolvePerformanceSettings(input: unknown): PerformanceSettings {
-  const candidate = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-
-  const prefetchRaw = String(candidate.prefetchStrategy ?? DEFAULT_PERFORMANCE_SETTINGS.prefetchStrategy)
-    .trim()
-    .toLowerCase();
-  const prefetchStrategy: PrefetchStrategy =
-    prefetchRaw === "none" || prefetchRaw === "critical" || prefetchRaw === "all"
-      ? prefetchRaw
-      : DEFAULT_PERFORMANCE_SETTINGS.prefetchStrategy;
-
-  const restFallbackPollMs = clamp(
-    Math.round(numOrNull(candidate.restFallbackPollMs) ?? DEFAULT_PERFORMANCE_SETTINGS.restFallbackPollMs),
-    100,
-    60_000,
-  );
-  const quoteFlushIntervalMs = clamp(
-    Math.round(numOrNull(candidate.quoteFlushIntervalMs) ?? DEFAULT_PERFORMANCE_SETTINGS.quoteFlushIntervalMs),
-    20,
-    5_000,
-  );
-
-  const defaultPollInstantMs = Math.min(restFallbackPollMs, 200);
-  const defaultPollFastMs = Math.min(restFallbackPollMs, 500);
-  const defaultPollModerateMs = clamp(Math.max(restFallbackPollMs, 1_500), 1_500, 6_000);
-  const defaultPollConstrainedMs = Math.max(Math.round(restFallbackPollMs * 2), 4_000);
-  const defaultPollMinimalMs = Math.max(Math.round(restFallbackPollMs * 3), 6_000);
-  const defaultFlushInstantMs = Math.min(quoteFlushIntervalMs, 50);
-  const defaultFlushFastMs = clamp(Math.round(quoteFlushIntervalMs * 3), 60, 5_000);
-  const defaultFlushModerateMs = clamp(Math.round(quoteFlushIntervalMs * 6), 120, 5_000);
-  const defaultFlushConstrainedMs = clamp(Math.round(quoteFlushIntervalMs * 10), 200, 5_000);
-  const defaultFlushMinimalMs = clamp(Math.round(quoteFlushIntervalMs * 20), 400, 5_000);
-
-  return {
-    restFallbackPollMs,
-    wsPushFrequencyMs: clamp(
-      Math.round(numOrNull(candidate.wsPushFrequencyMs) ?? DEFAULT_PERFORMANCE_SETTINGS.wsPushFrequencyMs),
-      0,
-      1_000,
-    ),
-    quoteFlushIntervalMs,
-    maxWsReconnectAttempts: clamp(
-      Math.round(
-        numOrNull(candidate.maxWsReconnectAttempts) ??
-          DEFAULT_PERFORMANCE_SETTINGS.maxWsReconnectAttempts,
-      ),
-      1,
-      30,
-    ),
-    wsReconnectBaseDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.wsReconnectBaseDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.wsReconnectBaseDelayMs,
-      ),
-      100,
-      30_000,
-    ),
-    prefetchStrategy,
-    prefetchMaxConcurrency: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchMaxConcurrency) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchMaxConcurrency,
-      ),
-      1,
-      MAX_PREFETCH_CONCURRENCY,
-    ),
-    prefetchStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    prefetchFastConcurrencyCap: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchFastConcurrencyCap) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchFastConcurrencyCap,
-      ),
-      1,
-      MAX_PREFETCH_CONCURRENCY,
-    ),
-    prefetchModerateConcurrencyCap: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchModerateConcurrencyCap) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchModerateConcurrencyCap,
-      ),
-      1,
-      MAX_PREFETCH_CONCURRENCY,
-    ),
-    prefetchConstrainedConcurrencyCap: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchConstrainedConcurrencyCap) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchConstrainedConcurrencyCap,
-      ),
-      1,
-      MAX_PREFETCH_CONCURRENCY,
-    ),
-    prefetchNetworkFastStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchNetworkFastStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchNetworkFastStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    prefetchNetworkModerateStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchNetworkModerateStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchNetworkModerateStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    prefetchNetworkConstrainedStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchNetworkConstrainedStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchNetworkConstrainedStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    prefetchDeviceModerateStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchDeviceModerateStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchDeviceModerateStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    prefetchDeviceConstrainedStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchDeviceConstrainedStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchDeviceConstrainedStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    prefetchDeviceMinimalStartDelayMs: clamp(
-      Math.round(
-        numOrNull(candidate.prefetchDeviceMinimalStartDelayMs) ??
-          DEFAULT_PERFORMANCE_SETTINGS.prefetchDeviceMinimalStartDelayMs,
-      ),
-      0,
-      15_000,
-    ),
-    pollInstantMs: clamp(Math.round(numOrNull(candidate.pollInstantMs) ?? defaultPollInstantMs), 100, 60_000),
-    pollFastMs: clamp(Math.round(numOrNull(candidate.pollFastMs) ?? defaultPollFastMs), 100, 60_000),
-    pollModerateMs: clamp(Math.round(numOrNull(candidate.pollModerateMs) ?? defaultPollModerateMs), 100, 60_000),
-    pollConstrainedMs: clamp(
-      Math.round(numOrNull(candidate.pollConstrainedMs) ?? defaultPollConstrainedMs),
-      100,
-      60_000,
-    ),
-    pollMinimalMs: clamp(Math.round(numOrNull(candidate.pollMinimalMs) ?? defaultPollMinimalMs), 100, 60_000),
-    flushInstantMs: clamp(Math.round(numOrNull(candidate.flushInstantMs) ?? defaultFlushInstantMs), 20, 5_000),
-    flushFastMs: clamp(Math.round(numOrNull(candidate.flushFastMs) ?? defaultFlushFastMs), 20, 5_000),
-    flushModerateMs: clamp(
-      Math.round(numOrNull(candidate.flushModerateMs) ?? defaultFlushModerateMs),
-      20,
-      5_000,
-    ),
-    flushConstrainedMs: clamp(
-      Math.round(numOrNull(candidate.flushConstrainedMs) ?? defaultFlushConstrainedMs),
-      20,
-      5_000,
-    ),
-    flushMinimalMs: clamp(Math.round(numOrNull(candidate.flushMinimalMs) ?? defaultFlushMinimalMs), 20, 5_000),
-  };
+  return resolveSharedPerformanceSettings(input);
 }
 
 function pollIntervalForTierInternal(
@@ -569,23 +347,11 @@ function flushIntervalForTierInternal(
 }
 
 export function pollIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
-  const normalizedTier = normalizeTier(tier);
-  const base = clamp(Math.round(baseMs), 100, 60_000);
-  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
-  const settings = hasSettingsInput
-    ? resolvePerformanceSettings(settingsInput)
-    : DEFAULT_PERFORMANCE_SETTINGS;
-  return pollIntervalForTierInternal(normalizedTier, base, settings, hasSettingsInput);
+  return resolvePollIntervalForTier(tier, baseMs, settingsInput);
 }
 
 export function flushIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
-  const normalizedTier = normalizeTier(tier);
-  const base = clamp(Math.round(baseMs), 20, 5_000);
-  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
-  const settings = hasSettingsInput
-    ? resolvePerformanceSettings(settingsInput)
-    : DEFAULT_PERFORMANCE_SETTINGS;
-  return flushIntervalForTierInternal(normalizedTier, base, settings, hasSettingsInput);
+  return resolveFlushIntervalForTier(tier, baseMs, settingsInput);
 }
 
 export function tierPollIntervalMs(
@@ -593,33 +359,17 @@ export function tierPollIntervalMs(
   hints: PerfHints = getPerfHints(),
   settingsInput?: unknown,
 ): number {
-  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
-  const settings = hasSettingsInput
-    ? resolvePerformanceSettings(settingsInput)
-    : DEFAULT_PERFORMANCE_SETTINGS;
+  const settings = settingsInput ? resolvePerformanceSettings(settingsInput) : DEFAULT_PERFORMANCE_SETTINGS;
   const configuredBase = clamp(Math.round(baseMs || settings.restFallbackPollMs), 100, 60_000);
-  return pollIntervalForTierInternal(
-    normalizeTier(hints.networkTier),
-    configuredBase,
-    settings,
-    hasSettingsInput,
-  );
+  return resolvePollIntervalForTier(hints.networkTier, configuredBase, settings);
 }
 
 export function tierFlushIntervalMs(
   hints: PerfHints = getPerfHints(),
   settingsInput?: unknown,
 ): number {
-  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
-  const settings = hasSettingsInput
-    ? resolvePerformanceSettings(settingsInput)
-    : DEFAULT_PERFORMANCE_SETTINGS;
-  return flushIntervalForTierInternal(
-    normalizeTier(hints.deviceTier),
-    settings.quoteFlushIntervalMs,
-    settings,
-    hasSettingsInput,
-  );
+  const settings = settingsInput ? resolvePerformanceSettings(settingsInput) : DEFAULT_PERFORMANCE_SETTINGS;
+  return resolveFlushIntervalForTier(hints.deviceTier, settings.quoteFlushIntervalMs, settings);
 }
 
 export function tierPrefetchPlan(

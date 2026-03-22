@@ -38,8 +38,6 @@ import {
 import { getActiveTradeConstraintsForUser } from "../../recruitment/challengesV4/challengeService";
 import {
   getGlobalSettingsCached,
-  getMinPriceDistancePips,
-  sanitizeMinPriceDistancePips,
 } from "../../services/globalSettings";
 import { botGuard } from "../../security/botGuard";
 import { isPostgres } from "@db/config";
@@ -60,6 +58,11 @@ import {
   incTradeOpenRejectedQuoteRevalidationTotal,
 } from "../metricsState";
 import type { TraderRouterDeps } from "./types";
+import {
+  resolveEffectiveTradeLeverage,
+  resolveTradeConcurrencyLimits,
+  resolveTradingRiskConfig,
+} from "../../services/runtimeConfig/tradingRisk";
 
 export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
   const { ensureAuth, ensureDoc1TermsAccepted, broadcast } = deps;
@@ -323,8 +326,9 @@ export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
 
       // Enforce global maxPositionSize limit
       const gs = await getGlobalSettingsCached();
-      const maxPositionSize = Number(gs?.maxPositionSize ?? 5000000);
-      const minPriceDistancePips = sanitizeMinPriceDistancePips(gs?.minPriceDistancePips);
+      const tradingRisk = resolveTradingRiskConfig(gs);
+      const maxPositionSize = tradingRisk.maxPositionSize;
+      const minPriceDistancePips = tradingRisk.minPriceDistancePips;
       if (positionSize > maxPositionSize) {
         await writeDecisionReject("POSITION_SIZE_EXCEEDED", { maxPositionSize }, { positionSize });
         return res.status(400).json({
@@ -497,17 +501,12 @@ export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
         : entryPrice;
 
       // Get global settings for leverage cascade
-      const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
-
       // Effective leverage: user override takes precedence over global
       const challengeTradeConstraints = await getActiveTradeConstraintsForUser(userId);
-      const challengeLeverageMultiplier = Math.max(
-        0.01,
-        Number(challengeTradeConstraints?.leverageMultiplier ?? 1),
-      );
-      const effectiveLeverage = Math.max(
-        0.01,
-        Number(updatedUser.leverage ?? globalDefaultLeverage) * challengeLeverageMultiplier,
+      const effectiveLeverage = resolveEffectiveTradeLeverage(
+        tradingRisk,
+        updatedUser.leverage,
+        challengeTradeConstraints?.leverageMultiplier,
       );
 
       // How much margin will this order need?
@@ -530,9 +529,10 @@ export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
 
       // Check max concurrent lots limit (includes both OPEN and PENDING orders)
       const userSettingsData = await storage.getUserSettingsById(userId);
-      const globalMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
-      // Effective max lots: user override takes precedence over global (can exceed)
-      const effectiveMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? globalMaxConcurrentLots);
+      const effectiveMaxConcurrentLots = resolveTradeConcurrencyLimits(
+        tradingRisk,
+        userSettingsData ?? null,
+      ).maxConcurrentLots;
 
       // Create trade with appropriate price and status based on order type
       // Market orders: OPEN immediately at current price

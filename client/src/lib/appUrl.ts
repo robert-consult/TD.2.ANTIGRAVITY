@@ -1,3 +1,5 @@
+import { normalizeAppBaseUrl } from "@shared/appSurfaceConfig";
+
 function getEnvString(name: string): string | undefined {
   const value = (import.meta as any).env?.[name];
   if (value == null) return undefined;
@@ -5,17 +7,18 @@ function getEnvString(name: string): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function normalizeBaseUrl(raw: string): string {
-  return String(raw).trim().replace(/\/+$/, "");
-}
-
 export function getApiBaseUrl(): string {
-  const base =
-    getEnvString("VITE_API_URL") ||
-    getEnvString("VITE_APP_URL") ||
-    (typeof window !== "undefined" ? window.location.origin : "");
+  const configured =
+    normalizeAppBaseUrl(getEnvString("VITE_API_URL")) ||
+    normalizeAppBaseUrl(getEnvString("VITE_APP_URL"));
 
-  return normalizeBaseUrl(base);
+  if (configured) {
+    return configured;
+  }
+
+  return typeof window !== "undefined"
+    ? normalizeAppBaseUrl(window.location.origin) ?? ""
+    : "";
 }
 
 export function resolveApiUrl(url: string): string {
@@ -27,4 +30,3 @@ export function resolveApiUrl(url: string): string {
 
   return `${base}${raw}`;
 }
-

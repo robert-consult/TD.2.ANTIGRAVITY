@@ -9,6 +9,9 @@ import { useQuery } from "@tanstack/react-query";
 import { getQuoteDecimals, pointsToPips } from "@shared/pips";
 import { SymbolSubscriptionDialog } from "@/components/SymbolSubscriptionDialog";
 import { useAuth } from "@/hooks/use-auth";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 
 interface QuotesScreenProps {
   onSelectSymbol: (symbol: string) => void;
@@ -21,6 +24,12 @@ const DEFAULT_QUOTE_ROW_HEIGHT = 78;
 export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   const { quotes, isLoading, isConnected, hasStaleData } = useQuotes();
   const { isAuthenticated } = useAuth();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
   const [connectionStatus, setConnectionStatus] = useState<string>("connecting");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [sortField, setSortField] = useState<string>("symbol");
@@ -49,7 +58,7 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   }>({
     queryKey: ["/api/quote-subscriptions/me"],
     enabled: isAuthenticated,
-    refetchInterval: 5000,
+    refetchInterval: runtimeIntervals.quoteSubscriptions.modePollMs,
     refetchOnWindowFocus: true,
     staleTime: 0,
   });

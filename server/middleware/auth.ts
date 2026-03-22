@@ -11,9 +11,11 @@ import {
   getUserAgent,
   recordLoginAttempt,
   revokeAllSessionsForUser,
+  revokeSession,
   touchSession,
 } from "../security/sessionTrail";
 import { getTrustedProxyCountryIso2 } from "../security/proxyHeaders";
+import { evaluateLoginJurisdiction } from "../policy/jurisdictionControl";
 import {
   buildRememberMeCookieOptions,
   clearRememberMeCookie,
@@ -43,6 +45,7 @@ type RememberMeMissRateEntry = {
 const REMEMBER_ME_NOT_FOUND_RATE_WINDOW_MS = 10 * 60 * 1000;
 const REMEMBER_ME_NOT_FOUND_RATE_LIMIT = 20;
 const rememberMeNotFoundRateByIp = new Map<string, RememberMeMissRateEntry>();
+const SESSION_COOKIE_NAME = String(process.env.SESSION_COOKIE_NAME ?? "connect.sid").trim() || "connect.sid";
 
 function normalizeRateIp(ip: string): string {
   const normalized = String(ip || "").trim();
@@ -296,6 +299,56 @@ async function tryRestoreSessionFromRememberMe(
     geo,
     eventType: "SESSION_RESTORED_VIA_TOKEN",
   });
+
+  if (!user.isAdmin) {
+    const loginJ = evaluateLoginJurisdiction({
+      ipCountryIso2,
+      userCountryIso2: userCountryIso2 ?? null,
+    });
+
+    if (!loginJ.allowed) {
+      await recordLoginAttempt({
+        userId: user.id,
+        email: user.email,
+        ip,
+        userAgent,
+        identity,
+        geo,
+        success: false,
+        failureReason: loginJ.reasonCode,
+        eventType: loginJ.reasonCode,
+      });
+
+      try {
+        await revokeSession({
+          actorUserId: 0,
+          targetUserId: user.id,
+          sessionId: req.sessionID,
+          reason: loginJ.reasonCode,
+        });
+      } catch {}
+
+      try {
+        await revokeRememberMeTokenById(result.token.id, result.userId);
+      } catch {}
+
+      clearRememberMeCookie(res);
+      res.clearCookie(SESSION_COOKIE_NAME);
+      try {
+        req.session.destroy(() => {});
+      } catch {}
+
+      res.status(loginJ.httpStatus).json({
+        message: loginJ.message,
+        code: loginJ.code,
+        reasonCode: loginJ.reasonCode,
+        blockedBy: loginJ.blockedBy,
+        ipCountryIso2: loginJ.ipCountryIso2 ?? null,
+        userCountryIso2: loginJ.selectedCountryIso2 ?? null,
+      });
+      return "responded";
+    }
+  }
 
   if (config.tokenRotationEnabled) {
     const rotated = await rotateRememberMeToken({

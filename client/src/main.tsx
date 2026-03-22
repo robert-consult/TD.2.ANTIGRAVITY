@@ -6,7 +6,26 @@ type BootWindow = Window & {
 };
 
 const BOOT_RECOVERY_TIMEOUT_MS = 12_000;
+const BOOT_RECOVERY_TIMEOUT_CONSTRAINED_MS = 25_000;
 const SHELL_CACHE_PREFIX = "tq-shell-v";
+
+type BootNavigatorLike = Navigator & {
+  connection?: {
+    effectiveType?: string;
+    saveData?: boolean;
+    rtt?: number;
+  };
+  mozConnection?: {
+    effectiveType?: string;
+    saveData?: boolean;
+    rtt?: number;
+  };
+  webkitConnection?: {
+    effectiveType?: string;
+    saveData?: boolean;
+    rtt?: number;
+  };
+};
 
 function swEnabled(): boolean {
   if (import.meta.env.DEV) return false;
@@ -65,6 +84,23 @@ function installServiceWorkerRegistration(): void {
         console.warn("[sw] registration failed", error);
       });
   });
+}
+
+function resolveBootRecoveryTimeoutMs(): number {
+  if (typeof navigator === "undefined") return BOOT_RECOVERY_TIMEOUT_MS;
+  const bootNavigator = navigator as BootNavigatorLike;
+  const connection = bootNavigator.connection ?? bootNavigator.mozConnection ?? bootNavigator.webkitConnection;
+  const effectiveType = String(connection?.effectiveType ?? "").trim().toLowerCase();
+  const saveData = Boolean(connection?.saveData);
+  const rtt = Number(connection?.rtt ?? 0);
+
+  if (saveData || effectiveType === "slow-2g" || effectiveType === "2g" || effectiveType === "3g") {
+    return BOOT_RECOVERY_TIMEOUT_CONSTRAINED_MS;
+  }
+  if (Number.isFinite(rtt) && rtt >= 300) {
+    return BOOT_RECOVERY_TIMEOUT_CONSTRAINED_MS;
+  }
+  return BOOT_RECOVERY_TIMEOUT_MS;
 }
 
 function updateBootStatus(message: string): void {
@@ -183,7 +219,7 @@ async function handleOpenPlatformClick(): Promise<void> {
   setBootButtonBusy(true);
   updateBootStatus("Opening platform...");
   try {
-    await startAppWithTimeout(BOOT_RECOVERY_TIMEOUT_MS);
+    await startAppWithTimeout(resolveBootRecoveryTimeoutMs());
   } catch (error) {
     console.warn("[boot] startup retry failed; forcing recovery reload", error);
     updateBootStatus("Refreshing platform cache...");

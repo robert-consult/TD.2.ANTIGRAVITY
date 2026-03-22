@@ -25,6 +25,11 @@ import {
   localDateTimeInputToUnixSeconds as localDateTimeInputToUtcSec,
   unixSecondsToLocalDateTimeInput as utcSecToLocalDateTimeInput,
 } from "@shared/time/format";
+import {
+  challengeEvalIntervalSecFromMinutes,
+  DEFAULT_CHALLENGE_EVAL_INTERVAL_MIN,
+  normalizeChallengeEvalIntervalMin,
+} from "@shared/challenges/systemConfig";
 
 type AnyRow = Record<string, any>;
 type InlineTemplateDraft = { profitTargetPct: string; maxDailyLossPct: string; durationDays: string };
@@ -129,9 +134,9 @@ export const EMPTY_TIER = {
 export const DEFAULT_SETTINGS: Record<string, any> = {
   traderCompeteEnabled: false,
   challengeAutoAdvancePhase: true,
-  challengeEvalIntervalMin: 60,
+  challengeEvalIntervalMin: DEFAULT_CHALLENGE_EVAL_INTERVAL_MIN,
   challengeEvalMaxRows: 500,
-  challengeEvaluationIntervalSec: 3600,
+  challengeEvaluationIntervalSec: challengeEvalIntervalSecFromMinutes(DEFAULT_CHALLENGE_EVAL_INTERVAL_MIN),
   challengeWarningThresholdPct: 0.8,
   challengeDefaultDrawdownType: "STATIC",
   challengeDefaultCapitalMode: "VIRTUAL",
@@ -233,6 +238,22 @@ export function toNum(value: unknown, fallback = 0): number {
 
 export function toInt(value: unknown, fallback = 0): number {
   return Math.trunc(toNum(value, fallback));
+}
+
+export function applyChallengeSchedulerIntervalDraft(
+  draft: Record<string, any>,
+  intervalMin: unknown,
+): Record<string, any> {
+  const fallbackMin = normalizeChallengeEvalIntervalMin(
+    draft.challengeEvalIntervalMin,
+    DEFAULT_CHALLENGE_EVAL_INTERVAL_MIN,
+  );
+  const nextIntervalMin = normalizeChallengeEvalIntervalMin(intervalMin, fallbackMin);
+  return {
+    ...draft,
+    challengeEvalIntervalMin: nextIntervalMin,
+    challengeEvaluationIntervalSec: challengeEvalIntervalSecFromMinutes(nextIntervalMin),
+  };
 }
 
 export function toOptNum(value: string): number | null {
@@ -466,4 +487,3 @@ export function mapDetailToDraft(detail: AnyRow, defaultChallengeVirtualCapitalU
     phases,
   };
 }
-

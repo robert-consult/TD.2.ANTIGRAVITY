@@ -5,7 +5,9 @@ const child = spawn("node", ["dist/index.js"], {
   env: {
     ...process.env,
     NODE_ENV: "production",
+    APP_ROLE: process.env.APP_ROLE || "api,ws,ingestor",
     COOKIE_SECURE: "false",
+    E2E_DISABLE_BACKGROUND_JOBS: "1",
     FORGE_KEY: "",
     QUOTE_SOURCE: "simulated",
     LEGAL_TERMS_HMAC_SECRET: "dummy_dummy_dummy_dummy_dummy_dummy_dummy_dummy",

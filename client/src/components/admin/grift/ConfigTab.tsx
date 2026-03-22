@@ -246,6 +246,16 @@ interface GriftConfig {
   [key: string]: number | boolean;
 }
 
+interface GriftEffectiveConfigState {
+  source: "DB" | "DEFAULT";
+  engineCaps: {
+    configTtlMs: number;
+    maxLinkedEdgeWritesPerTrigger: number;
+    maxEvidenceLinkedUsers: number;
+    maxLinkedEdgeBatchRows: number;
+  };
+}
+
 interface AuditLogEntry {
   id: number;
   admin_id: number;
@@ -748,7 +758,10 @@ export function ConfigTab() {
   const [hasChanges, setHasChanges] = useState(false);
   const [vacuumConfirm, setVacuumConfirm] = useState("");
 
-  const { data, isLoading } = useQuery<{ config: GriftConfig }>({
+  const { data, isLoading } = useQuery<{
+    config: GriftConfig;
+    effective?: GriftEffectiveConfigState;
+  }>({
     queryKey: ["/api/admin/grift/config"],
   });
 
@@ -1024,6 +1037,48 @@ export function ConfigTab() {
         </Button>
       </div>
 
+      {data?.effective ? (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Settings className="h-5 w-5 text-cyan-400" />
+              <div className="flex-1">
+                <FieldHintLabel
+                  label="Effective Runtime Split"
+                  hint="Grift policy remains admin-editable. Engine caps are protective deploy diagnostics and intentionally read-only."
+                  labelClassName="text-base"
+                />
+              </div>
+            </div>
+            <CardDescription>
+              Admin policy and deploy-owned engine caps are separated so high-impact throttles stay visible without becoming editable drift.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5 text-sm">
+            <div>
+              <div className="text-xs text-gray-400">Policy source</div>
+              <div>{data.effective.source}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Config cache TTL</div>
+              <div>{data.effective.engineCaps.configTtlMs} ms</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Max linked-edge writes/trigger</div>
+              <div>{data.effective.engineCaps.maxLinkedEdgeWritesPerTrigger}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Max evidence-linked users</div>
+              <div>{data.effective.engineCaps.maxEvidenceLinkedUsers}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Max linked-edge batch rows</div>
+              <div>{data.effective.engineCaps.maxLinkedEdgeBatchRows}</div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card className="bg-neutral-800 border-neutral-700">
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -1281,4 +1336,3 @@ export function ConfigTab() {
     </div>
   );
 }
-

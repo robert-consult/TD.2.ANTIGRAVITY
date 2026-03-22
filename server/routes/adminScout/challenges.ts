@@ -38,8 +38,13 @@ import {
   updateRecruitingPipelineForUser,
 } from "../../recruitment/pipelineService";
 import { appendChallengeEvent } from "../../recruitment/challengesV4/challengeEvents";
-import { getSystemChallengeConfig } from "../../recruitment/challengesV4/challengeConfig";
+import {
+  buildSystemChallengeConfig,
+  getSystemChallengeConfig,
+  invalidateSystemChallengeConfigCache,
+} from "../../recruitment/challengesV4/challengeConfig";
 import { computePhaseStats } from "../../recruitment/challengesV4/challengeEvaluation";
+import { getChallengeSchedulerState } from "../../cron/evaluateChallenges";
 import { listAdminScoutCandidates } from "../../scout/scoutService";
 import {
   getPartnerInquiryRoutingConfig,
@@ -53,6 +58,8 @@ import {
   normalizePartnerGatingConfig,
   normalizePartnerGatingOverrides,
 } from "../../partner/onboarding";
+import { canonicalizeChallengeEvalIntervalInput } from "@shared/challenges/systemConfig";
+import { ensureSystemConfigRow } from "../../services/systemConfig";
 import {
   LEADERBOARD_MODES,
   PARTNER_INVITE_EMAIL_STATUSES,
@@ -295,101 +302,11 @@ adminChallengesRouter.post("/", async (req, res) => {
 
 adminChallengesRouter.get("/settings", async (_req, res) => {
   try {
-    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const row = await ensureSystemConfigRow();
     return res.json({
       ok: true,
-      settings: {
-        traderCompeteEnabled: Boolean((row as any)?.traderCompeteEnabled ?? false),
-        challengeAutoAdvancePhase: Boolean((row as any)?.challengeAutoAdvancePhase ?? true),
-        challengeEvalIntervalMin: clampInt((row as any)?.challengeEvalIntervalMin, 60, 1, 24 * 60),
-        challengeEvalMaxRows: clampInt((row as any)?.challengeEvalMaxRows, 500, 1, 5000),
-        challengeEvaluationIntervalSec: clampInt((row as any)?.challengeEvaluationIntervalSec, 3600, 60, 24 * 3600),
-        challengeWarningThresholdPct: Number((row as any)?.challengeWarningThresholdPct ?? 0.8),
-        challengeDefaultDrawdownType: String((row as any)?.challengeDefaultDrawdownType ?? "STATIC"),
-        challengeDefaultCapitalMode: String((row as any)?.challengeDefaultCapitalMode ?? "VIRTUAL"),
-        challengeDefaultMaxRetries: clampInt((row as any)?.challengeDefaultMaxRetries, 3, 0, 100),
-        challengeDefaultRetryCooldownHours: clampInt(
-          (row as any)?.challengeDefaultRetryCooldownHours,
-          24,
-          0,
-          24 * 365,
-        ),
-        challengeDefaultEligibility: String((row as any)?.challengeDefaultEligibility ?? "EMAIL_VERIFIED"),
-        challengeDefaultCategory: String((row as any)?.challengeDefaultCategory ?? "STANDARD"),
-        challengeDefaultTier: String((row as any)?.challengeDefaultTier ?? "STARTER"),
-        challengeRewardsEnabled: Boolean((row as any)?.challengeRewardsEnabled ?? true),
-        challengePrizePoolsEnabled: Boolean((row as any)?.challengePrizePoolsEnabled ?? true),
-        challengeBadgesEnabled: Boolean((row as any)?.challengeBadgesEnabled ?? true),
-        challengeCertificatesEnabled: Boolean((row as any)?.challengeCertificatesEnabled ?? true),
-        challengeCertificatesDownloadable: Boolean((row as any)?.challengeCertificatesDownloadable ?? true),
-        challengeCertificatesShareable: Boolean((row as any)?.challengeCertificatesShareable ?? true),
-        challengeSelectionBoostEnabled: Boolean((row as any)?.challengeSelectionBoostEnabled ?? true),
-        challengeDefaultSelectionBoost: Number((row as any)?.challengeDefaultSelectionBoost ?? 0),
-        challengeProgressionEnabled: Boolean((row as any)?.challengeProgressionEnabled ?? true),
-        challengeCustomRewardsEnabled: Boolean((row as any)?.challengeCustomRewardsEnabled ?? false),
-        challengeNotifyOnEnroll: Boolean((row as any)?.challengeNotifyOnEnroll ?? true),
-        challengeNotifyOnPhaseWarning: Boolean((row as any)?.challengeNotifyOnPhaseWarning ?? true),
-        challengeNotifyOnBreach: Boolean((row as any)?.challengeNotifyOnBreach ?? true),
-        challengeNotifyOnPhasePass: Boolean((row as any)?.challengeNotifyOnPhasePass ?? true),
-        challengeNotifyOnFail: Boolean((row as any)?.challengeNotifyOnFail ?? true),
-        challengeNotifyOnComplete: Boolean((row as any)?.challengeNotifyOnComplete ?? true),
-        challengeNotifyOnBadgeAward: Boolean((row as any)?.challengeNotifyOnBadgeAward ?? true),
-        challengeNotifyOnPrizeAward: Boolean((row as any)?.challengeNotifyOnPrizeAward ?? true),
-        challengeNotifyOnCertIssue: Boolean((row as any)?.challengeNotifyOnCertIssue ?? true),
-        challengeNotifyOnTierUp: Boolean((row as any)?.challengeNotifyOnTierUp ?? true),
-        challengeNotifyOnAdminAction: Boolean((row as any)?.challengeNotifyOnAdminAction ?? true),
-        challengeNotifyViaMailbox: Boolean((row as any)?.challengeNotifyViaMailbox ?? false),
-        challengeMailboxCategory: String((row as any)?.challengeMailboxCategory ?? "SYSTEM"),
-        challengeLeaderboardEnabled: Boolean((row as any)?.challengeLeaderboardEnabled ?? true),
-        challengeLeaderboardRefreshSec: clampInt((row as any)?.challengeLeaderboardRefreshSec, 60, 10, 24 * 3600),
-        challengeLeaderboardSnapshotIntervalSec: clampInt(
-          (row as any)?.challengeLeaderboardSnapshotIntervalSec,
-          60,
-          10,
-          24 * 3600,
-        ),
-        challengeLeaderboardRankingMetric: String((row as any)?.challengeLeaderboardRankingMetric ?? "COMPOSITE_SCORE"),
-        challengePrizeAwardTimingDefault: String((row as any)?.challengePrizeAwardTimingDefault ?? "ON_COMPLETE"),
-        challengePrizeCandidatesDefault: String((row as any)?.challengePrizeCandidatesDefault ?? "PASSED_ONLY"),
-        challengeBreachPolicyDefault: String((row as any)?.challengeBreachPolicyDefault ?? "FAIL"),
-        challengeSingleDayProfitBasis: String((row as any)?.challengeSingleDayProfitBasis ?? "PNL_PCT"),
-        challengeNewsBlackoutWindowsJson: String((row as any)?.challengeNewsBlackoutWindowsJson ?? "[]"),
-        challengeWeekendCutoffHours: clampInt((row as any)?.challengeWeekendCutoffHours, 6, 0, 72),
-        challengeForceCloseBeforeWeekend: Boolean((row as any)?.challengeForceCloseBeforeWeekend ?? false),
-        challengeLeverageMultiplierDefault: Number((row as any)?.challengeLeverageMultiplierDefault ?? 1),
-        challengeMaxActiveEnrollmentsUser: clampInt((row as any)?.challengeMaxActiveEnrollmentsUser, 5, 1, 1000),
-        challengeMaxActiveEnrollmentsPerChallenge: clampInt(
-          (row as any)?.challengeMaxActiveEnrollmentsPerChallenge,
-          1,
-          1,
-          1000,
-        ),
-        challengeCooldownHoursAfterFail: clampInt((row as any)?.challengeCooldownHoursAfterFail, 24, 0, 24 * 365),
-        challengeCooldownHoursAfterWithdraw: clampInt(
-          (row as any)?.challengeCooldownHoursAfterWithdraw,
-          12,
-          0,
-          24 * 365,
-        ),
-        challengeCertificateDefaultTemplateId:
-          Number((row as any)?.challengeCertificateDefaultTemplateId ?? 0) > 0
-            ? Math.trunc(Number((row as any)?.challengeCertificateDefaultTemplateId))
-            : null,
-        challengeCertificateIncludeMetricsDefault: Boolean(
-          (row as any)?.challengeCertificateIncludeMetricsDefault ?? true,
-        ),
-        challengeCertificateIncludeQrDefault: Boolean((row as any)?.challengeCertificateIncludeQrDefault ?? true),
-        challengeCertificateVerificationKeyId: String((row as any)?.challengeCertificateVerificationKeyId ?? "v1"),
-        challengeAuditStrictMode: Boolean((row as any)?.challengeAuditStrictMode ?? true),
-        challengeAnomalyDetectionEnabled: Boolean((row as any)?.challengeAnomalyDetectionEnabled ?? true),
-        challengeManualReviewEnabled: Boolean((row as any)?.challengeManualReviewEnabled ?? false),
-        challengeManualReviewSuspiciousThreshold: clampInt(
-          (row as any)?.challengeManualReviewSuspiciousThreshold,
-          3,
-          1,
-          100,
-        ),
-      },
+      settings: buildSystemChallengeConfig(row),
+      effectiveScheduler: getChallengeSchedulerState(),
     });
   } catch (error) {
     console.error("[admin-scout] challenge settings get error:", error);
@@ -407,20 +324,34 @@ adminChallengesRouter.put("/settings", async (req, res) => {
       return res.status(400).json({ message: "EMPTY_UPDATE" });
     }
 
-    await db
-      .insert(systemConfig)
-      .values({ id: 1, updatedAt: nowSec(), updatedBy: String(req.session?.email || "admin") } as any)
-      .onConflictDoNothing();
+    await ensureSystemConfigRow();
 
     const payload = parsed.data;
+    const intervalInput = canonicalizeChallengeEvalIntervalInput({
+      challengeEvalIntervalMin: payload.challengeEvalIntervalMin,
+      challengeEvaluationIntervalSec: payload.challengeEvaluationIntervalSec,
+    });
+    if (intervalInput.conflict) {
+      return res.status(400).json({
+        message:
+          "challengeEvaluationIntervalSec must match challengeEvalIntervalMin after canonical minute conversion.",
+      });
+    }
+
+    const patchKeys = new Set<string>(Object.keys(payload));
+    if (intervalInput.intervalMin !== undefined) {
+      patchKeys.add("challengeEvalIntervalMin");
+      patchKeys.add("challengeEvaluationIntervalSec");
+    }
+
     await db
       .update(systemConfig)
       .set({
         traderCompeteEnabled: payload.traderCompeteEnabled,
         challengeAutoAdvancePhase: payload.challengeAutoAdvancePhase,
-        challengeEvalIntervalMin: payload.challengeEvalIntervalMin,
+        challengeEvalIntervalMin: intervalInput.intervalMin,
+        challengeEvaluationIntervalSec: intervalInput.intervalSec,
         challengeEvalMaxRows: payload.challengeEvalMaxRows,
-        challengeEvaluationIntervalSec: payload.challengeEvaluationIntervalSec,
         challengeWarningThresholdPct: payload.challengeWarningThresholdPct,
         challengeDefaultDrawdownType: payload.challengeDefaultDrawdownType,
         challengeDefaultCapitalMode: payload.challengeDefaultCapitalMode,
@@ -481,10 +412,22 @@ adminChallengesRouter.put("/settings", async (req, res) => {
       })
       .where(eq(systemConfig.id, 1));
 
-    await appendRecruitmentAudit(req, "CHALLENGE_SETTINGS_UPDATE", { patchKeys: Object.keys(payload) });
-    publishChallengesUpdated({ action: "settings-updated", patchKeys: Object.keys(payload) });
+    invalidateSystemChallengeConfigCache();
+    const normalizedPatchKeys = Array.from(patchKeys).sort();
+    await appendRecruitmentAudit(req, "CHALLENGE_SETTINGS_UPDATE", { patchKeys: normalizedPatchKeys });
+    publishChallengesUpdated({
+      action: "settings-updated",
+      patchKeys: normalizedPatchKeys,
+      scheduler: intervalInput.intervalMin !== undefined
+        ? {
+            intervalMin: intervalInput.intervalMin,
+            intervalSec: intervalInput.intervalSec,
+            source: intervalInput.source,
+          }
+        : undefined,
+    });
     const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-    return res.json({ ok: true, settings: updated });
+    return res.json({ ok: true, settings: buildSystemChallengeConfig(updated) });
   } catch (error) {
     console.error("[admin-scout] challenge settings update error:", error);
     return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE_SETTINGS" });
@@ -1156,4 +1099,3 @@ adminChallengesRouter.put("/enrollments/:id/disqualify", async (req, res) => {
     return res.status(500).json({ message: "FAILED_TO_DISQUALIFY_CHALLENGE_ENROLLMENT" });
   }
 });
-

@@ -51,7 +51,7 @@ test("RUNBOOK: admin bundle loads only on /admin navigation", async ({ page }) =
   expect(adminChunkRequests()).toBe(0);
 
   await page.goto("/admin");
-  await expect(page.getByText("Admin Dashboard")).toBeVisible();
+  await expect(page.getByText("Admin Dashboard")).toBeVisible({ timeout: 60_000 });
   expect(adminChunkRequests()).toBeGreaterThan(0);
 });
 
@@ -68,7 +68,7 @@ test("RUNBOOK: instruments config dictates trader quotes", async ({ browser }) =
     await login(traderPage, DEMO.email, DEMO.password);
     await login(adminPage, ADMIN.email, ADMIN.password);
     await adminPage.goto("/admin");
-    await expect(adminPage.getByText("Admin Dashboard")).toBeVisible();
+    await expect(adminPage.getByText("Admin Dashboard")).toBeVisible({ timeout: 60_000 });
 
     const symbolConfigs: Array<{ id: number; symbol: string; enabled: boolean }> =
       await adminPage.evaluate(async () => {

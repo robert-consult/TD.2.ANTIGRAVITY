@@ -50,6 +50,10 @@ export async function getGlobalSettingsCached(): Promise<GlobalSettingsRow | nul
   return inflight;
 }
 
+export function invalidateGlobalSettingsCache() {
+  cached = null;
+}
+
 export async function getMinPriceDistancePips(): Promise<number> {
   const gs = await getGlobalSettingsCached();
   return sanitizeMinPriceDistancePips(gs?.minPriceDistancePips);

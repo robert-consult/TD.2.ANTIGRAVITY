@@ -4,6 +4,7 @@ import axios from "axios";
 import SignupFreezeWaitlistCard from "@/components/admin/SignupFreezeWaitlistCard";
 import { JurisdictionControlsCard } from "@/components/admin/JurisdictionControlsCard";
 import { MarketDataProvidersCard } from "@/components/admin/MarketDataProvidersCard";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,9 +26,13 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { mergeGlobalSettingsPerformance, resolveGlobalPerformanceSettingsPayload } from "@/lib/globalSettingsPerformance";
 import { PERFORMANCE_TIERS } from "@/lib/perfHints";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   CONTROLS_FIELD_HELP,
   DEFAULT_MARKET_PERFORMANCE_SETTINGS,
+  type EffectiveQuoteTransportData,
   FieldHintLabel,
   FxRolloverSettings,
   MARKET_DATA_QUOTE_FIELD_HELP,
@@ -52,12 +57,15 @@ import {
   type SystemConfigSaveSection,
   type SystemHealthData,
 } from "./AdminDashboardSupport";
+import { GovernanceVisibilityTab } from "./GovernanceVisibilityTab";
 import { MigrationTab } from "./MigrationTab";
 import { SystemHealthPanel } from "./SystemHealthPanel";
 
 export function SystemConfigTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
   const [subTab, setSubTab] = useState("trading");
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [, setConfigChanged] = useState(false);
@@ -78,6 +86,10 @@ export function SystemConfigTab() {
     value: false,
     label: ""
   });
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
 
   const { data: systemConfig, isLoading } = useQuery<SystemConfigData>({
     queryKey: ["/api/admin/system-config"],
@@ -98,11 +110,22 @@ export function SystemConfigTab() {
     queryKey: ["/api/admin/market-data/providers"],
     queryFn: () => axios.get("/api/admin/market-data/providers").then((r) => r.data),
   });
+  const { data: effectiveQuoteTransport } = useQuery<EffectiveQuoteTransportData>({
+    queryKey: ["/api/admin/runtime-config/effective/quote-transport"],
+    queryFn: () => axios.get("/api/admin/runtime-config/effective/quote-transport").then((r) => r.data),
+  });
 
   const providers = useMemo(
     () => (providersData?.rows || []).filter((p) => !p.deletedAt && p.isEnabled),
     [providersData?.rows],
   );
+  const feedReloadStatus = effectiveQuoteTransport?.reloadStatus ?? null;
+  const feedReloadBadgeVariant =
+    feedReloadStatus?.status === "failed"
+      ? "destructive"
+      : feedReloadStatus?.status === "pending"
+        ? "secondary"
+        : "outline";
 
   const { data: health, refetch: refetchHealth } = useQuery<SystemHealthData>({
     queryKey: ["/api/admin/system-health", healthProviderKey],
@@ -110,7 +133,7 @@ export function SystemConfigTab() {
       axios
         .get("/api/admin/system-health", { params: healthProviderKey ? { providerKey: healthProviderKey } : undefined })
         .then((r) => r.data),
-    refetchInterval: 5000,
+    refetchInterval: runtimeIntervals.admin.fastPollMs,
   });
 
   useEffect(() => {
@@ -155,7 +178,6 @@ export function SystemConfigTab() {
   );
 
   const isMarketDataSettingsChanged = sectionChanged(
-    "quoteRefreshMs",
     "feedPollMs",
     "staleThresholdMs",
     "fxRolloverTz",
@@ -457,7 +479,6 @@ export function SystemConfigTab() {
     handleSaveSystemConfigSection(
       "marketData",
       {
-        quoteRefreshMs: config.quoteRefreshMs,
         feedPollMs: config.feedPollMs,
         staleThresholdMs: config.staleThresholdMs,
         fxRolloverTz: config.fxRolloverTz,
@@ -589,7 +610,7 @@ export function SystemConfigTab() {
       <p className="text-gray-400 text-sm mb-4">Manage platform-wide operational controls, API integration, and performance parameters.</p>
 
       <Tabs value={subTab} onValueChange={setSubTab} className="space-y-4">
-        <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-1">
+        <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-1">
           <TabsTrigger value="trading" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Trading Controls</TabsTrigger>
           <TabsTrigger value="market" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Market Data</TabsTrigger>
           <TabsTrigger value="compliance" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Signup Compliance</TabsTrigger>
@@ -597,6 +618,7 @@ export function SystemConfigTab() {
           <TabsTrigger value="controls" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Controls</TabsTrigger>
           <TabsTrigger value="migration" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Migration</TabsTrigger>
           <TabsTrigger value="health" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">System Health</TabsTrigger>
+          <TabsTrigger value="governance" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Governance</TabsTrigger>
         </TabsList>
 
         {/* TRADING CONTROLS */}
@@ -720,6 +742,10 @@ export function SystemConfigTab() {
                   <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
                     Configure quote fetch cadence and stale-detection guardrails. Use the hidden <span className="font-medium">Hint</span> controls for deeper operational impact notes.
                   </div>
+                  <div className="rounded-md border border-amber-700/40 bg-amber-950/20 p-3 text-xs text-amber-100/90">
+                    Legacy note: <span className="font-medium">Client Quote Refresh (ms)</span> is a deprecated shadow field.
+                    Runtime quote cadence should be controlled through the adaptive performance settings below, not through this legacy value.
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
                       <FieldHintLabel
@@ -730,14 +756,15 @@ export function SystemConfigTab() {
                       <Input
                         type="number"
                         value={config.quoteRefreshMs}
-                        onChange={(e) => {
-                          setConfig(prev => prev ? { ...prev, quoteRefreshMs: Number(e.target.value) } : prev);
-                          setConfigChanged(true);
-                        }}
-                        className="bg-neutral-600 mt-2"
+                        readOnly
+                        disabled
+                        className="bg-neutral-800 text-neutral-400 mt-2"
                         min={100}
                         title={MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.tooltip}
                       />
+                      <p className="text-[11px] text-amber-300 mt-2">
+                        Read-only in Wave 0. Use Adaptive Client Performance Controls for live quote behavior.
+                      </p>
                     </div>
 
                     <div>
@@ -785,11 +812,51 @@ export function SystemConfigTab() {
                     setConfigChanged={setConfigChanged}
                   />
 
-                  <div className="bg-green-900/30 border border-green-700/50 p-4 rounded-lg mt-4">
-                    <p className="text-sm text-green-300">
-                      <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately
-                      without requiring a server restart.
+                  <div className="rounded-lg border border-blue-700/40 bg-blue-950/20 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={feedReloadBadgeVariant}>
+                        Feed Reload: {feedReloadStatus?.status ?? "idle"}
+                      </Badge>
+                      {feedReloadStatus?.requestedVersion ? (
+                        <Badge variant="outline">Version {feedReloadStatus.requestedVersion}</Badge>
+                      ) : null}
+                      {feedReloadStatus?.requiredScope ? (
+                        <Badge variant="outline">Scope: {feedReloadStatus.requiredScope}</Badge>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-2 text-xs text-blue-100/90 md:grid-cols-2">
+                      <div>
+                        <div className="font-medium text-blue-100">Configured</div>
+                        <div>
+                          poll={effectiveQuoteTransport?.configured.feedPollMs ?? config.feedPollMs}ms stale=
+                          {effectiveQuoteTransport?.configured.staleThresholdMs ?? config.staleThresholdMs}ms
+                        </div>
+                        <div>
+                          rollover=
+                          {effectiveQuoteTransport?.configured.fxRolloverTz ?? config.fxRolloverTz}{" "}
+                          {effectiveQuoteTransport?.configured.fxRolloverTime ?? config.fxRolloverTime}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="font-medium text-blue-100">Applied</div>
+                        <div>
+                          poll={effectiveQuoteTransport?.applied.feedPollMs ?? config.feedPollMs}ms stale=
+                          {effectiveQuoteTransport?.applied.staleThresholdMs ?? config.staleThresholdMs}ms
+                        </div>
+                        <div>
+                          rollover=
+                          {effectiveQuoteTransport?.applied.fxRolloverTz ?? config.fxRolloverTz}{" "}
+                          {effectiveQuoteTransport?.applied.fxRolloverTime ?? config.fxRolloverTime}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-blue-100/80">
+                      Feed transport changes are controlled-reload settings. Saving queues a reload for the ingestor and
+                      the effective state above updates after apply acknowledgement.
                     </p>
+                    {feedReloadStatus?.lastError ? (
+                      <p className="text-xs text-red-300">{feedReloadStatus.lastError}</p>
+                    ) : null}
                   </div>
 
                   <div className="flex justify-end pt-4">
@@ -1405,6 +1472,29 @@ export function SystemConfigTab() {
                         <SelectItem value="SLIDER">Slider</SelectItem>
                       </SelectContent>
                     </Select>
+                    <div className="mt-3 rounded-md border border-neutral-600 bg-neutral-800/70 p-3 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">Configured: {config.captchaProvider}</Badge>
+                        <Badge variant={config.captchaFallbackUsed ? "destructive" : "outline"}>
+                          Effective: {config.captchaEffectiveProvider}
+                        </Badge>
+                        <Badge variant={config.captchaSelectedProviderSecretConfigured ? "outline" : "destructive"}>
+                          Secret Ready: {config.captchaSelectedProviderSecretConfigured ? "yes" : "no"}
+                        </Badge>
+                      </div>
+                      {config.captchaFallbackUsed ? (
+                        <p className="text-xs text-amber-200">
+                          {config.captchaFallbackReason ?? "Runtime is using a fallback CAPTCHA provider."}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-gray-300">
+                          Runtime is currently honoring the configured CAPTCHA provider.
+                        </p>
+                      )}
+                      <p className="text-[11px] text-gray-400">
+                        Turnstile secret configured: {config.captchaTurnstileSecretConfigured ? "yes" : "no"} | hCaptcha secret configured: {config.captchaHcaptchaSecretConfigured ? "yes" : "no"}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="flex justify-between items-center py-3 border-b border-gray-600">
@@ -1909,6 +1999,10 @@ export function SystemConfigTab() {
         {/* MIGRATION */}
         <TabsContent value="migration">
           <MigrationTab />
+        </TabsContent>
+
+        <TabsContent value="governance">
+          <GovernanceVisibilityTab />
         </TabsContent>
 
         <SystemHealthPanel

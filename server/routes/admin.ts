@@ -15,18 +15,21 @@ import { eq, sql, desc, and, gte, inArray, like, or } from "drizzle-orm";
 import { trades, users, symbolConfigs, userSettings } from "@shared/schema";
 import { appendIdentityAudit, getRecentIdentityAudit } from "../services/identityAudit";
 import { scheduleAutoClose } from "../cron/autoClose";
-import { reloadFeedConfig } from "../feeds/quoteFeed";
+import { getAutoCloseSchedulerState } from "../cron/autoClose";
+import { getAppliedQuoteTransportConfig } from "../feeds/quoteFeed";
 import { stringify } from "csv-stringify/sync";
 import { z } from "zod";
 import { sha256, stableStringify } from "../legal/cryptoUtils";
-import { invalidateJurisdictionRestrictionPolicyCache, parseRestrictedCountriesCsv } from "../legal/regionRules";
+import { parseRestrictedCountriesCsv } from "../legal/regionRules";
 import { buildAuditContext } from "../lib/auditContext";
 import { recalcAccount } from "../recalcAccount";
 import { publishLiveEvent } from "../services/liveBus";
-import { invalidateRememberMeConfigCache } from "../services/rememberMe";
+import { getControlledReloadStatus, requestControlledReload } from "../services/controlledReload";
 import { applyAdminScopeSession } from "../security/adminScopeSession";
 import { consumeGlobalSettingsUpdateRateLimit } from "../security/globalSettingsRateLimit";
+import { resolveCaptchaRuntimeConfig } from "../security/captcha";
 import {
+  buildGlobalSettingsApiPayload,
   buildDefaultGlobalSettingsWrite,
   buildGlobalSettingsPerformanceSnapshot,
   buildGlobalSettingsRiskSnapshot,
@@ -34,8 +37,18 @@ import {
   resolveGlobalSettingsWrite,
 } from "../services/globalSettingsAdmin";
 import {
+  buildSystemConfigMutationActor,
+  buildSystemConfigAdminSnapshot,
+  emitSystemConfigMutationEffects,
+  ensureSystemConfigRow,
+  isSystemConfigConflictError,
+  isSystemConfigValidationError,
+  updateSystemConfigWithAudit,
+} from "../services/systemConfig";
+import {
   LEGACY_TRADE_PROFIT_NUMERIC_SQL,
 } from "../services/traderScoutQuery";
+import { buildServerSignupUrl } from "../services/appLinks";
 
 function getParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -316,10 +329,10 @@ export function registerAdminRoutes(app: Express) {
         const newSettings = await db.query.globalSettings.findFirst({
           where: eq(globalSettings.id, 1),
         });
-        return res.json(newSettings);
+        return res.json(buildGlobalSettingsApiPayload(newSettings));
       }
 
-      res.json(settings);
+      res.json(buildGlobalSettingsApiPayload(settings));
     } catch (error) {
       console.error("Error fetching global settings:", error);
       res.status(500).json({ message: "Internal server error" });
@@ -485,7 +498,7 @@ export function registerAdminRoutes(app: Express) {
         console.warn("Could not reschedule auto-close:", e);
       }
 
-      res.json(updated);
+      res.json(buildGlobalSettingsApiPayload(updated));
     } catch (error) {
       console.error("Error updating global settings:", error);
       res.status(500).json({ message: "Internal server error" });
@@ -513,8 +526,7 @@ export function registerAdminRoutes(app: Express) {
     });
 
   const getSignupLink = () => {
-    const base = String(process.env.APP_URL || "http://localhost:5000").replace(/\/+$/, "");
-    return `${base}/login`;
+    return buildServerSignupUrl();
   };
 
   function renderWaitlistInvite(params: {
@@ -664,104 +676,22 @@ export function registerAdminRoutes(app: Express) {
   // Get current system config
   app.get("/api/admin/system-config", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const config = await db.query.systemConfig.findFirst({
-        where: eq(systemConfig.id, 1)
+      const config = buildSystemConfigAdminSnapshot(await ensureSystemConfigRow());
+      const captchaRuntime = resolveCaptchaRuntimeConfig({
+        signupCaptchaEnforce: config.signupCaptchaEnforce,
+        captchaProvider: config.captchaProvider,
       });
-
-      if (!config) {
-        // Return defaults if no config exists
-        return res.json({
-          id: 1,
-          maintenanceMode: false,
-          tradingHalt: false,
-          closeOnlyMode: false,
-          blockOpenOnStaleQuotes: true,
-          maintenanceMessage: "System is under maintenance. Trading will resume shortly.",
-          quoteRefreshMs: 870,
-          feedPollMs: 870,
-          staleThresholdMs: 30000,
-          fxRolloverTz: "America/New_York",
-          fxRolloverTime: "17:00",
-          signupCaptchaEnforce: false,
-          captchaProvider: "TURNSTILE",
-          signupPhoneEnforce: true,
-          legalCoverageEnforce: false,
-          jurisdictionRestrictedIso2Csv: "KP,IR,CU,SY",
-          jurisdictionRestrictedMessage: "This jurisdiction is not supported due to regulatory restrictions.",
-          jurisdictionEnforceByIpGeo: false,
-          jurisdictionEnforceBySignupCountry: true,
-          jurisdictionBlockSignup: true,
-          jurisdictionBlockLogin: true,
-          // Signup freeze + waitlist
-          signupFreeze: false,
-          signupFreezeMessage: "Signups are temporarily paused due to capacity. Existing users can still log in.",
-          signupWaitlistEnabled: true,
-          signupWaitlistInviteSender: "TradeQuip <noreply@tradequip.com>",
-          signupWaitlistInviteSubject: "Signup slots are open again",
-          signupWaitlistInviteBodyText:
-            "Hello {{name}},\n\nSignup slots are open again. Please register here: {{signup_link}}\n\nIf you did not request an invite, you can ignore this message.",
-          signupWaitlistAutoInviteOnUnfreeze: false,
-          signupWaitlistInviteBatchCap: 200,
-          signupWaitlistPolicyVersion: "1",
-          signupWaitlistPolicyContent:
-            "WAITLIST COMMUNICATIONS & PRIVACY NOTICE\n\nBy requesting an invite, you consent to receive an email when signup slots reopen.\n\nWhat we collect:\n- Your name and email address\n- Basic client metadata (IP address and user agent)\n\nHow we use it:\n- To notify you when signup slots open\n- We do not sell your data\n\nRetention:\n- We retain waitlist records until you are invited or you opt out\n\nOpt-out:\n- You can opt out by replying to an invite email or contacting support.",
-          rememberMeEnabled: true,
-          rememberMeMaxAgeDays: 30,
-          rememberMeMaxDevicesPerUser: 10,
-          rememberMeReauthAfterAbsenceDays: 7,
-          rememberMeTokenRotationEnabled: true,
-          rememberMeTheftAutoRevokeAll: true,
-          sessionCookieMaxAgeHours: 24,
-          sessionIdleTimeoutMinutes: 0,
-          logoutClearAllDeviceTokens: false,
-          allowUserTimezoneEdit: true,
-          scoutTabEnabled: true,
-          migrationChunkingEnabled: false,
-          migrationChunkSizeMb: 51200,
-          updatedAt: null,
-          updatedBy: null
-        });
-      }
 
       res.json({
         ...config,
-        signupCaptchaEnforce: Boolean(config.signupCaptchaEnforce),
-        captchaProvider: config.captchaProvider || "TURNSTILE",
-        signupPhoneEnforce: Boolean((config as any).signupPhoneEnforce ?? true),
-        legalCoverageEnforce: Boolean((config as any).legalCoverageEnforce ?? false),
-        jurisdictionRestrictedIso2Csv: String((config as any).jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY"),
-        jurisdictionRestrictedMessage: String(
-          (config as any).jurisdictionRestrictedMessage ?? "This jurisdiction is not supported due to regulatory restrictions."
-        ),
-        jurisdictionEnforceByIpGeo: Boolean((config as any).jurisdictionEnforceByIpGeo ?? false),
-        jurisdictionEnforceBySignupCountry: Boolean((config as any).jurisdictionEnforceBySignupCountry ?? true),
-        jurisdictionBlockSignup: Boolean((config as any).jurisdictionBlockSignup ?? true),
-        jurisdictionBlockLogin: Boolean((config as any).jurisdictionBlockLogin ?? true),
-        signupFreeze: Boolean((config as any).signupFreeze ?? false),
-        signupFreezeMessage: String((config as any).signupFreezeMessage ?? ""),
-        signupWaitlistEnabled: Boolean((config as any).signupWaitlistEnabled ?? true),
-        signupWaitlistInviteSender: String((config as any).signupWaitlistInviteSender ?? ""),
-        signupWaitlistInviteSubject: String((config as any).signupWaitlistInviteSubject ?? ""),
-        signupWaitlistInviteBodyText: String((config as any).signupWaitlistInviteBodyText ?? ""),
-        signupWaitlistAutoInviteOnUnfreeze: Boolean((config as any).signupWaitlistAutoInviteOnUnfreeze ?? false),
-        signupWaitlistInviteBatchCap: Number((config as any).signupWaitlistInviteBatchCap ?? 200),
-        signupWaitlistPolicyVersion: String((config as any).signupWaitlistPolicyVersion ?? "1"),
-        signupWaitlistPolicyContent: String((config as any).signupWaitlistPolicyContent ?? ""),
-        rememberMeEnabled: Boolean((config as any).rememberMeEnabled ?? true),
-        rememberMeMaxAgeDays: Number((config as any).rememberMeMaxAgeDays ?? 30),
-        rememberMeMaxDevicesPerUser: Number((config as any).rememberMeMaxDevicesPerUser ?? 10),
-        rememberMeReauthAfterAbsenceDays: Number((config as any).rememberMeReauthAfterAbsenceDays ?? 7),
-        rememberMeTokenRotationEnabled: Boolean((config as any).rememberMeTokenRotationEnabled ?? true),
-        rememberMeTheftAutoRevokeAll: Boolean((config as any).rememberMeTheftAutoRevokeAll ?? true),
-        sessionCookieMaxAgeHours: Number((config as any).sessionCookieMaxAgeHours ?? 24),
-        sessionIdleTimeoutMinutes: Number((config as any).sessionIdleTimeoutMinutes ?? 0),
-        logoutClearAllDeviceTokens: Boolean((config as any).logoutClearAllDeviceTokens ?? false),
-        allowUserTimezoneEdit: Boolean((config as any).allowUserTimezoneEdit ?? true),
-        scoutTabEnabled: Boolean((config as any).scoutTabEnabled ?? true),
-        fxRolloverTz: (config as any).fxRolloverTz || "America/New_York",
-        fxRolloverTime: (config as any).fxRolloverTime || "17:00",
-        migrationChunkingEnabled: Boolean((config as any).migrationChunkingEnabled ?? false),
-        migrationChunkSizeMb: Number((config as any).migrationChunkSizeMb ?? 51200),
+        signupCaptchaEnforce: captchaRuntime.enforceSignupCaptcha,
+        captchaProvider: config.captchaProvider || captchaRuntime.selectedProvider,
+        captchaEffectiveProvider: captchaRuntime.effectiveProvider,
+        captchaFallbackUsed: captchaRuntime.fallbackUsed,
+        captchaFallbackReason: captchaRuntime.fallbackReason,
+        captchaTurnstileSecretConfigured: captchaRuntime.turnstileSecretConfigured,
+        captchaHcaptchaSecretConfigured: captchaRuntime.hcaptchaSecretConfigured,
+        captchaSelectedProviderSecretConfigured: captchaRuntime.selectedProviderSecretConfigured,
       });
     } catch (error) {
       console.error("Error fetching system config:", error);
@@ -769,11 +699,48 @@ export function registerAdminRoutes(app: Express) {
     }
   });
 
+  app.get("/api/admin/runtime-config/effective/quote-transport", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const config = buildSystemConfigAdminSnapshot(await ensureSystemConfigRow());
+      const reloadStatus = await getControlledReloadStatus("quotes.transport.feed");
+
+      res.json({
+        configured: {
+          feedPollMs: config.feedPollMs,
+          staleThresholdMs: config.staleThresholdMs,
+          fxRolloverTz: config.fxRolloverTz,
+          fxRolloverTime: config.fxRolloverTime,
+        },
+        applied: getAppliedQuoteTransportConfig(),
+        reloadStatus,
+      });
+    } catch (error) {
+      console.error("Error fetching effective quote transport state:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/runtime-config/effective/auto-close", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json(getAutoCloseSchedulerState());
+    } catch (error) {
+      console.error("Error fetching effective auto-close state:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Update system config
   app.put("/api/admin/system-config", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const body = req.body;
-      const adminUser = req.session?.email || "admin";
+      const body = req.body ?? {};
+      const actor = buildSystemConfigMutationActor(req);
+      const adminUser = actor.adminUser;
+
+      if (Object.prototype.hasOwnProperty.call(body, "quoteRefreshMs")) {
+        return res.status(400).json({
+          message: "quoteRefreshMs is deprecated. Use admin global performance controls for client quote cadence.",
+        });
+      }
 
       const restrictedCsvRaw =
         typeof body.jurisdictionRestrictedIso2Csv === "string" ? String(body.jurisdictionRestrictedIso2Csv) : undefined;
@@ -794,11 +761,9 @@ export function registerAdminRoutes(app: Express) {
           ? restrictedMsgRaw.trim() || "This jurisdiction is not supported due to regulatory restrictions."
           : undefined;
 
-      const existing = await db.query.systemConfig.findFirst({
-        where: eq(systemConfig.id, 1)
-      });
+      const existing = buildSystemConfigAdminSnapshot(await ensureSystemConfigRow());
 
-      const prevFreeze = Boolean((existing as any)?.signupFreeze ?? false);
+      const prevFreeze = existing.signupFreeze;
 
       const next = {
         maintenanceMode: body.maintenanceMode,
@@ -806,7 +771,6 @@ export function registerAdminRoutes(app: Express) {
         closeOnlyMode: body.closeOnlyMode,
         blockOpenOnStaleQuotes: body.blockOpenOnStaleQuotes,
         maintenanceMessage: body.maintenanceMessage,
-        quoteRefreshMs: body.quoteRefreshMs ? Number(body.quoteRefreshMs) : undefined,
         feedPollMs: body.feedPollMs ? Number(body.feedPollMs) : undefined,
         staleThresholdMs: body.staleThresholdMs ? Number(body.staleThresholdMs) : undefined,
         fxRolloverTz: typeof body.fxRolloverTz === "string" ? body.fxRolloverTz : undefined,
@@ -929,188 +893,129 @@ export function registerAdminRoutes(app: Express) {
         (next as any).sessionIdleTimeoutMinutes = Math.floor(minutes);
       }
 
-      const nextFreeze = (next as any).signupFreeze ?? Boolean((existing as any)?.signupFreeze ?? false);
-      const nextWaitlistEnabled = (next as any).signupWaitlistEnabled ?? Boolean((existing as any)?.signupWaitlistEnabled ?? true);
+      const nextFreeze = (next as any).signupFreeze ?? existing.signupFreeze;
+      const nextWaitlistEnabled = (next as any).signupWaitlistEnabled ?? existing.signupWaitlistEnabled;
       const nextAutoInvite =
         (next as any).signupWaitlistAutoInviteOnUnfreeze ??
-        Boolean((existing as any)?.signupWaitlistAutoInviteOnUnfreeze ?? false);
+        existing.signupWaitlistAutoInviteOnUnfreeze;
       const nextBatchCap = Number(
-        (next as any).signupWaitlistInviteBatchCap ?? (existing as any)?.signupWaitlistInviteBatchCap ?? 200
+        (next as any).signupWaitlistInviteBatchCap ?? existing.signupWaitlistInviteBatchCap
       );
 
-      const nowSec = Math.floor(Date.now() / 1000);
-
-      if (existing) {
-        await db.update(systemConfig)
-          .set({
-            maintenanceMode: next.maintenanceMode ?? existing.maintenanceMode,
-            tradingHalt: next.tradingHalt ?? existing.tradingHalt,
-            closeOnlyMode: next.closeOnlyMode ?? existing.closeOnlyMode,
-            blockOpenOnStaleQuotes: next.blockOpenOnStaleQuotes ?? existing.blockOpenOnStaleQuotes,
-            maintenanceMessage: next.maintenanceMessage ?? existing.maintenanceMessage,
-            quoteRefreshMs: next.quoteRefreshMs ?? existing.quoteRefreshMs,
-            feedPollMs: next.feedPollMs ?? existing.feedPollMs,
-            staleThresholdMs: next.staleThresholdMs ?? existing.staleThresholdMs,
-            fxRolloverTz: next.fxRolloverTz ?? (existing as any).fxRolloverTz ?? "America/New_York",
-            fxRolloverTime: next.fxRolloverTime ?? (existing as any).fxRolloverTime ?? "17:00",
-            signupCaptchaEnforce: next.signupCaptchaEnforce ?? existing.signupCaptchaEnforce,
-            captchaProvider: next.captchaProvider ?? existing.captchaProvider,
-            signupPhoneEnforce: next.signupPhoneEnforce ?? (existing as any).signupPhoneEnforce ?? true,
-            legalCoverageEnforce: next.legalCoverageEnforce ?? existing.legalCoverageEnforce,
-            jurisdictionRestrictedIso2Csv:
-              (next as any).jurisdictionRestrictedIso2Csv ?? (existing as any).jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY",
-            jurisdictionRestrictedMessage:
-              (next as any).jurisdictionRestrictedMessage ??
-              (existing as any).jurisdictionRestrictedMessage ??
-              "This jurisdiction is not supported due to regulatory restrictions.",
-            jurisdictionEnforceByIpGeo:
-              (next as any).jurisdictionEnforceByIpGeo ?? (existing as any).jurisdictionEnforceByIpGeo ?? false,
-            jurisdictionEnforceBySignupCountry:
-              (next as any).jurisdictionEnforceBySignupCountry ??
-              (existing as any).jurisdictionEnforceBySignupCountry ??
-              true,
-            jurisdictionBlockSignup:
-              (next as any).jurisdictionBlockSignup ?? (existing as any).jurisdictionBlockSignup ?? true,
-            jurisdictionBlockLogin:
-              (next as any).jurisdictionBlockLogin ?? (existing as any).jurisdictionBlockLogin ?? true,
-            allowUserTimezoneEdit: next.allowUserTimezoneEdit ?? (existing as any).allowUserTimezoneEdit ?? true,
-            scoutTabEnabled: (next as any).scoutTabEnabled ?? (existing as any).scoutTabEnabled ?? true,
-            signupFreeze: (next as any).signupFreeze ?? (existing as any).signupFreeze ?? false,
-            signupFreezeMessage: (next as any).signupFreezeMessage ?? (existing as any).signupFreezeMessage ?? "",
-            signupWaitlistEnabled: (next as any).signupWaitlistEnabled ?? (existing as any).signupWaitlistEnabled ?? true,
-            signupWaitlistInviteSender: (next as any).signupWaitlistInviteSender ?? (existing as any).signupWaitlistInviteSender ?? "",
-            signupWaitlistInviteSubject: (next as any).signupWaitlistInviteSubject ?? (existing as any).signupWaitlistInviteSubject ?? "",
-            signupWaitlistInviteBodyText: (next as any).signupWaitlistInviteBodyText ?? (existing as any).signupWaitlistInviteBodyText ?? "",
-            signupWaitlistAutoInviteOnUnfreeze:
-              (next as any).signupWaitlistAutoInviteOnUnfreeze ??
-              (existing as any).signupWaitlistAutoInviteOnUnfreeze ??
-              false,
-            signupWaitlistInviteBatchCap: Number(
-              (next as any).signupWaitlistInviteBatchCap ?? (existing as any).signupWaitlistInviteBatchCap ?? 200
-            ),
-            signupWaitlistPolicyVersion: (next as any).signupWaitlistPolicyVersion ?? (existing as any).signupWaitlistPolicyVersion ?? "1",
-            signupWaitlistPolicyContent: (next as any).signupWaitlistPolicyContent ?? (existing as any).signupWaitlistPolicyContent ?? "",
-            rememberMeEnabled: (next as any).rememberMeEnabled ?? (existing as any).rememberMeEnabled ?? true,
-            rememberMeMaxAgeDays: Number(
-              (next as any).rememberMeMaxAgeDays ?? (existing as any).rememberMeMaxAgeDays ?? 30,
-            ),
-            rememberMeMaxDevicesPerUser: Number(
-              (next as any).rememberMeMaxDevicesPerUser ?? (existing as any).rememberMeMaxDevicesPerUser ?? 10,
-            ),
-            rememberMeReauthAfterAbsenceDays: Number(
-              (next as any).rememberMeReauthAfterAbsenceDays ??
-                (existing as any).rememberMeReauthAfterAbsenceDays ??
-                7,
-            ),
-            rememberMeTokenRotationEnabled:
-              (next as any).rememberMeTokenRotationEnabled ??
-              (existing as any).rememberMeTokenRotationEnabled ??
-              true,
-            rememberMeTheftAutoRevokeAll:
-              (next as any).rememberMeTheftAutoRevokeAll ??
-              (existing as any).rememberMeTheftAutoRevokeAll ??
-              true,
-            sessionCookieMaxAgeHours: Number(
-              (next as any).sessionCookieMaxAgeHours ?? (existing as any).sessionCookieMaxAgeHours ?? 24,
-            ),
-            sessionIdleTimeoutMinutes: Number(
-              (next as any).sessionIdleTimeoutMinutes ?? (existing as any).sessionIdleTimeoutMinutes ?? 0,
-            ),
-            logoutClearAllDeviceTokens:
-              (next as any).logoutClearAllDeviceTokens ??
-              (existing as any).logoutClearAllDeviceTokens ??
-              false,
-            migrationChunkingEnabled:
-              (next as any).migrationChunkingEnabled ?? (existing as any).migrationChunkingEnabled ?? false,
-            migrationChunkSizeMb: Number(
-              (next as any).migrationChunkSizeMb ?? (existing as any).migrationChunkSizeMb ?? 51200
-            ),
-            updatedAt: nowSec,
-            updatedBy: adminUser
-          })
-          .where(eq(systemConfig.id, 1));
-      } else {
-        await db.insert(systemConfig).values({
-          id: 1,
-          maintenanceMode: next.maintenanceMode ?? false,
-          tradingHalt: next.tradingHalt ?? false,
-          closeOnlyMode: next.closeOnlyMode ?? false,
-          blockOpenOnStaleQuotes: next.blockOpenOnStaleQuotes ?? true,
-          maintenanceMessage: next.maintenanceMessage ?? "System is under maintenance. Trading will resume shortly.",
-          quoteRefreshMs: next.quoteRefreshMs ?? 870,
-          feedPollMs: next.feedPollMs ?? 870,
-          staleThresholdMs: next.staleThresholdMs ?? 30000,
-          marketDataActiveProviderKey: (next as any).marketDataActiveProviderKey ?? "twelvedata",
-          marketDataFallbackProviderKeysCsv: (next as any).marketDataFallbackProviderKeysCsv ?? "",
-          fxRolloverTz: next.fxRolloverTz ?? "America/New_York",
-          fxRolloverTime: next.fxRolloverTime ?? "17:00",
-          signupCaptchaEnforce: next.signupCaptchaEnforce ?? true,
-          captchaProvider: next.captchaProvider ?? "SLIDER",
-          signupPhoneEnforce: next.signupPhoneEnforce ?? true,
-          legalCoverageEnforce: next.legalCoverageEnforce ?? false,
-          jurisdictionRestrictedIso2Csv: (next as any).jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY",
+      const nextFeedConfig = {
+        feedPollMs: next.feedPollMs ?? existing.feedPollMs,
+        staleThresholdMs: next.staleThresholdMs ?? existing.staleThresholdMs,
+        fxRolloverTz: next.fxRolloverTz ?? existing.fxRolloverTz,
+        fxRolloverTime: next.fxRolloverTime ?? existing.fxRolloverTime,
+      };
+      const feedChangedKeys = [
+        nextFeedConfig.feedPollMs !== existing.feedPollMs ? "feedPollMs" : null,
+        nextFeedConfig.staleThresholdMs !== existing.staleThresholdMs ? "staleThresholdMs" : null,
+        nextFeedConfig.fxRolloverTz !== existing.fxRolloverTz ? "fxRolloverTz" : null,
+        nextFeedConfig.fxRolloverTime !== existing.fxRolloverTime ? "fxRolloverTime" : null,
+      ].filter((key): key is string => Boolean(key));
+      const result = await updateSystemConfigWithAudit({
+        actor,
+        patch: {
+          maintenanceMode: next.maintenanceMode ?? existing.maintenanceMode,
+          tradingHalt: next.tradingHalt ?? existing.tradingHalt,
+          closeOnlyMode: next.closeOnlyMode ?? existing.closeOnlyMode,
+          blockOpenOnStaleQuotes: next.blockOpenOnStaleQuotes ?? existing.blockOpenOnStaleQuotes,
+          maintenanceMessage: next.maintenanceMessage ?? existing.maintenanceMessage,
+          feedPollMs: next.feedPollMs ?? existing.feedPollMs,
+          staleThresholdMs: next.staleThresholdMs ?? existing.staleThresholdMs,
+          fxRolloverTz: next.fxRolloverTz ?? existing.fxRolloverTz,
+          fxRolloverTime: next.fxRolloverTime ?? existing.fxRolloverTime,
+          signupCaptchaEnforce: next.signupCaptchaEnforce ?? existing.signupCaptchaEnforce,
+          captchaProvider: next.captchaProvider ?? existing.captchaProvider,
+          signupPhoneEnforce: next.signupPhoneEnforce ?? existing.signupPhoneEnforce,
+          legalCoverageEnforce: next.legalCoverageEnforce ?? existing.legalCoverageEnforce,
+          jurisdictionRestrictedIso2Csv:
+            (next as any).jurisdictionRestrictedIso2Csv ?? existing.jurisdictionRestrictedIso2Csv,
           jurisdictionRestrictedMessage:
-            (next as any).jurisdictionRestrictedMessage ?? "This jurisdiction is not supported due to regulatory restrictions.",
-          jurisdictionEnforceByIpGeo: (next as any).jurisdictionEnforceByIpGeo ?? false,
-          jurisdictionEnforceBySignupCountry: (next as any).jurisdictionEnforceBySignupCountry ?? true,
-          jurisdictionBlockSignup: (next as any).jurisdictionBlockSignup ?? true,
-          jurisdictionBlockLogin: (next as any).jurisdictionBlockLogin ?? true,
-          allowUserTimezoneEdit: next.allowUserTimezoneEdit ?? true,
-          scoutTabEnabled: (next as any).scoutTabEnabled ?? true,
-          signupFreeze: (next as any).signupFreeze ?? false,
-          signupFreezeMessage: (next as any).signupFreezeMessage ?? "Signups are temporarily paused due to capacity. Existing users can still log in.",
-          signupWaitlistEnabled: (next as any).signupWaitlistEnabled ?? true,
-          signupWaitlistInviteSender: (next as any).signupWaitlistInviteSender ?? "TradeQuip <noreply@tradequip.com>",
-          signupWaitlistInviteSubject: (next as any).signupWaitlistInviteSubject ?? "Signup slots are open again",
+            (next as any).jurisdictionRestrictedMessage ?? existing.jurisdictionRestrictedMessage,
+          jurisdictionEnforceByIpGeo:
+            (next as any).jurisdictionEnforceByIpGeo ?? existing.jurisdictionEnforceByIpGeo,
+          jurisdictionEnforceBySignupCountry:
+            (next as any).jurisdictionEnforceBySignupCountry ?? existing.jurisdictionEnforceBySignupCountry,
+          jurisdictionBlockSignup: (next as any).jurisdictionBlockSignup ?? existing.jurisdictionBlockSignup,
+          jurisdictionBlockLogin: (next as any).jurisdictionBlockLogin ?? existing.jurisdictionBlockLogin,
+          allowUserTimezoneEdit: next.allowUserTimezoneEdit ?? existing.allowUserTimezoneEdit,
+          scoutTabEnabled: (next as any).scoutTabEnabled ?? existing.scoutTabEnabled,
+          signupFreeze: (next as any).signupFreeze ?? existing.signupFreeze,
+          signupFreezeMessage: (next as any).signupFreezeMessage ?? existing.signupFreezeMessage,
+          signupWaitlistEnabled: (next as any).signupWaitlistEnabled ?? existing.signupWaitlistEnabled,
+          signupWaitlistInviteSender:
+            (next as any).signupWaitlistInviteSender ?? existing.signupWaitlistInviteSender,
+          signupWaitlistInviteSubject:
+            (next as any).signupWaitlistInviteSubject ?? existing.signupWaitlistInviteSubject,
           signupWaitlistInviteBodyText:
-            (next as any).signupWaitlistInviteBodyText ??
-            "Hello {{name}},\n\nSignup slots are open again. Please register here: {{signup_link}}\n\nIf you did not request an invite, you can ignore this message.",
-          signupWaitlistAutoInviteOnUnfreeze: (next as any).signupWaitlistAutoInviteOnUnfreeze ?? false,
-          signupWaitlistInviteBatchCap: Number((next as any).signupWaitlistInviteBatchCap ?? 200),
-          signupWaitlistPolicyVersion: (next as any).signupWaitlistPolicyVersion ?? "1",
+            (next as any).signupWaitlistInviteBodyText ?? existing.signupWaitlistInviteBodyText,
+          signupWaitlistAutoInviteOnUnfreeze:
+            (next as any).signupWaitlistAutoInviteOnUnfreeze ?? existing.signupWaitlistAutoInviteOnUnfreeze,
+          signupWaitlistInviteBatchCap: Number(
+            (next as any).signupWaitlistInviteBatchCap ?? existing.signupWaitlistInviteBatchCap,
+          ),
+          signupWaitlistPolicyVersion:
+            (next as any).signupWaitlistPolicyVersion ?? existing.signupWaitlistPolicyVersion,
           signupWaitlistPolicyContent:
-            (next as any).signupWaitlistPolicyContent ??
-            "WAITLIST COMMUNICATIONS & PRIVACY NOTICE\n\nBy requesting an invite, you consent to receive an email when signup slots reopen.\n\nWhat we collect:\n- Your name and email address\n- Basic client metadata (IP address and user agent)\n\nHow we use it:\n- To notify you when signup slots open\n- We do not sell your data\n\nRetention:\n- We retain waitlist records until you are invited or you opt out\n\nOpt-out:\n- You can opt out by replying to an invite email or contacting support.",
-          rememberMeEnabled: (next as any).rememberMeEnabled ?? true,
-          rememberMeMaxAgeDays: Number((next as any).rememberMeMaxAgeDays ?? 30),
-          rememberMeMaxDevicesPerUser: Number((next as any).rememberMeMaxDevicesPerUser ?? 10),
-          rememberMeReauthAfterAbsenceDays: Number((next as any).rememberMeReauthAfterAbsenceDays ?? 7),
-          rememberMeTokenRotationEnabled: (next as any).rememberMeTokenRotationEnabled ?? true,
-          rememberMeTheftAutoRevokeAll: (next as any).rememberMeTheftAutoRevokeAll ?? true,
-          sessionCookieMaxAgeHours: Number((next as any).sessionCookieMaxAgeHours ?? 24),
-          sessionIdleTimeoutMinutes: Number((next as any).sessionIdleTimeoutMinutes ?? 0),
-          logoutClearAllDeviceTokens: (next as any).logoutClearAllDeviceTokens ?? false,
-          migrationChunkingEnabled: (next as any).migrationChunkingEnabled ?? false,
-          migrationChunkSizeMb: Number((next as any).migrationChunkSizeMb ?? 51200),
-          updatedBy: adminUser
-        });
-      }
-
-      try {
-        invalidateJurisdictionRestrictionPolicyCache();
-      } catch { }
-
-      try {
-        invalidateRememberMeConfigCache();
-      } catch { }
-
-      const updated = await db.query.systemConfig.findFirst({
-        where: eq(systemConfig.id, 1)
+            (next as any).signupWaitlistPolicyContent ?? existing.signupWaitlistPolicyContent,
+          rememberMeEnabled: (next as any).rememberMeEnabled ?? existing.rememberMeEnabled,
+          rememberMeMaxAgeDays: Number((next as any).rememberMeMaxAgeDays ?? existing.rememberMeMaxAgeDays),
+          rememberMeMaxDevicesPerUser: Number(
+            (next as any).rememberMeMaxDevicesPerUser ?? existing.rememberMeMaxDevicesPerUser,
+          ),
+          rememberMeReauthAfterAbsenceDays: Number(
+            (next as any).rememberMeReauthAfterAbsenceDays ?? existing.rememberMeReauthAfterAbsenceDays,
+          ),
+          rememberMeTokenRotationEnabled:
+            (next as any).rememberMeTokenRotationEnabled ?? existing.rememberMeTokenRotationEnabled,
+          rememberMeTheftAutoRevokeAll:
+            (next as any).rememberMeTheftAutoRevokeAll ?? existing.rememberMeTheftAutoRevokeAll,
+          sessionCookieMaxAgeHours: Number(
+            (next as any).sessionCookieMaxAgeHours ?? existing.sessionCookieMaxAgeHours,
+          ),
+          sessionIdleTimeoutMinutes: Number(
+            (next as any).sessionIdleTimeoutMinutes ?? existing.sessionIdleTimeoutMinutes,
+          ),
+          logoutClearAllDeviceTokens:
+            (next as any).logoutClearAllDeviceTokens ?? existing.logoutClearAllDeviceTokens,
+          migrationChunkingEnabled:
+            (next as any).migrationChunkingEnabled ?? existing.migrationChunkingEnabled,
+          migrationChunkSizeMb: Number((next as any).migrationChunkSizeMb ?? existing.migrationChunkSizeMb),
+        },
+        snapshotBuilder: buildSystemConfigAdminSnapshot,
+        auditType: "SYSTEM_CONFIG_UPDATED",
+        auditTitle: "System config updated",
+        auditDescription:
+          "Updated operational controls, jurisdiction rules, signup settings, and session security controls.",
       });
+      const updated = result.updated;
 
-      // Reload feed config immediately so changes take effect without restart
-      try {
-        void reloadFeedConfig();
-      } catch (e) {
-        console.warn("Could not reload feed config:", e);
+      let feedReloadStatus = null;
+      if (feedChangedKeys.length > 0) {
+        try {
+          feedReloadStatus = await requestControlledReload({
+            domain: "quotes.transport.feed",
+            requestedBy: adminUser,
+            requiredScope: "reload",
+            changedKeys: feedChangedKeys,
+          });
+        } catch (e) {
+          console.warn("Could not request controlled feed reload:", e);
+        }
       }
 
-      // Broadcast config invalidations so other nodes refresh cached policy/feed settings.
-      try {
-        publishLiveEvent({ type: "system-config:updated", payload: { updatedAt: nowSec } });
-        publishLiveEvent({ type: "feed:config-updated", payload: { updatedAt: nowSec } });
-        publishLiveEvent({ type: "jurisdiction-policy:invalidate", payload: { updatedAt: nowSec } });
-      } catch { }
+      emitSystemConfigMutationEffects({
+        updatedAt: result.updatedAt,
+        scope: "SYSTEM_CONFIG",
+        invalidateJurisdiction: true,
+        invalidateRememberMe: true,
+        publishJurisdictionPolicyInvalidate: true,
+        feedReloadStatus,
+        changedKeys: feedChangedKeys,
+        adminUser,
+      });
 
       let autoInviteSummary: any = null;
       const isUnfreezingNow = prevFreeze === true && nextFreeze === false;
@@ -1144,8 +1049,29 @@ export function registerAdminRoutes(app: Express) {
         }
       }
 
-      res.json({ ...(updated as any), autoInviteSummary });
+      res.json({
+        ...(updated as any),
+        autoInviteSummary,
+        controlledReload:
+          feedReloadStatus
+            ? {
+                domain: "quotes.transport.feed",
+                acceptedVersion: feedReloadStatus.requestedVersion,
+                requiredScope: feedReloadStatus.requiredScope,
+                reloadStatus: feedReloadStatus,
+              }
+            : null,
+      });
     } catch (error) {
+      if (isSystemConfigValidationError(error)) {
+        return res.status(400).json({ message: error.message });
+      }
+      if (isSystemConfigConflictError(error)) {
+        return res.status(409).json({
+          message: error.message,
+          currentUpdatedAt: error.currentUpdatedAt,
+        });
+      }
       console.error("Error updating system config:", error);
       res.status(500).json({ message: "Internal server error" });
     }

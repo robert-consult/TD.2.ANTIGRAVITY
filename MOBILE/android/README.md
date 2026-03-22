@@ -23,4 +23,8 @@ npm run build:android:release
 
 ## Release Notes
 - Treat `key.properties` and any keystore files as operator material.
+- The standard local operator path is `~/.config/tradequip/android-signing/key.properties` with the keystore in the same directory.
+- Android release signing will use that default location automatically, or you can override it with `TRADEQUIP_ANDROID_KEY_PROPERTIES` or Gradle property `tradequipAndroidKeyPropertiesPath`.
+- Keep the external signing directory `0700` and populated files `0600`.
+- Use `key.properties.example` only as a template; do not place populated signing files under `MOBILE/android/`.
 - Keep cleartext exceptions limited to local debug workflows.

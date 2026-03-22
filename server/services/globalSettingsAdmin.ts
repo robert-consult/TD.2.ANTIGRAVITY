@@ -1,4 +1,8 @@
 import { insertGlobalSettingsSchema, type GlobalSettings as GlobalSettingsRow } from "@shared/schema";
+import {
+  resolvePerformanceSettings,
+  type ResolvedPerformanceSettings,
+} from "@shared/performanceSettings";
 import { clampIntOr, nowSec } from "@shared/scalars";
 import { z } from "zod";
 
@@ -46,35 +50,7 @@ export type GlobalSettingsRiskSnapshot = {
   lotDropdownMax: number;
 };
 
-export type GlobalSettingsPerformanceSnapshot = {
-  restFallbackPollMs: number;
-  wsPushFrequencyMs: number;
-  quoteFlushIntervalMs: number;
-  maxWsReconnectAttempts: number;
-  wsReconnectBaseDelayMs: number;
-  prefetchStrategy: "all" | "critical" | "none";
-  prefetchMaxConcurrency: number;
-  prefetchStartDelayMs: number;
-  prefetchFastConcurrencyCap: number;
-  prefetchModerateConcurrencyCap: number;
-  prefetchConstrainedConcurrencyCap: number;
-  prefetchNetworkFastStartDelayMs: number;
-  prefetchNetworkModerateStartDelayMs: number;
-  prefetchNetworkConstrainedStartDelayMs: number;
-  prefetchDeviceModerateStartDelayMs: number;
-  prefetchDeviceConstrainedStartDelayMs: number;
-  prefetchDeviceMinimalStartDelayMs: number;
-  pollInstantMs: number;
-  pollFastMs: number;
-  pollModerateMs: number;
-  pollConstrainedMs: number;
-  pollMinimalMs: number;
-  flushInstantMs: number;
-  flushFastMs: number;
-  flushModerateMs: number;
-  flushConstrainedMs: number;
-  flushMinimalMs: number;
-};
+export type GlobalSettingsPerformanceSnapshot = ResolvedPerformanceSettings;
 
 export type GlobalSettingsWritePayload = Omit<GlobalSettingsRow, "id"> & { updatedAt: number };
 
@@ -197,15 +173,6 @@ function parseTime(value: unknown): string | undefined {
   const mm = Number(m[2]);
   if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return undefined;
   return `${m[1]}:${m[2]}`;
-}
-
-function normalizeGlobalPrefetchStrategy(
-  value: unknown,
-  fallback: "all" | "critical" | "none" = "all",
-): "all" | "critical" | "none" {
-  const normalized = String(value ?? fallback).trim().toLowerCase();
-  if (normalized === "critical" || normalized === "none") return normalized;
-  return "all";
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -333,39 +300,14 @@ export function buildGlobalSettingsRiskSnapshot(
 export function buildGlobalSettingsPerformanceSnapshot(
   source: Partial<GlobalSettingsRow> | null | undefined,
 ): GlobalSettingsPerformanceSnapshot {
+  return resolvePerformanceSettings(source);
+}
+
+export function buildGlobalSettingsApiPayload(source: GlobalSettingsRow | null | undefined) {
+  if (!source) return null;
   return {
-    restFallbackPollMs: clampInt(source?.restFallbackPollMs ?? 500, 100, 60_000, 500),
-    wsPushFrequencyMs: clampInt(source?.wsPushFrequencyMs ?? 0, 0, 1_000, 0),
-    quoteFlushIntervalMs: clampInt(source?.quoteFlushIntervalMs ?? 50, 20, 5_000, 50),
-    maxWsReconnectAttempts: clampInt(source?.maxWsReconnectAttempts ?? 30, 1, 30, 30),
-    wsReconnectBaseDelayMs: clampInt(source?.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500),
-    prefetchStrategy: normalizeGlobalPrefetchStrategy(source?.prefetchStrategy ?? "all"),
-    prefetchMaxConcurrency: clampInt(source?.prefetchMaxConcurrency ?? 4, 1, 6, 4),
-    prefetchStartDelayMs: clampInt(source?.prefetchStartDelayMs ?? 0, 0, 15_000, 0),
-    prefetchFastConcurrencyCap: clampInt(source?.prefetchFastConcurrencyCap ?? 3, 1, 6, 3),
-    prefetchModerateConcurrencyCap: clampInt(source?.prefetchModerateConcurrencyCap ?? 2, 1, 6, 2),
-    prefetchConstrainedConcurrencyCap: clampInt(source?.prefetchConstrainedConcurrencyCap ?? 1, 1, 6, 1),
-    prefetchNetworkFastStartDelayMs: clampInt(source?.prefetchNetworkFastStartDelayMs ?? 75, 0, 15_000, 75),
-    prefetchNetworkModerateStartDelayMs: clampInt(source?.prefetchNetworkModerateStartDelayMs ?? 200, 0, 15_000, 200),
-    prefetchNetworkConstrainedStartDelayMs: clampInt(
-      source?.prefetchNetworkConstrainedStartDelayMs ?? 450,
-      0,
-      15_000,
-      450,
-    ),
-    prefetchDeviceModerateStartDelayMs: clampInt(source?.prefetchDeviceModerateStartDelayMs ?? 50, 0, 15_000, 50),
-    prefetchDeviceConstrainedStartDelayMs: clampInt(source?.prefetchDeviceConstrainedStartDelayMs ?? 150, 0, 15_000, 150),
-    prefetchDeviceMinimalStartDelayMs: clampInt(source?.prefetchDeviceMinimalStartDelayMs ?? 300, 0, 15_000, 300),
-    pollInstantMs: clampInt(source?.pollInstantMs ?? 200, 100, 60_000, 200),
-    pollFastMs: clampInt(source?.pollFastMs ?? 500, 100, 60_000, 500),
-    pollModerateMs: clampInt(source?.pollModerateMs ?? 1500, 100, 60_000, 1500),
-    pollConstrainedMs: clampInt(source?.pollConstrainedMs ?? 4000, 100, 60_000, 4000),
-    pollMinimalMs: clampInt(source?.pollMinimalMs ?? 6000, 100, 60_000, 6000),
-    flushInstantMs: clampInt(source?.flushInstantMs ?? 50, 20, 5_000, 50),
-    flushFastMs: clampInt(source?.flushFastMs ?? 150, 20, 5_000, 150),
-    flushModerateMs: clampInt(source?.flushModerateMs ?? 300, 20, 5_000, 300),
-    flushConstrainedMs: clampInt(source?.flushConstrainedMs ?? 500, 20, 5_000, 500),
-    flushMinimalMs: clampInt(source?.flushMinimalMs ?? 1000, 20, 5_000, 1000),
+    ...source,
+    performanceSettings: buildGlobalSettingsPerformanceSnapshot(source),
   };
 }
 

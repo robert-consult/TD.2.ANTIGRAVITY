@@ -1,3 +1,5 @@
+import { PRODUCTION_APP_BASE_URL } from "@shared/appSurfaceConfig";
+
 export const DASHBOARD_ROUTE_CHANGED_EVENT = "tq:dashboard-route-changed";
 
 const DASHBOARD_TABS = ["quotes", "chart", "trade", "history", "leaderboard", "account"] as const;
@@ -35,12 +37,12 @@ function sanitizeSymbol(value: unknown): string | undefined {
 function getUrl(source?: UrlLike): URL {
   if (source instanceof URL) return source;
   if (source) {
-    return new URL(`${source.pathname || "/"}${source.search || ""}`, "https://tradehub.example.com");
+    return new URL(`${source.pathname || "/"}${source.search || ""}`, `${PRODUCTION_APP_BASE_URL}/`);
   }
   if (typeof window !== "undefined") {
     return new URL(window.location.href);
   }
-  return new URL("/", "https://tradehub.example.com");
+  return new URL("/", `${PRODUCTION_APP_BASE_URL}/`);
 }
 
 export function normalizeDashboardRouteState(

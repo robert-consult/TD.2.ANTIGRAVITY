@@ -71,12 +71,31 @@ async function acquireSliderConsumeLock(key: string, nowMs: number): Promise<boo
 
 export type CaptchaProvider = "TURNSTILE" | "HCAPTCHA" | "SLIDER";
 
+export type CaptchaRuntimeConfig = {
+  enforceSignupCaptcha: boolean;
+  selectedProvider: CaptchaProvider;
+  effectiveProvider: CaptchaProvider;
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  turnstileSecretConfigured: boolean;
+  hcaptchaSecretConfigured: boolean;
+  selectedProviderSecretConfigured: boolean;
+};
+
 function hasTurnstileSecret(): boolean {
   return Boolean(process.env.TURNSTILE_SECRET_KEY || process.env.CAPTCHA_TURNSTILE_SECRET);
 }
 
 function hasHcaptchaSecret(): boolean {
   return Boolean(process.env.HCAPTCHA_SECRET_KEY || process.env.CAPTCHA_HCAPTCHA_SECRET);
+}
+
+function normalizeCaptchaProvider(raw: unknown): CaptchaProvider {
+  const normalized = String(raw ?? "SLIDER").trim().toUpperCase();
+  if (normalized === "TURNSTILE" || normalized === "HCAPTCHA" || normalized === "SLIDER") {
+    return normalized;
+  }
+  return "SLIDER";
 }
 
 export function resolveCaptchaProvider(
@@ -87,26 +106,59 @@ export function resolveCaptchaProvider(
   return { provider, fallbackUsed: false };
 }
 
-async function getConfig(): Promise<{ enforceSignupCaptcha: boolean; provider: CaptchaProvider }> {
+export function resolveCaptchaRuntimeConfig(input: {
+  signupCaptchaEnforce?: unknown;
+  captchaProvider?: unknown;
+}): CaptchaRuntimeConfig {
+  const selectedProvider = normalizeCaptchaProvider(input.captchaProvider);
+  const resolved = resolveCaptchaProvider(selectedProvider);
+  const turnstileSecretConfigured = hasTurnstileSecret();
+  const hcaptchaSecretConfigured = hasHcaptchaSecret();
+
+  let selectedProviderSecretConfigured = true;
+  let fallbackReason: string | null = null;
+  if (selectedProvider === "TURNSTILE") {
+    selectedProviderSecretConfigured = turnstileSecretConfigured;
+    if (!turnstileSecretConfigured) {
+      fallbackReason = "TURNSTILE secret is not configured; runtime falls back to SLIDER.";
+    }
+  } else if (selectedProvider === "HCAPTCHA") {
+    selectedProviderSecretConfigured = hcaptchaSecretConfigured;
+    if (!hcaptchaSecretConfigured) {
+      fallbackReason = "HCAPTCHA secret is not configured; runtime falls back to SLIDER.";
+    }
+  }
+
+  return {
+    enforceSignupCaptcha: Boolean(input.signupCaptchaEnforce ?? true),
+    selectedProvider,
+    effectiveProvider: resolved.provider,
+    fallbackUsed: resolved.fallbackUsed,
+    fallbackReason,
+    turnstileSecretConfigured,
+    hcaptchaSecretConfigured,
+    selectedProviderSecretConfigured,
+  };
+}
+
+export async function getCaptchaRuntimeConfig(): Promise<CaptchaRuntimeConfig> {
   const cfg = await db.query.systemConfig.findFirst({
     where: eq(systemConfig.id, 1),
   });
-  const selectedProvider = String(cfg?.captchaProvider ?? "SLIDER").toUpperCase() as CaptchaProvider;
-  const resolved = resolveCaptchaProvider(selectedProvider);
-  return {
-    enforceSignupCaptcha: Boolean(cfg?.signupCaptchaEnforce ?? true),
-    provider: resolved.provider,
-  };
+  return resolveCaptchaRuntimeConfig({
+    signupCaptchaEnforce: cfg?.signupCaptchaEnforce,
+    captchaProvider: cfg?.captchaProvider,
+  });
 }
 
 export async function verifySignupCaptcha(
   req: Request,
   captchaToken: string | undefined | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const { enforceSignupCaptcha, provider } = await getConfig();
+  const { enforceSignupCaptcha, effectiveProvider } = await getCaptchaRuntimeConfig();
   if (!enforceSignupCaptcha) return { ok: true };
 
-  if (provider === "SLIDER") {
+  if (effectiveProvider === "SLIDER") {
     const sessionAny: any = (req as any).session;
     const slider = sessionAny?.captchaSlider;
     const now = Date.now();
@@ -156,7 +208,7 @@ export async function verifySignupCaptcha(
   const ip = getClientIp(req) || undefined;
 
   try {
-    if (provider === "TURNSTILE") {
+    if (effectiveProvider === "TURNSTILE") {
       const secret = process.env.TURNSTILE_SECRET_KEY || process.env.CAPTCHA_TURNSTILE_SECRET;
       if (!secret) return { ok: false, message: "CAPTCHA_SECRET_NOT_CONFIGURED" };
 
@@ -179,7 +231,7 @@ export async function verifySignupCaptcha(
       return { ok: true };
     }
 
-    if (provider === "HCAPTCHA") {
+    if (effectiveProvider === "HCAPTCHA") {
       const secret = process.env.HCAPTCHA_SECRET_KEY || process.env.CAPTCHA_HCAPTCHA_SECRET;
       if (!secret) return { ok: false, message: "CAPTCHA_SECRET_NOT_CONFIGURED" };
 

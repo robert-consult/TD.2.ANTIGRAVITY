@@ -10,7 +10,6 @@ import {
   getValkeySnapshot,
 } from "../../services/quoteHub";
 import { getAllowedSymbolsForUser } from "../../services/quoteSubscriptions";
-import { ensureMarketDailyCloseTable } from "../../utils/marketDailyClose";
 import { computeCurrentSessionDay } from "../../utils/quoteSession";
 import { isMarketOpenForSymbol } from "../../services/marketHours";
 
@@ -111,7 +110,6 @@ function buildQuoteView(quote: any, prevCloseMap: Map<string, number>, nowMs: nu
 }
 
 export async function buildQuoteSnapshotResponse(symbols?: string[]) {
-  await ensureMarketDailyCloseTable();
   const { staleThresholdMs, fxRolloverTz, fxRolloverTime } = await loadQuoteSnapshotConfig();
   const currentSessionDay = computeCurrentSessionDay({
     tz: fxRolloverTz,

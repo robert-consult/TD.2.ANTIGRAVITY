@@ -39,9 +39,16 @@ describe("market data provider selection hardening", () => {
     expect(allowLegacyEnvProviderFallback()).toBe(false);
   });
 
-  it("keeps legacy env fallback available by default outside production", () => {
+  it("keeps legacy env fallback disabled by default outside production", () => {
     process.env.NODE_ENV = "development";
     delete process.env.MARKET_DATA_PROVIDER_ALLOW_ENV_FALLBACK;
+
+    expect(allowLegacyEnvProviderFallback()).toBe(false);
+  });
+
+  it("allows explicit diagnostic env fallback opt-in", () => {
+    process.env.NODE_ENV = "development";
+    process.env.MARKET_DATA_PROVIDER_ALLOW_ENV_FALLBACK = "true";
 
     expect(allowLegacyEnvProviderFallback()).toBe(true);
   });
@@ -53,12 +60,10 @@ describe("market data provider selection hardening", () => {
     expect(resolveLegacyEnvProviderKeys()).toEqual(["twelvedata", "1forge"]);
   });
 
-  it("prefers configured active and fallback provider keys before any legacy env keys", () => {
+  it("uses only configured active and fallback provider keys for runtime selection order", () => {
     const keys = buildConfiguredProviderCandidateKeys({
       activeKey: "custom-feed",
       fallbackKeys: ["twelvedata", "1forge"],
-      allowLegacyEnvFallback: true,
-      legacyEnvKeys: ["twelvedata", "1forge"],
     });
 
     expect(keys).toEqual(["custom-feed", "twelvedata", "1forge"]);

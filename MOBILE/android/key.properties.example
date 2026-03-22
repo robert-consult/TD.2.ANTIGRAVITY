@@ -1,0 +1,14 @@
+# Copy this file to the default operator-managed location:
+#   ~/.config/tradequip/android-signing/key.properties
+#
+# Or point Gradle at a different external path with:
+#   export TRADEQUIP_ANDROID_KEY_PROPERTIES=/secure/path/key.properties
+# or:
+#   ./gradlew -PtradequipAndroidKeyPropertiesPath=/secure/path/key.properties assembleRelease
+#
+# Do not commit populated signing files or keystores to git.
+
+storePassword=replace_me
+keyPassword=replace_me
+keyAlias=tradequip
+storeFile=tradequip-release-key.keystore

@@ -1,3 +1,4 @@
+import { PRODUCTION_APP_BASE_URL } from "@shared/appSurfaceConfig";
 import {
   dispatchDashboardRouteStateChange,
   readDashboardRouteState,
@@ -5,7 +6,10 @@ import {
 } from "./dashboardUrlState";
 
 function resolveRelativeAppUrl(appPath: string): URL {
-  return new URL(appPath, typeof window !== "undefined" ? window.location.origin : "https://tradehub.example.com");
+  return new URL(
+    appPath,
+    typeof window !== "undefined" ? window.location.origin : `${PRODUCTION_APP_BASE_URL}/`,
+  );
 }
 
 export function navigateToAppPath(appPath: string, options?: { replace?: boolean }): void {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PRODUCTION_APP_BASE_URL } from "@shared/appSurfaceConfig";
 import {
   areDashboardRouteStatesEqual,
   buildDashboardUrl,
@@ -25,7 +26,7 @@ describe("dashboardUrlState", () => {
 
   it("reads query-backed dashboard state from urls", () => {
     const state = readDashboardRouteState(
-      new URL("https://tradehub.example.com/?tab=chart&symbol=eurusd"),
+      new URL(`${PRODUCTION_APP_BASE_URL}/?tab=chart&symbol=eurusd`),
     );
     expect(state).toEqual({
       tab: "chart",

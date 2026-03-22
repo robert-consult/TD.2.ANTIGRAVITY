@@ -1371,3 +1371,92 @@ Failure Mode if Missing:
   - Bootstrap local SOPS config with `npm run ops:sops:bootstrap`.
   - Encrypt each `*.sops.yaml` file and confirm no `REPLACE_*` placeholders remain.
 - Failure Mode if Missing: production credentials are either absent at deploy time or stored unencrypted in git/GitOps paths.
+
+### PRD-MOBILE-001
+- ID: `PRD-MOBILE-001`
+- Date (UTC): `2026-03-16`
+- Scope: `Android wrapper release signing material handling`
+- Requirement: Android release builds must obtain signing configuration from an operator-managed `key.properties` file outside the repo. The standard local operator path is `~/.config/tradequip/android-signing/key.properties`; explicit overrides may be supplied via `TRADEQUIP_ANDROID_KEY_PROPERTIES` or Gradle property `tradequipAndroidKeyPropertiesPath`. Populated signing files and release keystores must not live under `MOBILE/android/` or remain tracked in git, and the external signing directory/files must be permission-restricted (`0700` directory, `0600` files).
+- Enforcement: `MOBILE/android/app/build.gradle`, `MOBILE/android/.gitignore`, `MOBILE/android/key.properties.example`, `MOBILE/android/README.md`, `MOBILE/docs/APP_SIGNING_GUIDE.md`.
+- Validation:
+  - Run `cd MOBILE && npm run doctor`.
+  - Run `cd MOBILE && TRADEQUIP_REQUIRE_RELEASE_SIGNING=0 bash scripts/with-jdk.sh ./android/gradlew -p android assembleRelease` to confirm Gradle wiring is valid without repo-managed signing inputs.
+  - Verify `~/.config/tradequip/android-signing` exists with mode `700` and populated files use mode `600` when local operator material is present.
+  - Run `cd MOBILE && TRADEQUIP_ANDROID_KEY_PROPERTIES=/secure/path/key.properties bash scripts/with-jdk.sh ./android/gradlew -p android assembleRelease` in a signing-enabled environment and confirm the release build succeeds.
+  - Verify `git ls-files -- MOBILE/android/key.properties MOBILE/android/*.keystore MOBILE/android/*.jks` returns no populated release signing material.
+- Failure Mode if Missing: release signing credentials can be exposed in git history or builds can silently depend on repo-local signing artifacts instead of operator-managed secrets.
+
+### PRD-MOBILE-003
+- ID: `PRD-MOBILE-003`
+- Date (UTC): `2026-03-16`
+- Scope: `Compromised Android signing material response`
+- Requirement: If any populated Android release `key.properties` or release keystore was ever committed to git, the associated signing identity must be treated as compromised. Operators must remove the files from the active branch, rotate the upload/release key through the mobile release authority, and stop using the exposed keystore/password pair for future releases.
+- Enforcement: Mobile release incident runbook, operator release process, and repository hygiene checks around `MOBILE/android/key.properties` / `MOBILE/android/*.keystore`.
+- Validation:
+  - Verify the active branch no longer tracks populated release signing material.
+  - Verify a new operator-managed keystore and credentials have replaced the exposed pair.
+  - Verify the next signed Android release is produced with the replacement key path, not the exposed historical material.
+- Failure Mode if Missing: anyone with repository history access can potentially sign malicious Android builds as the app identity or block safe future rotation.
+
+### PRD-CONFIG-001
+- ID: `PRD-CONFIG-001`
+- Date (UTC): `2026-03-17`
+- Scope: `Controlled-reload runtime configuration`
+- Requirement: Quote transport feed settings (`feedPollMs`, `staleThresholdMs`, `fxRolloverTz`, `fxRolloverTime`) and market-data provider selection/config changes must be treated as controlled-reload operations. Admin writes must record a durable requested version, publish a reload request event, and expose applied-versus-configured state until the quote ingestor acknowledges the new version.
+- Enforcement: `server/services/controlledReload.ts`, `server/routes/admin.ts`, `server/routes/adminMarketData.ts`, `server/feeds/quoteFeed.ts`, `server/services/runtimeConfig/marketDataProviders.ts`, `client/src/components/admin/dashboard/SystemConfigTab.tsx`, `client/src/components/admin/MarketDataProvidersCard.tsx`.
+- Validation:
+  - Change feed transport settings through `/api/admin/system-config` and verify the response includes `controlledReload.acceptedVersion`.
+  - Call `GET /api/admin/runtime-config/effective/quote-transport` and verify `reloadStatus.status` moves from `pending` to `applied`, with configured and applied values visible separately.
+  - Activate, upload, reload, disable, or delete a provider through `/api/admin/market-data/providers*` and verify `GET /api/admin/market-data/providers/effective` shows the requested version, effective provider, skipped candidates, and final apply status after acknowledgement.
+- Failure Mode if Missing: operators can believe quote transport or provider changes are live while the ingestor still runs stale settings, causing silent routing drift, unreliable incident response, and unsafe rollback assumptions.
+
+### PRD-TRD-008
+- ID: `PRD-TRD-008`
+- Date (UTC): `2026-03-18`
+- Scope: `Unified trading-risk resolution across trade entry and execution paths`
+- Requirement: Trade-open validation, risk middleware, and pending-order execution must resolve leverage, position-size limits, concurrency limits, min-hold policy, market-hours policy, and loss-limit thresholds from the same canonical trading-risk snapshot. Route- or engine-local fallback literals must not decide money-sensitive behavior independently.
+- Enforcement: `shared/tradingRiskConfig.ts`, `server/services/runtimeConfig/tradingRisk.ts`, `server/risk.ts`, `server/routes/trader/tradeOpen.ts`, `server/engine/orderEngine.ts`.
+- Validation:
+  - Run `npm run check` and `npm run build`.
+  - Run `npx vitest run server/services/runtimeConfig/tradingRisk.test.ts server/routes/trader/tradeOpen.test.ts server/routes/trader/tradeClose.test.ts server/routes/trader/tradeCancel.test.ts`.
+  - Verify that changing `global_settings` risk fields changes the effective behavior seen by risk middleware and trade-open/order execution without route-specific fallback drift.
+- Failure Mode if Missing: different trade paths can accept, reject, margin, or constrain orders using conflicting limits, producing money-flow inconsistency and weak audit defensibility.
+
+### PRD-SCHED-001
+- ID: `PRD-SCHED-001`
+- Date (UTC): `2026-03-18`
+- Scope: `Scheduler freshness after admin timing updates`
+- Requirement: Any scheduler that reschedules from cached admin/global config must invalidate or bypass stale cached settings before applying a live config update. Auto-close cadence changes from `global_settings` must take effect on the next reschedule instead of reusing the prior cached interval.
+- Enforcement: `server/services/globalSettings.ts`, `server/cron/autoClose.ts`, `server/services/runtimeConfig/autoClose.ts`, and scheduler-facing admin/effective-state routes that expose the current runtime schedule.
+- Validation:
+  - Run `npx vitest run server/cron/autoClose.test.ts server/services/runtimeConfig/autoClose.test.ts`.
+  - Start the app, change `autoCloseCheckFrequencyMinutes` in admin, and confirm the scheduler reschedules to the new cadence without waiting for cache TTL expiry.
+  - Verify any effective-state inspector reports the new next-run timing immediately after the config update event.
+- Failure Mode if Missing: operators can change scheduler timing in admin, see the write succeed, and still have the worker continue at the old cadence until cache expiry, creating hidden execution drift during incident response.
+
+### PRD-SURFACE-001
+- ID: `PRD-SURFACE-001`
+- Date (UTC): `2026-03-21`
+- Scope: `Cross-surface app origin, deep-link, and session endpoint parity`
+- Requirement: Web, Capacitor wrapper, React Native, server-generated outbound links, and website CTA links must resolve trading-app base URLs, deep-link routing, and session endpoint paths from one canonical precedence model. Server-generated verification and signup links must target user-facing app pages (`/verify-email`, `/login?tab=...`), not raw API endpoints, and platform shell host allow-lists must stay aligned with the canonical production host.
+- Enforcement: `shared/appSurfaceConfig.ts`, `shared/appLinks.ts`, `server/services/appLinks.ts`, `client/src/components/MobileWrapperBridge.tsx`, `client/src/lib/appUrl.ts`, `client/src/lib/wsUrl.ts`, `MOBILE/capacitor.config.ts`, `MOBILE/src/mobile/utils/deep-linking.ts`, `MOBILE/src/mobile/utils/session-manager.ts`, `NATIVE/src/services/runtimeConfig.ts`, `WEBSITE/client/src/lib/app-config.ts`, and platform shell manifests/entitlements under `MOBILE/*` and `NATIVE/*`.
+- Validation:
+  - Run `npm run check` and `npm run build`.
+  - Run `npx vitest run server/services/appSurfaceConfig.test.ts MOBILE/src/mobile/utils/deep-linking.test.ts MOBILE/src/mobile/utils/session-manager.test.ts client/src/lib/dashboardUrlState.test.ts`.
+  - Run `cd NATIVE && npm test -- --runInBand __tests__/runtimeConfig.test.ts __tests__/websocket.test.ts __tests__/csrf.test.ts`.
+  - Verify verification emails and waitlist invites point to `/verify-email?token=...` and `/login?tab=register` on the resolved app base URL instead of `/api/verification/email/verify`.
+  - Verify wrapper/native deep-link resolution accepts canonical tradehub URLs and the `tradequip://` scheme, while native continues rejecting unsupported web-only routes like `/admin`.
+- Failure Mode if Missing: mobile/web/native surfaces can point at different hosts, deep-link different route models, or send users to raw API endpoints, causing broken verification flows, inconsistent session behavior, and silent environment drift across deployments.
+
+### PRD-GOV-001
+- ID: `PRD-GOV-001`
+- Date (UTC): `2026-03-21`
+- Scope: `Governance visibility for deploy-owned and controlled-reload config`
+- Requirement: Deploy-owned runtime posture, effective-value inspection, and controlled-reload request/apply history must be visible through a read-only admin governance surface. The platform must expose configured-versus-applied feed/provider state, session transport posture, deploy-owned export/analytics settings, deployment manifest snapshots, and documentation reconciliation without turning deploy-owned or secret-backed values into normal admin edit fields.
+- Enforcement: `server/services/runtimeGovernance.ts`, `server/routes/adminGovernance.ts`, `client/src/components/admin/dashboard/GovernanceVisibilityTab.tsx`, `client/src/live/ConfigSync.tsx`, `shared/runtimeConfig.ts`, and `REPORTS AND REVIEWS/HARDCODING AUDIT/09_WAVE_5_COMPLETION.md`.
+- Validation:
+  - Run `npm run check` and `npm run build`.
+  - Run `npx vitest run server/services/runtimeGovernance.test.ts server/routes/adminGovernance.test.ts client/src/components/admin/dashboard/GovernanceVisibilityTab.test.tsx client/src/components/admin/dashboard/SystemConfigTab.test.tsx`.
+  - Call `GET /api/admin/runtime-config/governance` and verify the response contains sections for identity/session, market data, exports/analytics, schedulers, deployment snapshot, reload traces, and documentation reconciliation.
+  - Verify the governance tab renders deploy-owned values as read-only, shows secret readiness instead of secret values, and exposes reload versions plus acknowledgement state for feed/provider domains.
+- Failure Mode if Missing: operators cannot distinguish runtime-effective state from deploy-owned posture, reload rollback context remains implicit, and document/live drift becomes invisible until incidents or audits surface it.

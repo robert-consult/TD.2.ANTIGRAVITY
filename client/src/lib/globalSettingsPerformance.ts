@@ -1,55 +1,14 @@
-const ALLOWED_PERFORMANCE_SETTING_KEYS = new Set<string>([
-  "restFallbackPollMs",
-  "wsPushFrequencyMs",
-  "quoteFlushIntervalMs",
-  "maxWsReconnectAttempts",
-  "wsReconnectBaseDelayMs",
-  "prefetchStrategy",
-  "prefetchMaxConcurrency",
-  "prefetchStartDelayMs",
-  "prefetchFastConcurrencyCap",
-  "prefetchModerateConcurrencyCap",
-  "prefetchConstrainedConcurrencyCap",
-  "prefetchNetworkFastStartDelayMs",
-  "prefetchNetworkModerateStartDelayMs",
-  "prefetchNetworkConstrainedStartDelayMs",
-  "prefetchDeviceModerateStartDelayMs",
-  "prefetchDeviceConstrainedStartDelayMs",
-  "prefetchDeviceMinimalStartDelayMs",
-  "pollInstantMs",
-  "pollFastMs",
-  "pollModerateMs",
-  "pollConstrainedMs",
-  "pollMinimalMs",
-  "flushInstantMs",
-  "flushFastMs",
-  "flushModerateMs",
-  "flushConstrainedMs",
-  "flushMinimalMs",
-]);
+import {
+  resolvePerformanceSettingsSource,
+  sanitizePerformanceSettingsPatch,
+} from "@shared/performanceSettings";
 
 function sanitizePerformancePatch(perf: Record<string, unknown>): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(perf)) {
-    if (!ALLOWED_PERFORMANCE_SETTING_KEYS.has(key)) continue;
-    sanitized[key] = value;
-  }
-  return sanitized;
+  return sanitizePerformanceSettingsPatch(perf) as Record<string, unknown>;
 }
 
 export function resolveGlobalPerformanceSettingsPayload(payload: unknown): Record<string, unknown> {
-  if (!payload || typeof payload !== "object") return {};
-  const row = payload as Record<string, unknown>;
-  const nestedPerformance =
-    row.performanceSettings && typeof row.performanceSettings === "object"
-      ? sanitizePerformancePatch(row.performanceSettings as Record<string, unknown>)
-      : null;
-
-  if (!nestedPerformance) return row;
-  return {
-    ...row,
-    ...nestedPerformance,
-  };
+  return resolvePerformanceSettingsSource(payload);
 }
 
 export function mergeGlobalSettingsPerformance(

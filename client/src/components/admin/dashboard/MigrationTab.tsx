@@ -10,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   FieldHintLabel,
   MIGRATION_FIELD_HELP,
@@ -21,6 +24,12 @@ import {
 export function MigrationTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
 
   // ===== Migration chunking settings (stored in system_config) =====
   const systemConfigQuery = useQuery<SystemConfigData>({
@@ -353,13 +362,13 @@ curl -f -L -X POST "\$BASE/api/admin/migration/import-jobs" \\
   const exportJobsQuery = useQuery<MigrationExportJob[]>({
     queryKey: ["/api/admin/migration/export-jobs"],
     queryFn: () => axios.get("/api/admin/migration/export-jobs").then((r) => r.data),
-    refetchInterval: 5000,
+    refetchInterval: runtimeIntervals.admin.fastPollMs,
   });
 
   const importJobsQuery = useQuery<MigrationImportJob[]>({
     queryKey: ["/api/admin/migration/import-jobs"],
     queryFn: () => axios.get("/api/admin/migration/import-jobs").then((r) => r.data),
-    refetchInterval: 5000,
+    refetchInterval: runtimeIntervals.admin.fastPollMs,
   });
 
   const exportMutation = useMutation({

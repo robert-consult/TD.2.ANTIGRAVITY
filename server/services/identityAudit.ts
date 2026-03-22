@@ -1,6 +1,6 @@
 import { db } from "@db";
 import { identityAudit } from "@shared/schema";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { sha256Hex } from "./crypto";
 
 // Canonical JSON serialization with sorted keys for deterministic hashing
@@ -38,11 +38,24 @@ export type IdentityAuditEvent = {
   data?: Record<string, any> | null;
 };
 
+const IDENTITY_AUDIT_LOCK_NAMESPACE = 0x49415544;
+
+function getIdentityAuditScopeKey(userId: number | null | undefined): number {
+  if (typeof userId !== "number" || !Number.isFinite(userId)) return 0;
+  return Math.trunc(userId);
+}
+
 async function appendIdentityAuditCore(executor: any, evt: IdentityAuditEvent): Promise<void> {
+  const appendWithExecutor = async (runner: any) => {
   const atMs = evt.at ?? Date.now();
   const atSec = Math.floor(atMs / 1000);
+  const scopeKey = getIdentityAuditScopeKey(evt.userId);
 
-  const [lastRow] = await executor
+  await runner.execute(
+    sql`SELECT pg_advisory_xact_lock(${IDENTITY_AUDIT_LOCK_NAMESPACE}, ${scopeKey})`,
+  );
+
+  const [lastRow] = await runner
     .select({ eventHash: identityAudit.eventHash })
     .from(identityAudit)
     .where(evt.userId == null ? isNull(identityAudit.userId) : eq(identityAudit.userId, evt.userId))
@@ -73,7 +86,7 @@ async function appendIdentityAuditCore(executor: any, evt: IdentityAuditEvent): 
 
   const eventHash = sha256Hex(`${prevHash ?? ""}|${stableStringify(payload)}`);
 
-  await executor.insert(identityAudit).values({
+  await runner.insert(identityAudit).values({
     at: atSec,
     userId: evt.userId ?? null,
     email: evt.email ?? null,
@@ -93,6 +106,16 @@ async function appendIdentityAuditCore(executor: any, evt: IdentityAuditEvent): 
     prevHash,
     eventHash,
   });
+  };
+
+  if (executor === db) {
+    await db.transaction(async (tx) => {
+      await appendWithExecutor(tx);
+    });
+    return;
+  }
+
+  await appendWithExecutor(executor);
 }
 
 export async function appendIdentityAuditAwaitable(evt: IdentityAuditEvent, executor: any = db): Promise<void> {

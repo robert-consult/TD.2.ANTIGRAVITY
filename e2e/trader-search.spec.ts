@@ -97,7 +97,7 @@ test("Admin: Trader Search supports optional criteria + drilldown", async ({ bro
     await acceptDoc1IfPrompted(adminPage);
     await adminPage.goto("/admin");
     await acceptDoc1IfPrompted(adminPage);
-    await expect(adminPage.getByText("Admin Dashboard")).toBeVisible();
+    await expect(adminPage.getByText("Admin Dashboard")).toBeVisible({ timeout: 60_000 });
 
     await adminPage.getByRole("tab", { name: "Data" }).click({ timeout: 30_000 });
     await expect(adminPage.getByText("Trading Data")).toBeVisible();

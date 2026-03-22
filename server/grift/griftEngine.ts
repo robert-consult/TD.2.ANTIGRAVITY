@@ -1,27 +1,28 @@
 ﻿// server/grift/griftEngine.ts
 import type { GriftDb } from "./griftDb";
 import type { GriftConfig, GriftRuleCode, GriftSeverity, AuditContext, RuleTrigger } from "./griftTypes";
-import { DEFAULT_GRIFT_CONFIG } from "./griftDefaults";
 import { haversineKm, kmh } from "./griftGeo";
 import { normalizeIpKey, resolveAsnOrg } from "./griftIpAsn";
+import { onLiveEvent } from "../services/liveBus";
+import {
+  GRIFT_CONFIG_TTL_MS,
+  getGriftEngineCaps,
+  resolveGriftRuntimePolicy,
+} from "../services/runtimeConfig/griftConfig";
 
 let configCache: { cfg: GriftConfig; fetchedAt: number } | null = null;
+let subscribed = false;
+const ENGINE_CAPS = getGriftEngineCaps();
 
-function parsePositiveInt(raw: unknown, fallback: number): number {
-  const n = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.floor(n);
+function ensureSubscribed() {
+  if (subscribed) return;
+  subscribed = true;
+  onLiveEvent((event) => {
+    if (event.type === "grift-config:updated") {
+      invalidateConfigCache();
+    }
+  });
 }
-
-function parseBoundedPositiveInt(raw: unknown, fallback: number, min: number, max: number): number {
-  const n = parsePositiveInt(raw, fallback);
-  return Math.min(max, Math.max(min, n));
-}
-
-const CONFIG_TTL_MS = parseBoundedPositiveInt(process.env.GRIFT_CONFIG_TTL_MS, 15_000, 5_000, 120_000);
-const MAX_LINKED_EDGE_WRITES_PER_TRIGGER = parsePositiveInt(process.env.GRIFT_MAX_LINKED_EDGE_WRITES_PER_TRIGGER, 50);
-const MAX_EVIDENCE_LINKED_USERS = parsePositiveInt(process.env.GRIFT_MAX_EVIDENCE_LINKED_USERS, 50);
-const MAX_LINKED_EDGE_BATCH_ROWS = parseBoundedPositiveInt(process.env.GRIFT_MAX_LINKED_EDGE_BATCH_ROWS, 200, 10, 1000);
 
 type LinkedEdgeType = "device" | "device_fp" | "ip" | "ip_subnet" | "asn";
 type LinkedEdgeInput = {
@@ -31,64 +32,14 @@ type LinkedEdgeInput = {
   linkValue: string;
 };
 
-// Map snake_case DB row to camelCase GriftConfig with default fallbacks for NULL values
-function mapConfigRow(row: any): GriftConfig {
-  const d = DEFAULT_GRIFT_CONFIG;
-  return {
-    id: row.id ?? d.id,
-    enabled: row.enabled ?? d.enabled,
-    multiAccountWindowDays: row.multi_account_window_days ?? d.multiAccountWindowDays,
-    churnWindowHours: row.churn_window_hours ?? d.churnWindowHours,
-    hedgeWindowMinutes: row.hedge_window_minutes ?? d.hedgeWindowMinutes,
-    concurrentWindowMinutes: row.concurrent_window_minutes ?? d.concurrentWindowMinutes,
-    ipUniqueThreshold: row.ip_unique_threshold ?? d.ipUniqueThreshold,
-    uaUniqueThreshold: row.ua_unique_threshold ?? d.uaUniqueThreshold,
-    deviceUniqueThreshold: row.device_unique_threshold ?? d.deviceUniqueThreshold,
-    asnUniqueThreshold: row.asn_unique_threshold ?? d.asnUniqueThreshold,
-    geoVelocityKmhThreshold: row.geo_velocity_kmh_threshold ?? d.geoVelocityKmhThreshold,
-    geoVelocityMinDistanceKm: row.geo_velocity_min_distance_km ?? d.geoVelocityMinDistanceKm,
-    geoVelocityMaxHours: row.geo_velocity_max_hours ?? d.geoVelocityMaxHours,
-    hedgeRequireDeviceMatch: row.hedge_require_device_match ?? d.hedgeRequireDeviceMatch,
-    hedgeAllowIpMatch: row.hedge_allow_ip_match ?? d.hedgeAllowIpMatch,
-    scoreMultiAccountDevice: row.score_multi_account_device ?? d.scoreMultiAccountDevice,
-    scoreMultiAccountFingerprint: row.score_multi_account_fingerprint ?? d.scoreMultiAccountFingerprint,
-    scoreHedgePair: row.score_hedge_pair ?? d.scoreHedgePair,
-    scoreIpChurn: row.score_ip_churn ?? d.scoreIpChurn,
-    scoreUaChurn: row.score_ua_churn ?? d.scoreUaChurn,
-    scoreDeviceChurn: row.score_device_churn ?? d.scoreDeviceChurn,
-    scoreGeoVelocity: row.score_geo_velocity ?? d.scoreGeoVelocity,
-    scoreConcurrentSessions: row.score_concurrent_sessions ?? d.scoreConcurrentSessions,
-    scoreAsnVolatility: row.score_asn_volatility ?? d.scoreAsnVolatility,
-    scoreSharedIpAsnCluster: row.score_shared_ip_asn_cluster ?? d.scoreSharedIpAsnCluster,
-    scoreMultiAccountLaddering: row.score_multi_account_laddering ?? d.scoreMultiAccountLaddering,
-    clusterMinUsersForIpAsn: row.cluster_min_users_for_ip_asn ?? d.clusterMinUsersForIpAsn,
-    ladderingWindowDays: row.laddering_window_days ?? d.ladderingWindowDays,
-    ladderingMinSequence: row.laddering_min_sequence ?? d.ladderingMinSequence,
-    tierMed: row.tier_med ?? d.tierMed,
-    tierHigh: row.tier_high ?? d.tierHigh,
-    tierCritical: row.tier_critical ?? d.tierCritical,
-    mitigationMfa: row.mitigation_mfa ?? d.mitigationMfa,
-    mitigationKycApproved: row.mitigation_kyc_approved ?? d.mitigationKycApproved,
-    enforcementFreezeThreshold: row.enforcement_freeze_threshold ?? d.enforcementFreezeThreshold,
-    enforcementDisableThreshold: row.enforcement_disable_threshold ?? d.enforcementDisableThreshold,
-    enforcementAutoFreeze: row.enforcement_auto_freeze ?? d.enforcementAutoFreeze,
-    enforcementAutoDisable: row.enforcement_auto_disable ?? d.enforcementAutoDisable,
-    retentionObservationsDays: row.retention_observations_days ?? d.retentionObservationsDays,
-    retentionTradeObservationsDays: row.retention_trade_observations_days ?? d.retentionTradeObservationsDays,
-    retentionAuthEventsDays: row.retention_auth_events_days ?? d.retentionAuthEventsDays,
-    retentionIpAsnCacheDays: row.retention_ip_asn_cache_days ?? d.retentionIpAsnCacheDays,
-    updatedAt: row.updated_at ?? d.updatedAt,
-    updatedByAdminId: row.updated_by_admin_id ?? d.updatedByAdminId,
-  };
-}
-
 export async function getConfig(db: GriftDb): Promise<GriftConfig> {
+  ensureSubscribed();
   const now = Date.now();
-  if (configCache && now - configCache.fetchedAt < CONFIG_TTL_MS) {
+  if (configCache && now - configCache.fetchedAt < GRIFT_CONFIG_TTL_MS) {
     return configCache.cfg;
   }
   const row = await db.prepare("SELECT * FROM grift_config WHERE id=1").get() as any;
-  const cfg = row ? mapConfigRow(row) : DEFAULT_GRIFT_CONFIG;
+  const cfg = resolveGriftRuntimePolicy(row);
   configCache = { cfg, fetchedAt: now };
   return cfg;
 }
@@ -464,8 +415,8 @@ async function recordLinkedEdgesBatch(db: GriftDb, edges: LinkedEdgeInput[]): Pr
 
   const now = Date.now();
   let recorded = 0;
-  for (let start = 0; start < normalized.length; start += MAX_LINKED_EDGE_BATCH_ROWS) {
-    const batch = normalized.slice(start, start + MAX_LINKED_EDGE_BATCH_ROWS);
+  for (let start = 0; start < normalized.length; start += ENGINE_CAPS.maxLinkedEdgeBatchRows) {
+    const batch = normalized.slice(start, start + ENGINE_CAPS.maxLinkedEdgeBatchRows);
     const valuesSql = batch.map(() => "(?, ?, ?, ?, 1.0, ?, ?)").join(", ");
     const params: Array<number | string> = [];
     for (const edge of batch) {
@@ -511,7 +462,7 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
     .filter((n) => Number.isFinite(n))
     .sort((a, b) => a - b);
 
-  const edgeTargets = linkedUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  const edgeTargets = linkedUserIdsAll.slice(0, ENGINE_CAPS.maxLinkedEdgeWritesPerTrigger);
   const edgesRecorded = await recordLinkedEdgesBatch(
     db,
     edgeTargets.map((otherUserId) => ({
@@ -522,7 +473,7 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
     })),
   );
 
-  const linkedUserIds = linkedUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
+  const linkedUserIds = linkedUserIdsAll.slice(0, ENGINE_CAPS.maxEvidenceLinkedUsers);
   return {
     ruleCode: "MULTI_ACCOUNT_DEVICE",
     severity: severity(points, cfg),
@@ -570,7 +521,7 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
     .filter((n) => Number.isFinite(n))
     .sort((a, b) => a - b);
 
-  const edgeTargets = linkedUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  const edgeTargets = linkedUserIdsAll.slice(0, ENGINE_CAPS.maxLinkedEdgeWritesPerTrigger);
   const edgesRecorded = await recordLinkedEdgesBatch(
     db,
     edgeTargets.map((otherUserId) => ({
@@ -581,7 +532,7 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
     })),
   );
 
-  const linkedUserIds = linkedUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
+  const linkedUserIds = linkedUserIdsAll.slice(0, ENGINE_CAPS.maxEvidenceLinkedUsers);
   return {
     ruleCode: "MULTI_ACCOUNT_FINGERPRINT",
     severity: severity(points, cfg),
@@ -872,7 +823,7 @@ export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): P
     .filter((n) => Number.isFinite(n))
     .sort((a, b) => a - b);
 
-  const edgeTargets = clusterUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  const edgeTargets = clusterUserIdsAll.slice(0, ENGINE_CAPS.maxLinkedEdgeWritesPerTrigger);
   const batchedEdges: LinkedEdgeInput[] = [];
   for (const memberUserId of edgeTargets) {
     batchedEdges.push({ userIdA: ctx.userId, userIdB: memberUserId, linkType: "ip", linkValue: ctx.ip });
@@ -880,7 +831,7 @@ export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): P
   }
   const edgesRecorded = await recordLinkedEdgesBatch(db, batchedEdges);
 
-  const clusterMembers = clusterUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
+  const clusterMembers = clusterUserIdsAll.slice(0, ENGINE_CAPS.maxEvidenceLinkedUsers);
   return {
     ruleCode: "SHARED_IPASN_CLUSTER",
     severity: severity(points, cfg),

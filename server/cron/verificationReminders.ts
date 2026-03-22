@@ -11,6 +11,7 @@ import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { promotePerformerIfEligible } from "../policy/performerPromotion";
 import { buildSystemContext } from "../lib/auditContext";
 import { sanitizeExternalErrorText, summarizeErrorForLog } from "../security/logSanitizer";
+import { buildServerVerifyEmailUrl } from "../services/appLinks";
 
 const REMINDER_SCHEDULE = "0 9 * * *"; // 9 AM daily
 const VERIFICATION_TOKEN_EXPIRY_HOURS = 24;
@@ -35,7 +36,7 @@ async function sendVerificationEmail(email: string, token: string, kind: "INITIA
     return false;
   }
 
-  const verifyUrl = `${process.env.APP_URL || "http://localhost:5000"}/verify-email?token=${token}`;
+  const verifyUrl = buildServerVerifyEmailUrl(token);
   const isReverify = kind === "REVERIFY";
   const subject = isReverify ? "Re-verify your TradeQuip email address" : "Verify your TradeQuip email address";
 

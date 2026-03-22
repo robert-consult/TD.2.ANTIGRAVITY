@@ -3,14 +3,57 @@ apply plugin: 'com.android.application'
 def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
 def requireGoogleServicesForRelease =
     ((project.findProperty("tradequipRequireGoogleServicesForRelease") ?: System.getenv("TRADEQUIP_REQUIRE_GOOGLE_SERVICES_FOR_RELEASE") ?: "0").toString() == "1")
+def requireReleaseSigning =
+    ((project.findProperty("tradequipRequireReleaseSigning") ?: System.getenv("TRADEQUIP_REQUIRE_RELEASE_SIGNING") ?: "1").toString() == "1")
 def servicesJSON = file('google-services.json')
 def hasGoogleServices = servicesJSON.exists() && servicesJSON.length() > 0
 
-// Load signing config from key.properties
-def keystorePropertiesFile = rootProject.file("key.properties")
+File resolveSigningPath(File baseFile, Object rawPath) {
+    if (rawPath == null) return null
+    def text = rawPath.toString().trim()
+    if (!text) return null
+    File candidate = new File(text)
+    if (!candidate.isAbsolute() && baseFile != null) {
+        candidate = new File(baseFile.parentFile, text)
+    }
+    return candidate
+}
+
+File operatorManagedAndroidSigningHome() {
+    def userHome = System.getProperty("user.home")
+    if (userHome == null || !userHome.trim()) {
+        return null
+    }
+    return new File(new File(new File(userHome), ".config"), "tradequip/android-signing")
+}
+
+// Load release signing config from an operator-managed key.properties path.
+def defaultKeystorePropertiesFile = operatorManagedAndroidSigningHome() != null
+    ? new File(operatorManagedAndroidSigningHome(), "key.properties")
+    : null
+def keystorePropertiesPath = (
+    project.findProperty("tradequipAndroidKeyPropertiesPath")
+        ?: System.getenv("TRADEQUIP_ANDROID_KEY_PROPERTIES")
+        ?: ""
+).toString().trim()
+def keystorePropertiesFile = keystorePropertiesPath
+    ? file(keystorePropertiesPath)
+    : defaultKeystorePropertiesFile
 def keystoreProperties = new Properties()
-if (keystorePropertiesFile.exists()) {
+def hasReleaseSigningConfig = keystorePropertiesFile != null && keystorePropertiesFile.exists()
+if (hasReleaseSigningConfig) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+def releaseStoreFile = resolveSigningPath(keystorePropertiesFile, keystoreProperties['storeFile'])
+if (isReleaseTask && requireReleaseSigning) {
+    if (!hasReleaseSigningConfig) {
+        throw new GradleException(
+            "Release signing requires an operator-managed key.properties file at ${defaultKeystorePropertiesFile} or an override via TRADEQUIP_ANDROID_KEY_PROPERTIES / -PtradequipAndroidKeyPropertiesPath."
+        )
+    }
+    if (releaseStoreFile == null || !releaseStoreFile.exists()) {
+        throw new GradleException("Configured Android release keystore file was not found.")
+    }
 }
 
 android {
@@ -33,10 +76,10 @@ android {
     // Signing configuration for release builds
     signingConfigs {
         release {
-            if (keystorePropertiesFile.exists()) {
+            if (hasReleaseSigningConfig) {
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
-                storeFile file(keystoreProperties['storeFile'])
+                storeFile releaseStoreFile
                 storePassword keystoreProperties['storePassword']
             }
         }
@@ -53,7 +96,7 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             // Use signing config for release builds
-            if (keystorePropertiesFile.exists()) {
+            if (hasReleaseSigningConfig) {
                 signingConfig signingConfigs.release
             }
         }

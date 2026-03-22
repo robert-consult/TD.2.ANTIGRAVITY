@@ -2,7 +2,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { getClientIp, getUserAgent } from "../security/sessionTrail";
 import { appendIdentityAudit } from "../services/identityAudit";
-import { resolveCaptchaProvider, SLIDER_CAPTCHA_ISSUE_TTL_MS, SLIDER_MIN_SOLVE_MS } from "../security/captcha";
+import { resolveCaptchaRuntimeConfig, SLIDER_CAPTCHA_ISSUE_TTL_MS, SLIDER_MIN_SOLVE_MS } from "../security/captcha";
 import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { systemConfig } from "@shared/schema";
@@ -11,10 +11,14 @@ async function getCaptchaEnabled() {
   const row = await db.query.systemConfig.findFirst({
     where: eq(systemConfig.id, 1),
   });
-  const enforceSignupCaptcha = Boolean(row?.signupCaptchaEnforce ?? true);
-  const selectedProvider = String(row?.captchaProvider ?? "SLIDER").toUpperCase() as any;
-  const provider = resolveCaptchaProvider(selectedProvider).provider;
-  return { enforceSignupCaptcha, provider };
+  const captcha = resolveCaptchaRuntimeConfig({
+    signupCaptchaEnforce: row?.signupCaptchaEnforce,
+    captchaProvider: row?.captchaProvider,
+  });
+  return {
+    enforceSignupCaptcha: captcha.enforceSignupCaptcha,
+    provider: captcha.effectiveProvider,
+  };
 }
 
 export const captchaSliderRouter = Router();

@@ -14,6 +14,7 @@ import {
   NOTIFY_TOGGLES,
   REWARD_TOGGLES,
   SYSTEM_TOGGLES,
+  applyChallengeSchedulerIntervalDraft,
   toInt,
   toNum,
   toOptInt,
@@ -24,6 +25,16 @@ type AnyRow = Record<string, any>;
 interface ScoutChallengesSettingsTabProps {
   settingsDraft: Record<string, any>;
   setSettingsDraft: Dispatch<SetStateAction<Record<string, any>>>;
+  effectiveScheduler?: {
+    nextRunAtMs?: number | null;
+    runtime?: {
+      enabled: boolean;
+      intervalMin: number;
+      intervalSec: number;
+      maxRows: number;
+      source: string;
+    } | null;
+  } | null;
   saveSettingsPending: boolean;
   onSaveSettings: () => void;
   badgeDraft: typeof EMPTY_BADGE;
@@ -46,6 +57,7 @@ interface ScoutChallengesSettingsTabProps {
 export function ScoutChallengesSettingsTab({
   settingsDraft,
   setSettingsDraft,
+  effectiveScheduler,
   saveSettingsPending,
   onSaveSettings,
   badgeDraft,
@@ -99,7 +111,14 @@ export function ScoutChallengesSettingsTab({
             <Input
               type="number"
               value={settingsDraft.challengeEvalIntervalMin}
-              onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeEvalIntervalMin: Math.max(1, toInt(e.target.value, p.challengeEvalIntervalMin)) }))}
+              onChange={(e) =>
+                setSettingsDraft((p) =>
+                  applyChallengeSchedulerIntervalDraft(
+                    p,
+                    Math.max(1, toInt(e.target.value, p.challengeEvalIntervalMin)),
+                  ),
+                )
+              }
               className="bg-neutral-700 border-neutral-600"
               placeholder="Eval interval (minutes)"
             />
@@ -179,9 +198,10 @@ export function ScoutChallengesSettingsTab({
             <Input
               type="number"
               value={settingsDraft.challengeEvaluationIntervalSec}
-              onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeEvaluationIntervalSec: Math.max(60, toInt(e.target.value, p.challengeEvaluationIntervalSec)) }))}
-              className="bg-neutral-700 border-neutral-600"
-              placeholder="Evaluation interval (sec)"
+              readOnly
+              disabled
+              className="bg-neutral-800 border-neutral-700 text-neutral-400"
+              placeholder="Evaluation interval (sec, deprecated)"
             />
             <Input
               type="number"
@@ -206,6 +226,41 @@ export function ScoutChallengesSettingsTab({
               placeholder="Weekend cutoff (hours)"
             />
           </div>
+          <div className="rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-100/90">
+            <div className="font-medium">Legacy scheduler field retired</div>
+            <div className="mt-1">
+              <code>challengeEvaluationIntervalSec</code> is now read-only in Wave 0. The active scheduler cadence is controlled through <code>challengeEvalIntervalMin</code>.
+            </div>
+          </div>
+          {effectiveScheduler?.runtime ? (
+            <div className="rounded border border-cyan-700/30 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-100/90">
+              <div className="font-medium">Effective scheduler state</div>
+              <div className="mt-2 grid gap-2 md:grid-cols-4">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Source</div>
+                  <div>{effectiveScheduler.runtime.source}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Interval</div>
+                  <div>
+                    {effectiveScheduler.runtime.intervalMin} min / {effectiveScheduler.runtime.intervalSec} sec
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Max rows</div>
+                  <div>{effectiveScheduler.runtime.maxRows}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Next run</div>
+                  <div>
+                    {effectiveScheduler.nextRunAtMs
+                      ? new Date(effectiveScheduler.nextRunAtMs).toLocaleString()
+                      : "Not scheduled"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
             <Input
               type="number"

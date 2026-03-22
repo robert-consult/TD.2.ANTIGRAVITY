@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCTION_APP_BASE_URL } from "@shared/appSurfaceConfig";
 
 const addListenerMock = vi.hoisted(() => vi.fn());
 const getLaunchUrlMock = vi.hoisted(() => vi.fn());
@@ -36,7 +37,7 @@ describe("mobile deep linking", () => {
   });
 
   it("parses canonical web and native scheme links onto live dashboard routes", () => {
-    expect(parseDeepLink("https://tradehub.example.com/trade/eurusd")).toMatchObject({
+    expect(parseDeepLink(`${PRODUCTION_APP_BASE_URL}/trade/eurusd`)).toMatchObject({
       screen: "trade",
       params: { symbol: "EURUSD" },
       appPath: "/?tab=trade&symbol=EURUSD",
@@ -53,12 +54,13 @@ describe("mobile deep linking", () => {
 
   it("generates canonical web links for wrapper-routed screens", () => {
     expect(generateDeepLink("mailbox")).toBe(
-      "https://tradehub.example.com/?tab=account&panel=mailbox",
+      `${PRODUCTION_APP_BASE_URL}/?tab=account&panel=mailbox`,
     );
-    expect(generateDeepLink("profile")).toBe("https://tradehub.example.com/profile");
+    expect(generateDeepLink("profile")).toBe(`${PRODUCTION_APP_BASE_URL}/profile`);
     expect(generateDeepLink("verify-email", { token: "abc123" })).toBe(
-      "https://tradehub.example.com/verify-email?token=abc123",
+      `${PRODUCTION_APP_BASE_URL}/verify-email?token=abc123`,
     );
+    expect(generateDeepLink("register")).toBe(`${PRODUCTION_APP_BASE_URL}/login?tab=register`);
   });
 
   it("dispatches launch urls and runtime url-open events to the wrapper navigation callback", async () => {
@@ -66,7 +68,7 @@ describe("mobile deep linking", () => {
     let appUrlOpenHandler: ((event: { url: string }) => void) | undefined;
 
     getLaunchUrlMock.mockResolvedValue({
-      url: "https://tradehub.example.com/history",
+      url: `${PRODUCTION_APP_BASE_URL}/history`,
     });
     addListenerMock.mockImplementation(async (_eventName, callback) => {
       appUrlOpenHandler = callback;

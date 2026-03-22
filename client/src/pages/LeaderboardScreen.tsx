@@ -9,6 +9,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ChallengesCompetePanel from "@/components/trader/ChallengesCompetePanel";
 import { Trophy, TrendingUp } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 
 const LEADERBOARD_MODES = ["PUBLIC", "TOP_10", "DISABLED"] as const;
 
@@ -52,10 +55,16 @@ export default function LeaderboardScreen() {
   const queryClient = useQueryClient();
   const [subTab, setSubTab] = useState<LeaderboardSubTab>("leaderboard");
   const { user } = useAuth();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
 
   const { data: config } = useQuery<LeaderboardModeResp>({
     queryKey: ["/api/trader/leaderboard-mode"],
-    refetchInterval: 30000,
+    refetchInterval: runtimeIntervals.leaderboard.modePollMs,
   });
 
   const leaderboardMode = config?.leaderboardMode ?? "PUBLIC";
@@ -72,7 +81,7 @@ export default function LeaderboardScreen() {
 
   const { data: leaderboard = [], isLoading: leaderboardLoading } = useQuery<LeaderboardItem[]>({
     queryKey: ["/api/leaderboard"],
-    refetchInterval: 30000,
+    refetchInterval: runtimeIntervals.leaderboard.entriesPollMs,
   });
 
   const profileQuery = useQuery<{ row: TraderProfileRow }>({

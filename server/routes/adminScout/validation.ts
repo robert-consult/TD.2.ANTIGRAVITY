@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { CHALLENGE_MAILBOX_CATEGORIES } from "@shared/challenges/mailbox";
+import {
+  MAX_CHALLENGE_EVAL_INTERVAL_MIN,
+  MAX_CHALLENGE_EVAL_INTERVAL_SEC,
+  MIN_CHALLENGE_EVAL_INTERVAL_MIN,
+  MIN_CHALLENGE_EVAL_INTERVAL_SEC,
+} from "@shared/challenges/systemConfig";
 import { PIPELINE_STAGES } from "../../recruitment/pipelineService";
 
 export const LEADERBOARD_MODES = ["PUBLIC", "TOP_10", "DISABLED"] as const;
@@ -179,9 +185,9 @@ export const challengeEnrollmentActionSchema = z.object({
 export const challengeSettingsPatchSchema = z.object({
   traderCompeteEnabled: z.boolean().optional(),
   challengeAutoAdvancePhase: z.boolean().optional(),
-  challengeEvalIntervalMin: z.coerce.number().int().min(1).max(24 * 60).optional(),
+  challengeEvalIntervalMin: z.coerce.number().int().min(MIN_CHALLENGE_EVAL_INTERVAL_MIN).max(MAX_CHALLENGE_EVAL_INTERVAL_MIN).optional(),
+  challengeEvaluationIntervalSec: z.coerce.number().int().min(MIN_CHALLENGE_EVAL_INTERVAL_SEC).max(MAX_CHALLENGE_EVAL_INTERVAL_SEC).optional(),
   challengeEvalMaxRows: z.coerce.number().int().min(1).max(5000).optional(),
-  challengeEvaluationIntervalSec: z.coerce.number().int().min(60).max(24 * 3600).optional(),
   challengeWarningThresholdPct: z.coerce.number().min(0.01).max(0.99).optional(),
   challengeDefaultDrawdownType: z.enum(["STATIC", "TRAILING"]).optional(),
   challengeDefaultCapitalMode: z.enum(["VIRTUAL", "SNAPSHOT_EQUITY"]).optional(),

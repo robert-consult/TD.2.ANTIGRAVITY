@@ -8,6 +8,8 @@ import { enrichIpAsnCacheBatch } from "../../grift/griftIpAsn";
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "../../grift/griftIp2AsnDataset";
 import { appendAuditEntry } from "../../grift/griftAdminAudit";
 import { withGriftClient } from "../../grift/griftDb";
+import { publishLiveEvent } from "../../services/liveBus";
+import { getGriftEffectiveConfigState } from "../../services/runtimeConfig/griftConfig";
 import { getDb, getDbMaintenanceStats, sanitizeConfigPatch } from "./shared";
 
 export function registerGriftOpsRoutes(app: Express) {
@@ -198,10 +200,22 @@ export function registerGriftOpsRoutes(app: Express) {
     const db = getDb();
     try {
       const config = await getConfig(db);
-      res.json({ config });
+      const effective = await getGriftEffectiveConfigState(db);
+      res.json({ config, effective, engineCaps: effective.engineCaps });
     } catch (error) {
       console.error("Grift config error:", error);
       res.status(500).json({ message: "Failed to fetch grift config" });
+    }
+  });
+
+  app.get("/api/admin/grift/config/effective", requireAdmin, async (_req: Request, res: Response) => {
+    const db = getDb();
+    try {
+      const effective = await getGriftEffectiveConfigState(db);
+      res.json({ ok: true, ...effective });
+    } catch (error) {
+      console.error("Grift config effective error:", error);
+      res.status(500).json({ message: "Failed to fetch effective grift config" });
     }
   });
 
@@ -333,8 +347,16 @@ export function registerGriftOpsRoutes(app: Express) {
       invalidateConfigCache();
       const updatedConfig = await getConfig(db);
       await appendAuditEntry(db, adminId, "CONFIG_UPDATE", "config", 1, filteredUpdates);
+      publishLiveEvent({
+        type: "grift-config:updated",
+        payload: {
+          updatedAt: Date.now(),
+          patchKeys: Object.keys(filteredUpdates),
+        },
+      });
 
-      res.json({ config: updatedConfig });
+      const effective = await getGriftEffectiveConfigState(db);
+      res.json({ config: updatedConfig, effective, engineCaps: effective.engineCaps });
     } catch (error) {
       console.error("Grift config update error:", error);
       res.status(500).json({ message: "Failed to update grift config" });

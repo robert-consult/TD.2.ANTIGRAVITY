@@ -55,6 +55,7 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 
 ### Admin, audit, and “grift” controls
 - Admin routes: `server/routes/admin.ts`, `server/routes/adminSecurity.ts`, `server/routes/adminSystemConfig.ts`
+- Governance inspector: `server/routes/adminGovernance.ts`, `server/services/runtimeGovernance.ts`
 - Admin ops/users/kyc route modules (decomposed): `server/routes/adminOps.ts`, `server/routes/adminUsers.ts`, `server/routes/adminKyc.ts`
 - Institutional audit routes (decomposed): `server/routes/adminInstitutionalAudit.ts`
 - Admin DataTab rollup read-model: `server/routes/adminDataRollups.ts`, `server/services/adminDataRollups.ts`

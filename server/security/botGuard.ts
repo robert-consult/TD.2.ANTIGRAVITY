@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { db } from "@db";
 import { eq } from "drizzle-orm";
-import { botRiskAssessments, systemConfig } from "@shared/schema";
+import { botRiskAssessments } from "@shared/schema";
 import { issueBotChallenge, verifyBotProof } from "./botChallenge";
 import { valkeyIncrWithTtl, valkeySAddWithTtl } from "../services/valkey";
 import {
@@ -12,21 +12,14 @@ import {
 } from "@shared/identity/headers";
 import { BOT_CHALLENGE_REQUIRED_CODE } from "@shared/security/botChallenge";
 import { incBotChallengesIssuedTotal } from "../routes/metricsState";
-
-type BotConfig = {
-
-  botScoreThreshold: number; // default 40
-  powEnabled: boolean;
-  powEnforceSignup: boolean;
-  powEnforceLogin: boolean;
-  powChallengeScore: number; // score >= this => require proof
-  powBaseDifficulty: number;
-  powMaxDifficulty: number;
-  powTtlSec: number;
-  valkeyEnabled: boolean;
-};
-
-type BotGuardAction = "LOGIN" | "SIGNUP" | "TRADE";
+import { getBotGuardConfig } from "../services/runtimeConfig/botConfig";
+import {
+  labelFor,
+  type BotGuardAction,
+  type BotWindows,
+  uaHeuristicsScore,
+  windowPenalty,
+} from "./botGuardHeuristics";
 
 export type BotGuardProof = "OK" | "MISSING" | "INVALID" | "NOT_REQUIRED" | "SKIPPED";
 
@@ -97,8 +90,6 @@ export async function persistBotAssessmentForUser(args: {
   return { score: newScore, label };
 }
 
-let cached: { at: number; cfg: BotConfig } | null = null;
-
 function nowMs() {
   return Date.now();
 }
@@ -110,26 +101,6 @@ function clamp(n: number, lo: number, hi: number) {
 function toInt(v: unknown, fallback: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
-
-async function getBotConfig(): Promise<BotConfig> {
-  if (cached && nowMs() - cached.at < 15_000) return cached.cfg;
-
-  const sc = await db.query.systemConfig.findFirst({ where: eq(systemConfig.id, 1) });
-  const cfg: BotConfig = {
-    botScoreThreshold: toInt((sc as any)?.botScoreThreshold, 40),
-    powEnabled: Boolean((sc as any)?.botPowEnabled ?? true),
-    powEnforceSignup: Boolean((sc as any)?.botPowEnforceSignup ?? true),
-    powEnforceLogin: Boolean((sc as any)?.botPowEnforceLogin ?? false),
-    powChallengeScore: toInt((sc as any)?.botPowChallengeScore, 25),
-    powBaseDifficulty: toInt((sc as any)?.botPowBaseDifficulty, 14),
-    powMaxDifficulty: toInt((sc as any)?.botPowMaxDifficulty, 20),
-    powTtlSec: toInt((sc as any)?.botPowTtlSec, 120),
-    valkeyEnabled: Boolean((sc as any)?.botValkeyEnabled ?? true),
-  };
-
-  cached = { at: nowMs(), cfg };
-  return cfg;
 }
 
 function getIp(req: Request) {
@@ -154,91 +125,12 @@ function getClientTz(req: Request) {
   return (req.headers[IDENTITY_HEADER_CLIENT_TZ] as string | undefined) ?? "";
 }
 
-function uaHeuristicsScore(ua: string): number {
-  const s = ua.toLowerCase();
-  let pts = 0;
-  if (!ua) pts += 10;
-  if (s.includes("headless")) pts += 25;
-  if (s.includes("phantomjs")) pts += 40;
-  if (s.includes("selenium")) pts += 40;
-  if (s.includes("playwright")) pts += 35;
-  if (s.includes("puppeteer")) pts += 35;
-  if (s.includes("curl/")) pts += 40;
-  if (s.includes("python-requests")) pts += 40;
-  return pts;
-}
-
-function labelFor(score: number) {
-  if (score >= 60) return "HIGH";
-  if (score >= 40) return "SUSPICIOUS";
-  return "OK";
-}
-
-type BotWindows = {
-  ip1m: number | null;
-  ip10m: number | null;
-  inst10m: number | null;
-  fp10m: number | null;
-};
-
-function windowPenalty(action: BotGuardAction, w: BotWindows): number {
-  const ip1m = w.ip1m ?? 0;
-  const ip10m = w.ip10m ?? 0;
-  const inst10m = w.inst10m ?? 0;
-  const fp10m = w.fp10m ?? 0;
-
-  let pts = 0;
-
-  if (action === "SIGNUP") {
-    if (ip1m >= 20) pts += 35;
-    else if (ip1m >= 10) pts += 25;
-    else if (ip1m >= 5) pts += 15;
-    else if (ip1m >= 3) pts += 10;
-
-    if (ip10m >= 80) pts += 25;
-    else if (ip10m >= 40) pts += 15;
-    else if (ip10m >= 20) pts += 10;
-
-    if (inst10m >= 10) pts += 25;
-    else if (inst10m >= 5) pts += 15;
-
-    if (fp10m >= 20) pts += 15;
-    else if (fp10m >= 10) pts += 10;
-  } else if (action === "LOGIN") {
-    if (ip1m >= 30) pts += 25;
-    else if (ip1m >= 15) pts += 15;
-    else if (ip1m >= 8) pts += 10;
-
-    if (ip10m >= 200) pts += 25;
-    else if (ip10m >= 100) pts += 15;
-    else if (ip10m >= 50) pts += 10;
-
-    if (inst10m >= 20) pts += 20;
-    else if (inst10m >= 10) pts += 15;
-    else if (inst10m >= 5) pts += 10;
-
-    if (fp10m >= 40) pts += 15;
-    else if (fp10m >= 20) pts += 10;
-  } else if (action === "TRADE") {
-    if (ip1m >= 60) pts += 25;
-    else if (ip1m >= 30) pts += 15;
-
-    if (ip10m >= 400) pts += 25;
-    else if (ip10m >= 200) pts += 15;
-    else if (ip10m >= 100) pts += 10;
-
-    if (inst10m >= 40) pts += 20;
-    else if (inst10m >= 20) pts += 15;
-    else if (inst10m >= 10) pts += 10;
-
-    if (fp10m >= 60) pts += 15;
-    else if (fp10m >= 30) pts += 10;
-  }
-
-  return clamp(pts, 0, 60);
-}
-
-async function bumpWindows(cfg: BotConfig, req: Request, action: BotGuardAction, email?: string): Promise<BotWindows> {
+async function bumpWindows(
+  cfg: Awaited<ReturnType<typeof getBotGuardConfig>>,
+  req: Request,
+  action: BotGuardAction,
+  email?: string,
+): Promise<BotWindows> {
   const windows: BotWindows = { ip1m: null, ip10m: null, inst10m: null, fp10m: null };
   if (!cfg.valkeyEnabled) return windows;
 
@@ -269,7 +161,7 @@ export async function botGuard(
   res: Response,
   opts: { action: BotGuardAction; email?: string; userId?: number }
 ): Promise<{ allowed: boolean; score: number; proof: BotGuardProof; signals: BotGuardSignals }> {
-  const cfg = await getBotConfig();
+  const cfg = await getBotGuardConfig();
 
   const ua = getUa(req);
   const fp = getDeviceFp(req);
@@ -293,7 +185,7 @@ export async function botGuard(
     cfg.powEnabled &&
     ((opts.action === "SIGNUP" && cfg.powEnforceSignup && score >= cfg.powChallengeScore) ||
       (opts.action === "LOGIN" && cfg.powEnforceLogin && score >= cfg.powChallengeScore) ||
-      (opts.action === "TRADE" && score >= cfg.powChallengeScore + 10));
+      (opts.action === "TRADE" && score >= cfg.tradePowChallengeScore));
 
   const proofHdr = (req.headers[IDENTITY_HEADER_BOT_PROOF] as string | undefined) ?? "";
   let proofResult: BotGuardProof = cfg.powEnabled ? "NOT_REQUIRED" : "SKIPPED";

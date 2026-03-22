@@ -1,4 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
+import {
+  getWrapperAllowNavigationHosts,
+  resolveWrapperRuntimeBaseUrl,
+} from "../shared/appSurfaceConfig";
 
 /**
  * Capacitor configuration for TradeQuip Mobile App
@@ -16,26 +20,12 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * context, so `http://10.0.2.2:5000` / `http://192.168.x.x:5000` will break login on Android WebView.
  */
 
-const serverUrl = String(
-  process.env.CAPACITOR_SERVER_URL ||
-  process.env.APP_URL ||
-  (process.env.NODE_ENV === "production" ? "https://tradehub.example.com" : ""),
-).trim();
-const serverHost = (() => {
-  if (!serverUrl) return "";
-  try {
-    return new URL(serverUrl).host;
-  } catch {
-    return "";
-  }
-})();
-const allowNavigationHosts = Array.from(
-  new Set([
-    "tradehub.example.com",
-    "staging.tradehub.example.com",
-    serverHost,
-  ].filter(Boolean)),
-);
+const serverUrl = resolveWrapperRuntimeBaseUrl({
+  explicitBaseUrl: process.env.CAPACITOR_SERVER_URL,
+  appBaseUrl: process.env.APP_URL,
+  mode: process.env.NODE_ENV === "production" ? "production" : "development",
+});
+const allowNavigationHosts = getWrapperAllowNavigationHosts(serverUrl);
 
 const config: CapacitorConfig = {
   appId: "com.tradequip.app",

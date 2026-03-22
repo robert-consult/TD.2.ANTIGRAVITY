@@ -29,7 +29,7 @@ import { ScoutChallengesSettingsTab } from "./scout-challenges/SettingsTab";
 
 type AnyRow = Record<string, any>;
 type InlineTemplateDraft = { profitTargetPct: string; maxDailyLossPct: string; durationDays: string };
-import { LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL, EMPTY_DRAFT, EMPTY_BADGE, EMPTY_CERT, EMPTY_TIER, DEFAULT_SETTINGS, SYSTEM_TOGGLES, REWARD_TOGGLES, NOTIFY_TOGGLES, CONTROL_TOGGLES, ELIGIBILITY_GATE_MODES, HOVER_HINT_SELECTOR, toNum, toInt, toOptNum, toOptInt, isEligibilityGateValid, formatPct, normalizeHintText, isArchivedTemplateRow, buildInlineTemplateDraft, isInlineTemplateDraftEqual, toChallengeListRowPatch, inferHoverHint, applyHoverHints, formatUsd, formatWhen, statusVariant, daysLeftLabel, mapDetailToDraft } from "./scout-challenges/support";
+import { LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL, EMPTY_DRAFT, EMPTY_BADGE, EMPTY_CERT, EMPTY_TIER, DEFAULT_SETTINGS, SYSTEM_TOGGLES, REWARD_TOGGLES, NOTIFY_TOGGLES, CONTROL_TOGGLES, ELIGIBILITY_GATE_MODES, HOVER_HINT_SELECTOR, applyChallengeSchedulerIntervalDraft, toNum, toInt, toOptNum, toOptInt, isEligibilityGateValid, formatPct, normalizeHintText, isArchivedTemplateRow, buildInlineTemplateDraft, isInlineTemplateDraftEqual, toChallengeListRowPatch, inferHoverHint, applyHoverHints, formatUsd, formatWhen, statusVariant, daysLeftLabel, mapDetailToDraft } from "./scout-challenges/support";
 export default function ScoutChallengesPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -198,7 +198,13 @@ export default function ScoutChallengesPanel() {
 
   useEffect(() => {
     if (!settingsQuery.data?.settings) return;
-    setSettingsDraft({ ...DEFAULT_SETTINGS, ...settingsQuery.data.settings });
+    setSettingsDraft((prev) =>
+      applyChallengeSchedulerIntervalDraft(
+        { ...prev, ...DEFAULT_SETTINGS, ...settingsQuery.data.settings },
+        settingsQuery.data.settings?.challengeEvalIntervalMin ??
+          settingsQuery.data.settings?.challengeEvaluationIntervalSec,
+      ),
+    );
   }, [settingsQuery.data?.settings]);
 
   useEffect(() => {
@@ -352,7 +358,10 @@ export default function ScoutChallengesPanel() {
   });
 
   const saveSettingsMutation = useMutation({
-    mutationFn: (payload: AnyRow) => axios.put("/api/admin/challenges/settings", payload).then((r) => r.data),
+    mutationFn: (payload: AnyRow) => {
+      const { challengeEvaluationIntervalSec: _deprecatedChallengeEvaluationIntervalSec, ...sanitized } = payload;
+      return axios.put("/api/admin/challenges/settings", sanitized).then((r) => r.data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges/settings"] });
       toast({ title: "Challenge settings saved" });
@@ -1759,6 +1768,7 @@ export default function ScoutChallengesPanel() {
           <ScoutChallengesSettingsTab
             settingsDraft={settingsDraft}
             setSettingsDraft={setSettingsDraft}
+            effectiveScheduler={settingsQuery.data?.effectiveScheduler ?? null}
             saveSettingsPending={saveSettingsMutation.isPending}
             onSaveSettings={() => saveSettingsMutation.mutate(settingsDraft)}
             badgeDraft={badgeDraft}

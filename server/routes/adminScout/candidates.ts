@@ -48,6 +48,7 @@ import {
 } from "../../partner/inquiryRouting";
 import { createMailboxThreadWithMessage, createNotification, getCommunicationSettings } from "../../services/messaging";
 import { publishLiveEvent } from "../../services/liveBus";
+import { ensureSystemConfigRow } from "../../services/systemConfig";
 import {
   DEFAULT_PARTNER_GATING_CONFIG,
   normalizePartnerGatingConfig,
@@ -1086,14 +1087,7 @@ adminScoutRouter.put("/config", async (req, res) => {
       return res.status(400).json({ message: "EMPTY_UPDATE" });
     }
 
-    const [existing] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-    if (!existing) {
-      await db.insert(systemConfig).values({
-        id: 1,
-        marketDataActiveProviderKey: "twelvedata",
-        marketDataFallbackProviderKeysCsv: "",
-      });
-    }
+    await ensureSystemConfigRow();
 
     const ts = nowSec();
     await db

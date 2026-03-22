@@ -6,6 +6,14 @@ import { eq } from "drizzle-orm";
 import { systemConfig } from "@shared/schema";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/requireAdmin";
+import { ensureSystemConfigRow } from "../services/systemConfig";
+import {
+  buildActivityConfigWrite,
+  getActivityAdminConfig,
+  getActivityEffectiveState,
+  invalidateActivityAdminConfigCache,
+} from "../services/runtimeConfig/botConfig";
+import { publishLiveEvent } from "../services/liveBus";
 import {
   cancelDeletionQueue,
   enqueueForDeletion,
@@ -201,25 +209,20 @@ const configBodySchema = z
 
 adminActivityRouter.get("/config", async (_req, res) => {
   try {
-    const sc = await db.query.systemConfig.findFirst({ where: eq(systemConfig.id, 1) });
-    return res.json({
-      inactivityThresholdDays: sc?.inactivityThresholdDays ?? 90,
-      deletionGraceDays: sc?.deletionGraceDays ?? 30,
-      botScoreThreshold: sc?.botScoreThreshold ?? 40,
-      botPowEnabled: sc?.botPowEnabled ?? true,
-      botPowEnforceSignup: sc?.botPowEnforceSignup ?? true,
-      botPowEnforceLogin: sc?.botPowEnforceLogin ?? false,
-      botPowChallengeScore: sc?.botPowChallengeScore ?? 25,
-      botPowBaseDifficulty: sc?.botPowBaseDifficulty ?? 14,
-      botPowMaxDifficulty: sc?.botPowMaxDifficulty ?? 20,
-      botPowTtlSec: sc?.botPowTtlSec ?? 120,
-      botValkeyEnabled: sc?.botValkeyEnabled ?? true,
-      activityAutoQueueInactive: sc?.activityAutoQueueInactive ?? true,
-      activityAutoSoftDelete: sc?.activityAutoSoftDelete ?? false,
-      updatedAt: sc?.updatedAt ?? null,
-    });
+    const config = await getActivityAdminConfig();
+    const effective = await getActivityEffectiveState();
+    return res.json({ ...config, effective });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to get config." });
+  }
+});
+
+adminActivityRouter.get("/config/effective", async (_req, res) => {
+  try {
+    const effective = await getActivityEffectiveState();
+    return res.json({ ok: true, ...effective });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to get effective config." });
   }
 });
 
@@ -230,43 +233,27 @@ adminActivityRouter.put("/config", async (req, res) => {
   }
 
   try {
-    const body = parsed.data;
-    const inactivityThresholdDays = clampInt(body.inactivityThresholdDays, 1, 3650, 90);
-    const deletionGraceDays = clampInt(body.deletionGraceDays, 0, 3650, 30);
-    const botScoreThreshold = clampInt(body.botScoreThreshold, 0, 100, 40);
+    const writePatch = buildActivityConfigWrite(parsed.data);
 
-    const botPowEnabled = toBool(body.botPowEnabled, true);
-    const botPowEnforceSignup = toBool(body.botPowEnforceSignup, true);
-    const botPowEnforceLogin = toBool(body.botPowEnforceLogin, false);
-    const botPowChallengeScore = clampInt(body.botPowChallengeScore, 0, 100, 25);
-    const botPowBaseDifficulty = clampInt(body.botPowBaseDifficulty, 1, 32, 14);
-    const botPowMaxDifficulty = Math.max(botPowBaseDifficulty, clampInt(body.botPowMaxDifficulty, 1, 32, 20));
-    const botPowTtlSec = clampInt(body.botPowTtlSec, 10, 3600, 120);
-    const botValkeyEnabled = toBool(body.botValkeyEnabled, true);
-
-    const activityAutoQueueInactive = toBool(body.activityAutoQueueInactive, true);
-    const activityAutoSoftDelete = toBool(body.activityAutoSoftDelete, false);
-
+    await ensureSystemConfigRow();
     await db
       .update(systemConfig)
       .set({
-        inactivityThresholdDays,
-        deletionGraceDays,
-        botScoreThreshold,
-        botPowEnabled,
-        botPowEnforceSignup,
-        botPowEnforceLogin,
-        botPowChallengeScore,
-        botPowBaseDifficulty,
-        botPowMaxDifficulty,
-        botPowTtlSec,
-        botValkeyEnabled,
-        activityAutoQueueInactive,
-        activityAutoSoftDelete,
+        ...writePatch,
         updatedAt: Math.floor(Date.now() / 1000),
       } as any)
       .where(eq(systemConfig.id, 1));
-    return res.json({ ok: true });
+    invalidateActivityAdminConfigCache();
+    publishLiveEvent({
+      type: "activity-config:updated",
+      payload: {
+        updatedAt: Math.floor(Date.now() / 1000),
+        patchKeys: Object.keys(writePatch),
+      },
+    });
+    const config = await getActivityAdminConfig();
+    const effective = await getActivityEffectiveState();
+    return res.json({ ok: true, config, effective });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to set config." });
   }

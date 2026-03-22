@@ -1,5 +1,12 @@
 import { db } from "@db";
+import {
+  resolveChallengeEvalInterval,
+} from "@shared/challenges/systemConfig";
 import { systemConfig } from "@shared/schema";
+import { eq } from "drizzle-orm";
+import { onLiveEvent } from "../../services/liveBus";
+
+type SystemChallengeConfigSource = Partial<typeof systemConfig.$inferSelect> | null | undefined;
 
 export type SystemChallengeConfig = {
   traderCompeteEnabled: boolean;
@@ -71,6 +78,22 @@ export type SystemChallengeConfig = {
 
 let cache: { at: number; value: SystemChallengeConfig } | null = null;
 const TTL_MS = 3000;
+let subscribed = false;
+
+function ensureSubscribed() {
+  if (subscribed) return;
+  subscribed = true;
+  onLiveEvent((event) => {
+    if (!event || typeof event !== "object") return;
+    if (event.type === "challenges:updated" || event.type === "system-config:updated") {
+      cache = null;
+    }
+  });
+}
+
+export function invalidateSystemChallengeConfigCache() {
+  cache = null;
+}
 
 function safeJson(s: string | null | undefined, fallback: unknown): unknown {
   if (!s) return fallback;
@@ -135,116 +158,133 @@ function normalizePrizeCandidates(value: unknown): "PASSED_ONLY" | "INCLUDE_ACTI
 }
 
 export async function getSystemChallengeConfig(force = false): Promise<SystemChallengeConfig> {
+  ensureSubscribed();
   const now = Date.now();
   if (!force && cache && now - cache.at < TTL_MS) return cache.value;
 
-  const [row] = await db.select().from(systemConfig).limit(1);
-
-  const value: SystemChallengeConfig = {
-    traderCompeteEnabled: Boolean((row as any)?.traderCompeteEnabled ?? false),
-    challengeAutoAdvancePhase: Boolean((row as any)?.challengeAutoAdvancePhase ?? true),
-    challengeDefaultDrawdownType: normalizeDrawdownType((row as any)?.challengeDefaultDrawdownType),
-    challengeDefaultCapitalMode: normalizeCapitalMode((row as any)?.challengeDefaultCapitalMode),
-    challengeDefaultMaxRetries: Math.max(0, Math.trunc(clamp((row as any)?.challengeDefaultMaxRetries, 3, 0, 100))),
-    challengeDefaultRetryCooldownHours: Math.max(
-      0,
-      Math.trunc(clamp((row as any)?.challengeDefaultRetryCooldownHours, 24, 0, 24 * 365)),
-    ),
-    challengeDefaultEligibility: safeJson((row as any)?.challengeDefaultEligibility, "EMAIL_VERIFIED"),
-    challengeDefaultCategory: String((row as any)?.challengeDefaultCategory ?? "STANDARD"),
-    challengeDefaultTier: String((row as any)?.challengeDefaultTier ?? "STARTER"),
-    challengeRewardsEnabled: Boolean((row as any)?.challengeRewardsEnabled ?? true),
-    challengePrizePoolsEnabled: Boolean((row as any)?.challengePrizePoolsEnabled ?? true),
-    challengeBadgesEnabled: Boolean((row as any)?.challengeBadgesEnabled ?? true),
-    challengeCertificatesEnabled: Boolean((row as any)?.challengeCertificatesEnabled ?? true),
-    challengeCertificatesDownloadable: Boolean((row as any)?.challengeCertificatesDownloadable ?? true),
-    challengeCertificatesShareable: Boolean((row as any)?.challengeCertificatesShareable ?? true),
-    challengeSelectionBoostEnabled: Boolean((row as any)?.challengeSelectionBoostEnabled ?? true),
-    challengeDefaultSelectionBoost: Number((row as any)?.challengeDefaultSelectionBoost ?? 0),
-    challengeProgressionEnabled: Boolean((row as any)?.challengeProgressionEnabled ?? true),
-    challengeCustomRewardsEnabled: Boolean((row as any)?.challengeCustomRewardsEnabled ?? false),
-
-    challengeNotifyOnEnroll: Boolean((row as any)?.challengeNotifyOnEnroll ?? true),
-    challengeNotifyOnPhaseWarning: Boolean((row as any)?.challengeNotifyOnPhaseWarning ?? true),
-    challengeNotifyOnBreach: Boolean((row as any)?.challengeNotifyOnBreach ?? true),
-    challengeNotifyOnPhasePass: Boolean((row as any)?.challengeNotifyOnPhasePass ?? true),
-    challengeNotifyOnFail: Boolean((row as any)?.challengeNotifyOnFail ?? true),
-    challengeNotifyOnComplete: Boolean((row as any)?.challengeNotifyOnComplete ?? true),
-    challengeNotifyOnBadgeAward: Boolean((row as any)?.challengeNotifyOnBadgeAward ?? true),
-    challengeNotifyOnPrizeAward: Boolean((row as any)?.challengeNotifyOnPrizeAward ?? true),
-    challengeNotifyOnCertIssue: Boolean((row as any)?.challengeNotifyOnCertIssue ?? true),
-    challengeNotifyOnTierUp: Boolean((row as any)?.challengeNotifyOnTierUp ?? true),
-    challengeNotifyOnAdminAction: Boolean((row as any)?.challengeNotifyOnAdminAction ?? true),
-
-    challengeNotifyViaMailbox: Boolean((row as any)?.challengeNotifyViaMailbox ?? false),
-    challengeMailboxCategory: String((row as any)?.challengeMailboxCategory ?? "SYSTEM"),
-    challengeWarningThresholdPct: clamp((row as any)?.challengeWarningThresholdPct, 0.8, 0.01, 0.99),
-    challengeBreachPolicyDefault: normalizeBreachPolicy((row as any)?.challengeBreachPolicyDefault),
-    challengeSingleDayProfitBasis: normalizeSingleDayProfitBasis((row as any)?.challengeSingleDayProfitBasis),
-
-    challengeLeaderboardEnabled: Boolean((row as any)?.challengeLeaderboardEnabled ?? true),
-    challengeLeaderboardRefreshSec: Math.max(
-      10,
-      Math.trunc(clamp((row as any)?.challengeLeaderboardRefreshSec, 60, 10, 24 * 3600)),
-    ),
-    challengeLeaderboardSnapshotIntervalSec: Math.max(
-      10,
-      Math.trunc(clamp((row as any)?.challengeLeaderboardSnapshotIntervalSec, 60, 10, 24 * 3600)),
-    ),
-    challengeLeaderboardRankingMetric: normalizeLeaderboardRankingMetric((row as any)?.challengeLeaderboardRankingMetric),
-    challengePrizeAwardTimingDefault: normalizePrizeAwardTiming((row as any)?.challengePrizeAwardTimingDefault),
-    challengePrizeCandidatesDefault: normalizePrizeCandidates((row as any)?.challengePrizeCandidatesDefault),
-    challengeNewsBlackoutWindowsJson: String((row as any)?.challengeNewsBlackoutWindowsJson ?? "[]"),
-    challengeWeekendCutoffHours: Math.max(
-      0,
-      Math.trunc(clamp((row as any)?.challengeWeekendCutoffHours, 6, 0, 72)),
-    ),
-    challengeForceCloseBeforeWeekend: Boolean((row as any)?.challengeForceCloseBeforeWeekend ?? false),
-    challengeLeverageMultiplierDefault: Math.max(
-      0.01,
-      clamp((row as any)?.challengeLeverageMultiplierDefault, 1, 0.01, 100),
-    ),
-    challengeMaxActiveEnrollmentsUser: Math.max(
-      1,
-      Math.trunc(clamp((row as any)?.challengeMaxActiveEnrollmentsUser, 5, 1, 1000)),
-    ),
-    challengeMaxActiveEnrollmentsPerChallenge: Math.max(
-      1,
-      Math.trunc(clamp((row as any)?.challengeMaxActiveEnrollmentsPerChallenge, 1, 1, 1000)),
-    ),
-    challengeCooldownHoursAfterFail: Math.max(
-      0,
-      Math.trunc(clamp((row as any)?.challengeCooldownHoursAfterFail, 24, 0, 24 * 365)),
-    ),
-    challengeCooldownHoursAfterWithdraw: Math.max(
-      0,
-      Math.trunc(clamp((row as any)?.challengeCooldownHoursAfterWithdraw, 12, 0, 24 * 365)),
-    ),
-    challengeCertificateDefaultTemplateId:
-      Number((row as any)?.challengeCertificateDefaultTemplateId ?? 0) > 0
-        ? Math.trunc(Number((row as any)?.challengeCertificateDefaultTemplateId))
-        : null,
-    challengeCertificateIncludeMetricsDefault: Boolean(
-      (row as any)?.challengeCertificateIncludeMetricsDefault ?? true,
-    ),
-    challengeCertificateIncludeQrDefault: Boolean((row as any)?.challengeCertificateIncludeQrDefault ?? true),
-    challengeCertificateVerificationKeyId: String((row as any)?.challengeCertificateVerificationKeyId ?? "v1"),
-    challengeEvaluationIntervalSec: Math.max(
-      60,
-      Math.trunc(clamp((row as any)?.challengeEvaluationIntervalSec, 3600, 60, 24 * 3600)),
-    ),
-    challengeAuditStrictMode: Boolean((row as any)?.challengeAuditStrictMode ?? true),
-    challengeAnomalyDetectionEnabled: Boolean((row as any)?.challengeAnomalyDetectionEnabled ?? true),
-    challengeManualReviewEnabled: Boolean((row as any)?.challengeManualReviewEnabled ?? false),
-    challengeManualReviewSuspiciousThreshold: Math.max(
-      1,
-      Math.trunc(clamp((row as any)?.challengeManualReviewSuspiciousThreshold, 3, 1, 100)),
-    ),
-    challengeEvalEnabled: Boolean((row as any)?.challengeEvalEnabled ?? true),
-    challengeEvalIntervalMin: Math.max(1, Math.trunc(clamp((row as any)?.challengeEvalIntervalMin, 60, 1, 24 * 60))),
-    challengeEvalMaxRows: Math.max(1, Math.trunc(clamp((row as any)?.challengeEvalMaxRows, 500, 1, 5000))),
-  };
+  const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+  const value = buildSystemChallengeConfig(row);
 
   cache = { at: now, value };
   return value;
+}
+
+export function buildSystemChallengeConfig(source: SystemChallengeConfigSource): SystemChallengeConfig {
+  const row = source as any;
+  const challengeEval = resolveChallengeEvalInterval({
+    challengeEvalIntervalMin: row?.challengeEvalIntervalMin,
+    challengeEvaluationIntervalSec: row?.challengeEvaluationIntervalSec,
+  });
+
+  return {
+    traderCompeteEnabled: Boolean(row?.traderCompeteEnabled ?? false),
+    challengeAutoAdvancePhase: Boolean(row?.challengeAutoAdvancePhase ?? true),
+    challengeDefaultDrawdownType: normalizeDrawdownType(row?.challengeDefaultDrawdownType),
+    challengeDefaultCapitalMode: normalizeCapitalMode(row?.challengeDefaultCapitalMode),
+    challengeDefaultMaxRetries: Math.max(0, Math.trunc(clamp(row?.challengeDefaultMaxRetries, 3, 0, 100))),
+    challengeDefaultRetryCooldownHours: Math.max(
+      0,
+      Math.trunc(clamp(row?.challengeDefaultRetryCooldownHours, 24, 0, 24 * 365)),
+    ),
+    challengeDefaultEligibility: safeJson(row?.challengeDefaultEligibility, "EMAIL_VERIFIED"),
+    challengeDefaultCategory: String(row?.challengeDefaultCategory ?? "STANDARD"),
+    challengeDefaultTier: String(row?.challengeDefaultTier ?? "STARTER"),
+    challengeRewardsEnabled: Boolean(row?.challengeRewardsEnabled ?? true),
+    challengePrizePoolsEnabled: Boolean(row?.challengePrizePoolsEnabled ?? true),
+    challengeBadgesEnabled: Boolean(row?.challengeBadgesEnabled ?? true),
+    challengeCertificatesEnabled: Boolean(row?.challengeCertificatesEnabled ?? true),
+    challengeCertificatesDownloadable: Boolean(row?.challengeCertificatesDownloadable ?? true),
+    challengeCertificatesShareable: Boolean(row?.challengeCertificatesShareable ?? true),
+    challengeSelectionBoostEnabled: Boolean(row?.challengeSelectionBoostEnabled ?? true),
+    challengeDefaultSelectionBoost: Number(row?.challengeDefaultSelectionBoost ?? 0),
+    challengeProgressionEnabled: Boolean(row?.challengeProgressionEnabled ?? true),
+    challengeCustomRewardsEnabled: Boolean(row?.challengeCustomRewardsEnabled ?? false),
+
+    challengeNotifyOnEnroll: Boolean(row?.challengeNotifyOnEnroll ?? true),
+    challengeNotifyOnPhaseWarning: Boolean(row?.challengeNotifyOnPhaseWarning ?? true),
+    challengeNotifyOnBreach: Boolean(row?.challengeNotifyOnBreach ?? true),
+    challengeNotifyOnPhasePass: Boolean(row?.challengeNotifyOnPhasePass ?? true),
+    challengeNotifyOnFail: Boolean(row?.challengeNotifyOnFail ?? true),
+    challengeNotifyOnComplete: Boolean(row?.challengeNotifyOnComplete ?? true),
+    challengeNotifyOnBadgeAward: Boolean(row?.challengeNotifyOnBadgeAward ?? true),
+    challengeNotifyOnPrizeAward: Boolean(row?.challengeNotifyOnPrizeAward ?? true),
+    challengeNotifyOnCertIssue: Boolean(row?.challengeNotifyOnCertIssue ?? true),
+    challengeNotifyOnTierUp: Boolean(row?.challengeNotifyOnTierUp ?? true),
+    challengeNotifyOnAdminAction: Boolean(row?.challengeNotifyOnAdminAction ?? true),
+
+    challengeNotifyViaMailbox: Boolean(row?.challengeNotifyViaMailbox ?? false),
+    challengeMailboxCategory: String(row?.challengeMailboxCategory ?? "SYSTEM"),
+    challengeWarningThresholdPct: clamp(row?.challengeWarningThresholdPct, 0.8, 0.01, 0.99),
+    challengeBreachPolicyDefault: normalizeBreachPolicy(row?.challengeBreachPolicyDefault),
+    challengeSingleDayProfitBasis: normalizeSingleDayProfitBasis(row?.challengeSingleDayProfitBasis),
+
+    challengeLeaderboardEnabled: Boolean(row?.challengeLeaderboardEnabled ?? true),
+    challengeLeaderboardRefreshSec: Math.max(
+      10,
+      Math.trunc(clamp(row?.challengeLeaderboardRefreshSec, 60, 10, 24 * 3600)),
+    ),
+    challengeLeaderboardSnapshotIntervalSec: Math.max(
+      10,
+      Math.trunc(clamp(row?.challengeLeaderboardSnapshotIntervalSec, 60, 10, 24 * 3600)),
+    ),
+    challengeLeaderboardRankingMetric: normalizeLeaderboardRankingMetric(row?.challengeLeaderboardRankingMetric),
+    challengePrizeAwardTimingDefault: normalizePrizeAwardTiming(row?.challengePrizeAwardTimingDefault),
+    challengePrizeCandidatesDefault: normalizePrizeCandidates(row?.challengePrizeCandidatesDefault),
+    challengeNewsBlackoutWindowsJson: String(row?.challengeNewsBlackoutWindowsJson ?? "[]"),
+    challengeWeekendCutoffHours: Math.max(
+      0,
+      Math.trunc(clamp(row?.challengeWeekendCutoffHours, 6, 0, 72)),
+    ),
+    challengeForceCloseBeforeWeekend: Boolean(row?.challengeForceCloseBeforeWeekend ?? false),
+    challengeLeverageMultiplierDefault: Math.max(
+      0.01,
+      clamp(row?.challengeLeverageMultiplierDefault, 1, 0.01, 100),
+    ),
+    challengeMaxActiveEnrollmentsUser: Math.max(
+      1,
+      Math.trunc(clamp(row?.challengeMaxActiveEnrollmentsUser, 5, 1, 1000)),
+    ),
+    challengeMaxActiveEnrollmentsPerChallenge: Math.max(
+      1,
+      Math.trunc(clamp(row?.challengeMaxActiveEnrollmentsPerChallenge, 1, 1, 1000)),
+    ),
+    challengeCooldownHoursAfterFail: Math.max(
+      0,
+      Math.trunc(clamp(row?.challengeCooldownHoursAfterFail, 24, 0, 24 * 365)),
+    ),
+    challengeCooldownHoursAfterWithdraw: Math.max(
+      0,
+      Math.trunc(clamp(row?.challengeCooldownHoursAfterWithdraw, 12, 0, 24 * 365)),
+    ),
+    challengeCertificateDefaultTemplateId:
+      Number(row?.challengeCertificateDefaultTemplateId ?? 0) > 0
+        ? Math.trunc(Number(row?.challengeCertificateDefaultTemplateId))
+        : null,
+    challengeCertificateIncludeMetricsDefault: Boolean(
+      row?.challengeCertificateIncludeMetricsDefault ?? true,
+    ),
+    challengeCertificateIncludeQrDefault: Boolean(row?.challengeCertificateIncludeQrDefault ?? true),
+    challengeCertificateVerificationKeyId: String(row?.challengeCertificateVerificationKeyId ?? "v1"),
+    challengeEvaluationIntervalSec: challengeEval.intervalSec,
+    challengeAuditStrictMode: Boolean(row?.challengeAuditStrictMode ?? true),
+    challengeAnomalyDetectionEnabled: Boolean(row?.challengeAnomalyDetectionEnabled ?? true),
+    challengeManualReviewEnabled: Boolean(row?.challengeManualReviewEnabled ?? false),
+    challengeManualReviewSuspiciousThreshold: Math.max(
+      1,
+      Math.trunc(clamp(row?.challengeManualReviewSuspiciousThreshold, 3, 1, 100)),
+    ),
+    challengeEvalEnabled: Boolean(row?.challengeEvalEnabled ?? true),
+    challengeEvalIntervalMin: challengeEval.intervalMin,
+    challengeEvalMaxRows: Math.max(1, Math.trunc(clamp(row?.challengeEvalMaxRows, 500, 1, 5000))),
+  };
+}
+
+export function buildChallengeSchedulerRuntimeConfig(source: SystemChallengeConfigSource) {
+  const cfg = buildSystemChallengeConfig(source);
+  return {
+    enabled: Boolean(cfg.challengeEvalEnabled),
+    intervalMin: cfg.challengeEvalIntervalMin,
+    intervalSec: cfg.challengeEvaluationIntervalSec,
+    maxRows: cfg.challengeEvalMaxRows,
+  };
 }

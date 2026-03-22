@@ -10,6 +10,9 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 
 type AnyRow = Record<string, any>;
 
@@ -84,6 +87,12 @@ function extractErrorMessage(error: unknown): string | null {
 export default function ChallengesCompetePanel({ competeEnabled }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
   const [view, setView] = useState("browse");
   const [selectedChallengeId, setSelectedChallengeId] = useState<number | null>(null);
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<number | null>(null);
@@ -93,7 +102,7 @@ export default function ChallengesCompetePanel({ competeEnabled }: Props) {
     queryKey: ["/api/trader/challenges"],
     queryFn: () => axios.get("/api/trader/challenges").then((r) => r.data),
     enabled: competeEnabled,
-    refetchInterval: 30000,
+    refetchInterval: runtimeIntervals.admin.standardPollMs,
     refetchOnWindowFocus: false,
   });
 

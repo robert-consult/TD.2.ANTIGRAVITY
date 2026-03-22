@@ -108,6 +108,8 @@ export async function login(page: Page, email: string, password: string) {
   const emailInput = page.getByPlaceholder("email@example.com");
   const passwordInput = page.getByPlaceholder("********");
   const openPlatform = page.getByRole("button", { name: "Open Platform" });
+  const legalPromptVisible = async () =>
+    page.getByText("Updated Terms & Conditions").isVisible().catch(() => false);
 
   const waitForLoginForm = async (timeoutMs: number) => {
     await page.evaluate(() => {
@@ -125,7 +127,7 @@ export async function login(page: Page, email: string, password: string) {
     await expect(passwordInput).toBeVisible({ timeout: Math.min(timeoutMs, 20_000) });
   };
 
-  await page.goto("/login");
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
   try {
     await waitForLoginForm(20_000);
   } catch {
@@ -143,6 +145,7 @@ export async function login(page: Page, email: string, password: string) {
     .not.toBe("/login");
 
   const isReadyAfterLogin = async () => {
+    if (await legalPromptVisible()) return true;
     const tradeButtonVisible = await page
       .getByRole("button", { name: "Trade" })
       .first()

@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { tierFlushIntervalMs, tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
 import { secureGet } from "@/lib/secureCache";
 import { useAuth } from "@/hooks/use-auth";
 import { usePerformanceSettings } from "@/hooks/use-performance-settings";
@@ -120,12 +121,12 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
   const { isConnected: isWsConnected, sendMessage, subscribe } = useLiveUpdates();
   const perfHints = usePerfHints();
   const performanceSettings = usePerformanceSettings();
-  const quoteFlushMs = tierFlushIntervalMs(perfHints, performanceSettings);
-  const quotePollIntervalMs = tierPollIntervalMs(
-    performanceSettings.restFallbackPollMs,
-    perfHints,
-    performanceSettings,
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
   );
+  const quoteFlushMs = runtimeIntervals.quotes.flushMs;
+  const quotePollIntervalMs = runtimeIntervals.quotes.restFallbackPollMs;
   const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);
 
   useEffect(() => {
@@ -208,7 +209,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: false,
     staleTime: Infinity,
     // Keep permissions fresh even if an upstream WS event is missed.
-    refetchInterval: isWsConnected ? 10_000 : 20_000,
+    refetchInterval: runtimeIntervals.quotes.permissionsRefreshMs,
   });
 
   const symbols = symbolsData?.symbols ?? EMPTY_SYMBOLS;

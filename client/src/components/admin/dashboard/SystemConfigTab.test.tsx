@@ -83,6 +83,9 @@ vi.mock("@/components/admin/MarketDataProvidersCard", () => ({
 vi.mock("@/components/admin/dashboard/MigrationTab", () => ({
   MigrationTab: () => <div data-testid="migration-tab" />,
 }));
+vi.mock("@/components/admin/dashboard/GovernanceVisibilityTab", () => ({
+  GovernanceVisibilityTab: () => <div data-testid="governance-visibility-tab" />,
+}));
 
 vi.mock("@/components/admin/dashboard/SystemHealthPanel", () => ({
   SystemHealthPanel: (props: {
@@ -176,7 +179,13 @@ function createSystemConfig() {
     fxRolloverTz: "UTC",
     fxRolloverTime: "17:00",
     signupCaptchaEnforce: true,
-    captchaProvider: "cloudflare-turnstile",
+    captchaProvider: "TURNSTILE",
+    captchaEffectiveProvider: "SLIDER",
+    captchaFallbackUsed: true,
+    captchaFallbackReason: "TURNSTILE secret is not configured; runtime falls back to SLIDER.",
+    captchaTurnstileSecretConfigured: false,
+    captchaHcaptchaSecretConfigured: false,
+    captchaSelectedProviderSecretConfigured: false,
     signupPhoneEnforce: false,
     legalCoverageEnforce: true,
     jurisdictionRestrictedIso2Csv: "",
@@ -268,6 +277,36 @@ function setQueryState(globalPerformanceData: Record<string, unknown>) {
   const i18nConfig = createI18nConfig();
   const providersData = createProvidersData();
   const healthData = createHealthData();
+  const effectiveQuoteTransport = {
+    configured: {
+      feedPollMs: systemConfig.feedPollMs,
+      staleThresholdMs: systemConfig.staleThresholdMs,
+      fxRolloverTz: systemConfig.fxRolloverTz,
+      fxRolloverTime: systemConfig.fxRolloverTime,
+    },
+    applied: {
+      feedPollMs: systemConfig.feedPollMs,
+      staleThresholdMs: systemConfig.staleThresholdMs,
+      fxRolloverTz: systemConfig.fxRolloverTz,
+      fxRolloverTime: systemConfig.fxRolloverTime,
+      lastReloadedAt: systemConfig.updatedAt,
+    },
+    reloadStatus: {
+      domain: "quotes.transport.feed",
+      requestedVersion: 1,
+      requestedAt: systemConfig.updatedAt,
+      requestedBy: "admin@local.test",
+      requiredScope: "reload",
+      changedKeys: [],
+      status: "applied",
+      acknowledgements: [],
+      lastAppliedVersion: 1,
+      lastAppliedAt: systemConfig.updatedAt,
+      lastError: null,
+      effectiveState: null,
+      updatedAt: systemConfig.updatedAt,
+    },
+  };
   const refetchHealth = vi.fn();
 
   useQueryMock.mockImplementation((args: any) => {
@@ -278,11 +317,17 @@ function setQueryState(globalPerformanceData: Record<string, unknown>) {
     if (key === "/api/admin/global-settings") {
       return { data: globalPerformanceData, isFetchedAfterMount: true };
     }
+    if (key === "/api/global-settings") {
+      return { data: globalPerformanceData };
+    }
     if (key === "/api/admin/i18n/config") {
       return { data: i18nConfig, isLoading: false };
     }
     if (key === "/api/admin/market-data/providers") {
       return { data: providersData };
+    }
+    if (key === "/api/admin/runtime-config/effective/quote-transport") {
+      return { data: effectiveQuoteTransport };
     }
     if (key === "/api/admin/system-health") {
       return { data: healthData, refetch: refetchHealth };
@@ -446,5 +491,19 @@ describe("SystemConfigTab", () => {
         description: "Quotes: 1",
       }),
     );
+  });
+
+  it("renders the governance tab shell when selected", () => {
+    setQueryState({
+      updatedAt: 42,
+      performanceSettings: {
+        ...DEFAULT_MARKET_PERFORMANCE_SETTINGS,
+      },
+    });
+
+    renderSystemConfigTab();
+    fireEvent.click(screen.getByRole("button", { name: "Governance" }));
+
+    expect(screen.getByTestId("governance-visibility-tab")).toBeInTheDocument();
   });
 });

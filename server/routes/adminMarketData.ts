@@ -5,12 +5,14 @@ import { instrumentReference, marketDataProviders, pipCategoryDefaults, symbolCo
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { MarketDataProviderConfigSchema } from "@shared/marketDataProviders";
-import { activateProvider, getProviderByKey } from "../marketdata/providerManager";
+import { activateProvider, getProviderByKey, invalidateActiveProviderCache } from "../marketdata/providerManager";
 import { buildProviderFromConfig } from "../marketdata/providerRegistry";
 import { publishLiveEvent } from "../services/liveBus";
+import { requestControlledReload } from "../services/controlledReload";
 import { resolveSecretRef } from "../marketdata/secret";
 import { loadProviderConfigsFromDir, syncProviderConfigsFromDirToDb, type ProviderConfigFilesSyncMode } from "../marketdata/providerConfigFiles";
 import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
+import { resolveEffectiveProviderSelection } from "../services/runtimeConfig/marketDataProviders";
 
 export const adminMarketDataRouter = Router();
 adminMarketDataRouter.use(requireAdmin);
@@ -47,6 +49,37 @@ function allowProviderReload(userId: number): boolean {
   kept.push(now);
   providerReloadCallsByUserId.set(userId, kept);
   return true;
+}
+
+async function requestProvidersControlledReload(params: {
+  changedKeys: string[];
+  updatedBy: string | null;
+  action: string;
+  providerKey?: string | null;
+}) {
+  const reloadStatus = await requestControlledReload({
+    domain: "quotes.providers",
+    requestedBy: params.updatedBy ?? "admin",
+    requiredScope: "reload",
+    changedKeys: params.changedKeys,
+  });
+
+  invalidateActiveProviderCache();
+  publishLiveEvent({
+    type: "market-data:providers-updated",
+    payload: {
+      domain: "quotes.providers",
+      version: reloadStatus.requestedVersion,
+      updatedAt: nowSec(),
+      updatedBy: params.updatedBy ?? "admin",
+      changedKeys: params.changedKeys,
+      requiredScope: reloadStatus.requiredScope,
+      action: params.action,
+      providerKey: params.providerKey ?? null,
+    },
+  });
+
+  return reloadStatus;
 }
 
 function normalizeProviderKey(raw: unknown): string | null {
@@ -249,6 +282,18 @@ adminMarketDataRouter.get("/providers", async (_req, res) => {
   }
 });
 
+adminMarketDataRouter.get("/providers/effective", async (_req, res) => {
+  try {
+    const effective = await resolveEffectiveProviderSelection();
+    res.json({
+      ok: true,
+      ...effective,
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: String(e?.message ?? e) });
+  }
+});
+
 adminMarketDataRouter.get("/providers/:providerKey/export", async (req, res) => {
   try {
     const providerKey = normalizeProviderKey(req.params.providerKey);
@@ -316,25 +361,33 @@ adminMarketDataRouter.post("/providers/reload-files", async (req, res) => {
 
     const modeRaw = String(req.body?.mode ?? "").trim();
     const mode: ProviderConfigFilesSyncMode = modeRaw === "upsert" ? "upsert" : "create_missing";
+    const adminEmail = String((req.session as any)?.email || "").trim() || null;
 
     const synced = await syncProviderConfigsFromDirToDb({ mode, strictDir: true });
     const changed = synced.createdKeys.length + synced.updatedKeys.length;
+    let reloadStatus = null;
 
     if (changed > 0) {
-      try {
-        publishLiveEvent({
-          type: "market-data:providers-updated",
-          payload: { action: "reloaded-files", mode, created: synced.createdKeys.length, updated: synced.updatedKeys.length, at: Date.now() },
-        });
-      } catch {
-        // ignore
-      }
+      reloadStatus = await requestProvidersControlledReload({
+        changedKeys: ["providerConfigFiles"],
+        updatedBy: adminEmail,
+        action: `reloaded-files:${mode}`,
+      });
     }
 
     res.json({
       ok: synced.errors.length === 0,
       ...synced,
       dir: String(process.env.MARKET_DATA_PROVIDER_CONFIG_DIR ?? "config/marketdata/providers"),
+      controlledReload:
+        reloadStatus
+          ? {
+              domain: "quotes.providers",
+              acceptedVersion: reloadStatus.requestedVersion,
+              requiredScope: reloadStatus.requiredScope,
+              reloadStatus,
+            }
+          : null,
     });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message ?? e) });
@@ -409,6 +462,7 @@ adminMarketDataRouter.post("/providers", async (req, res) => {
     }
 
     const now = nowSec();
+    const adminEmail = String((req.session as any)?.email || "").trim() || null;
     const [row] = await db
       .insert(marketDataProviders)
       .values({
@@ -423,13 +477,23 @@ adminMarketDataRouter.post("/providers", async (req, res) => {
       } as any)
       .returning();
 
-    try {
-      publishLiveEvent({ type: "market-data:providers-updated", payload: { action: "created", providerKey, at: Date.now() } });
-    } catch {
-      // ignore
-    }
+    const reloadStatus = await requestProvidersControlledReload({
+      changedKeys: ["providerConfig", providerKey],
+      updatedBy: adminEmail,
+      action: "created",
+      providerKey,
+    });
 
-    res.json({ ok: true, row });
+    res.json({
+      ok: true,
+      row,
+      controlledReload: {
+        domain: "quotes.providers",
+        acceptedVersion: reloadStatus.requestedVersion,
+        requiredScope: reloadStatus.requiredScope,
+        reloadStatus,
+      },
+    });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message ?? e) });
   }
@@ -444,6 +508,7 @@ adminMarketDataRouter.put("/providers/:providerKey", async (req, res) => {
       where: and(eq(marketDataProviders.providerKey, providerKey), isNull(marketDataProviders.deletedAt)),
     });
     if (!existing) return res.status(404).json({ ok: false, error: "Provider not found" });
+    const currentEffective = await resolveEffectiveProviderSelection();
 
     const patch: any = {};
     if (typeof req.body?.displayName === "string" && req.body.displayName.trim()) patch.displayName = req.body.displayName.trim();
@@ -464,22 +529,42 @@ adminMarketDataRouter.put("/providers/:providerKey", async (req, res) => {
     patch.configJson = JSON.stringify(parsed);
     patch.updatedAt = nowSec();
 
+    if (patch.isEnabled === false && currentEffective.effectiveProviderKey === providerKey) {
+      const nextEffective = await resolveEffectiveProviderSelection({
+        excludedProviderKeys: [providerKey],
+      });
+      if (!nextEffective.effectiveProviderKey) {
+        return res.status(400).json({
+          ok: false,
+          error: "Cannot disable the effective provider without another usable provider configured",
+        });
+      }
+    }
+
     const [updated] = await db
       .update(marketDataProviders)
       .set(patch)
       .where(eq(marketDataProviders.providerKey, providerKey))
       .returning();
 
-    try {
-      publishLiveEvent({
-        type: "market-data:providers-updated",
-        payload: { action: "updated", providerKey, at: Date.now() },
-      });
-    } catch {
-      // ignore
-    }
+    const adminEmail = String((req.session as any)?.email || "").trim() || null;
+    const reloadStatus = await requestProvidersControlledReload({
+      changedKeys: ["providerConfig", providerKey],
+      updatedBy: adminEmail,
+      action: patch.isEnabled === false ? "disabled" : "updated",
+      providerKey,
+    });
 
-    res.json({ ok: true, row: updated });
+    res.json({
+      ok: true,
+      row: updated,
+      controlledReload: {
+        domain: "quotes.providers",
+        acceptedVersion: reloadStatus.requestedVersion,
+        requiredScope: reloadStatus.requiredScope,
+        reloadStatus,
+      },
+    });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message ?? e) });
   }
@@ -495,9 +580,17 @@ adminMarketDataRouter.delete("/providers/:providerKey", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Built-in providers cannot be deleted" });
     }
 
-    const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-    if (cfg?.marketDataActiveProviderKey && String(cfg.marketDataActiveProviderKey) === providerKey) {
-      return res.status(400).json({ ok: false, error: "Cannot delete the active provider" });
+    const currentEffective = await resolveEffectiveProviderSelection();
+    if (currentEffective.effectiveProviderKey === providerKey) {
+      const nextEffective = await resolveEffectiveProviderSelection({
+        excludedProviderKeys: [providerKey],
+      });
+      if (!nextEffective.effectiveProviderKey) {
+        return res.status(400).json({
+          ok: false,
+          error: "Cannot delete the effective provider without another usable provider configured",
+        });
+      }
     }
 
     const now = nowSec();
@@ -506,16 +599,23 @@ adminMarketDataRouter.delete("/providers/:providerKey", async (req, res) => {
       .set({ isEnabled: false, deletedAt: now, updatedAt: now })
       .where(eq(marketDataProviders.providerKey, providerKey));
 
-    try {
-      publishLiveEvent({
-        type: "market-data:providers-updated",
-        payload: { action: "deleted", providerKey, at: Date.now() },
-      });
-    } catch {
-      // ignore
-    }
+    const adminEmail = String((req.session as any)?.email || "").trim() || null;
+    const reloadStatus = await requestProvidersControlledReload({
+      changedKeys: ["providerConfig", providerKey],
+      updatedBy: adminEmail,
+      action: "deleted",
+      providerKey,
+    });
 
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      controlledReload: {
+        domain: "quotes.providers",
+        acceptedVersion: reloadStatus.requestedVersion,
+        requiredScope: reloadStatus.requiredScope,
+        reloadStatus,
+      },
+    });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message ?? e) });
   }
@@ -528,7 +628,21 @@ adminMarketDataRouter.post("/providers/:providerKey/activate", async (req, res) 
 
     const adminEmail = String((req.session as any)?.email || "").trim() || null;
     await activateProvider(providerKey, { adminEmail });
-    res.json({ ok: true });
+    const reloadStatus = await requestProvidersControlledReload({
+      changedKeys: ["marketDataActiveProviderKey", providerKey],
+      updatedBy: adminEmail,
+      action: "activated",
+      providerKey,
+    });
+    res.json({
+      ok: true,
+      controlledReload: {
+        domain: "quotes.providers",
+        acceptedVersion: reloadStatus.requestedVersion,
+        requiredScope: reloadStatus.requiredScope,
+        reloadStatus,
+      },
+    });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message ?? e) });
   }

@@ -42,6 +42,7 @@ import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { decidePolicy, featureGates } from "@shared/policyDecision";
 import { promotePerformerIfEligible } from "../policy/performerPromotion";
 import { defaultPaymentCurrencyForCountry } from "../utils/paymentCurrency";
+import { buildServerVerifyEmailUrl } from "../services/appLinks";
 
 interface ProfileCoreDeps {
   ensureAuth: (req: Request, res: Response, next: NextFunction) => Promise<void> | void;
@@ -213,7 +214,7 @@ app.post("/api/profile/update", ensureAuth, async (req: Request, res: Response) 
       let emailSent = false;
 
       if (resendApiKey) {
-        const verifyUrl = `${process.env.APP_URL || "http://localhost:5000"}/api/verification/email/verify?token=${token}`;
+        const verifyUrl = buildServerVerifyEmailUrl(token);
 
         try {
           const emailResponse = await fetch("https://api.resend.com/emails", {

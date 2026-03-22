@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { normalizeAppPathCandidate as resolveWrapperAppPathCandidate } from "@shared/appLinks";
 import { useAuth } from "@/hooks/use-auth";
 import { navigateToAppPath } from "@/lib/appNavigation";
 import type { DashboardTab } from "@/lib/dashboardUrlState";
@@ -19,37 +20,6 @@ import type {
   PushNotificationData,
 } from "../../../MOBILE/src/mobile/utils";
 
-const CANONICAL_WEB_HOST = "tradehub.example.com";
-const CANONICAL_SCHEME_PREFIX = "tradequip:";
-
-function normalizeAppPathCandidate(value: unknown): string | null {
-  const raw = String(value ?? "").trim();
-  if (!raw) return null;
-
-  if (raw.startsWith("?")) {
-    return parseDeepLink(`https://${CANONICAL_WEB_HOST}/${raw}`)?.appPath ?? null;
-  }
-
-  if (raw.startsWith("/")) {
-    return parseDeepLink(`https://${CANONICAL_WEB_HOST}${raw}`)?.appPath ?? null;
-  }
-
-  if (raw.startsWith(CANONICAL_SCHEME_PREFIX)) {
-    return parseDeepLink(raw)?.appPath ?? null;
-  }
-
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol === "https:" && parsed.host === CANONICAL_WEB_HOST) {
-      return parseDeepLink(parsed.toString())?.appPath ?? `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
 function resolveNotificationTarget(notification: PushNotificationData): string | null {
   const data = notification.data ?? {};
   const directCandidates = [
@@ -62,7 +32,7 @@ function resolveNotificationTarget(notification: PushNotificationData): string |
   ];
 
   for (const candidate of directCandidates) {
-    const normalized = normalizeAppPathCandidate(candidate);
+    const normalized = resolveWrapperAppPathCandidate(String(candidate ?? ""));
     if (normalized) {
       return normalized;
     }

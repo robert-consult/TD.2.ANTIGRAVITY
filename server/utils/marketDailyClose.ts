@@ -8,18 +8,30 @@ export type MarketDailyCloseConfig = {
   rolloverTime: string; // HH:MM
 };
 
+let ensurePromise: Promise<void> | null = null;
+
 export async function ensureMarketDailyCloseTable() {
-  await dbClient.query(`
-    CREATE TABLE IF NOT EXISTS ${MARKET_DAILY_CLOSE_TABLE} (
-      symbol TEXT NOT NULL,
-      session_day TEXT NOT NULL,
-      close REAL NOT NULL,
-      close_ts_ms BIGINT NOT NULL,
-      updated_at INTEGER NOT NULL DEFAULT (extract(epoch from now())),
-      PRIMARY KEY (symbol, session_day)
-    );
-  `);
-  await dbClient.query(`CREATE INDEX IF NOT EXISTS idx_mdc_symbol_day ON ${MARKET_DAILY_CLOSE_TABLE}(symbol, session_day);`);
+  if (!ensurePromise) {
+    ensurePromise = (async () => {
+      await dbClient.query(`
+        CREATE TABLE IF NOT EXISTS ${MARKET_DAILY_CLOSE_TABLE} (
+          symbol TEXT NOT NULL,
+          session_day TEXT NOT NULL,
+          close REAL NOT NULL,
+          close_ts_ms BIGINT NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (extract(epoch from now())),
+          PRIMARY KEY (symbol, session_day)
+        );
+      `);
+      await dbClient.query(`CREATE INDEX IF NOT EXISTS idx_mdc_symbol_day ON ${MARKET_DAILY_CLOSE_TABLE}(symbol, session_day);`);
+    })();
+  }
+  try {
+    await ensurePromise;
+  } catch (err) {
+    ensurePromise = null;
+    throw err;
+  }
 }
 
 export function computeSessionDayForQuote(tsMs: number, cfg?: Partial<MarketDailyCloseConfig>) {

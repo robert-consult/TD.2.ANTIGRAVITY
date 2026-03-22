@@ -4,7 +4,8 @@ import { useToast } from "@/hooks/use-toast";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useAuth } from "@/hooks/use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
 import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import { WS_MSG_TRADES_UPDATE, WS_MSG_TRADES_UPDATED } from "@shared/ws/protocol";
 
@@ -20,11 +21,8 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
   const enabled = options.enabled ?? true;
   const perfHints = usePerfHints();
   const performanceSettings = usePerformanceSettings();
-  const pendingOrdersPollMs = tierPollIntervalMs(
-    performanceSettings.restFallbackPollMs,
-    perfHints,
-    performanceSettings,
-  );
+  const runtimeIntervals = resolveRuntimeIntervals(perfHints, performanceSettings);
+  const pendingOrdersPollMs = runtimeIntervals.pendingOrders.restFallbackPollMs;
   const { isConnected: isWsConnected, subscribe } = useLiveUpdates();
   const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);
 

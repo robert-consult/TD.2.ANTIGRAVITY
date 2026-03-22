@@ -3,7 +3,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { db } from "@db";
 import { systemConfig } from "@shared/schema";
 import { sha256 } from "../legal/cryptoUtils";
-import { resolveCaptchaProvider } from "../security/captcha";
+import { resolveCaptchaRuntimeConfig } from "../security/captcha";
 
 export async function getSignupPublicConfig() {
   const [row] = await db
@@ -24,14 +24,15 @@ export async function getSignupPublicConfig() {
   const waitlistPolicyVersion = String((row as any)?.signupWaitlistPolicyVersion ?? "1");
   const waitlistPolicySha256 = sha256(waitlistPolicyContent);
 
-  const enforceSignupCaptcha = Boolean(row?.signupCaptchaEnforce ?? true);
-  const selectedCaptchaProvider = String(row?.captchaProvider ?? "SLIDER").toUpperCase() as any;
-  const captchaProvider = resolveCaptchaProvider(selectedCaptchaProvider).provider;
+  const captcha = resolveCaptchaRuntimeConfig({
+    signupCaptchaEnforce: row?.signupCaptchaEnforce,
+    captchaProvider: row?.captchaProvider,
+  });
 
   return {
     captcha: {
-      enforceSignupCaptcha,
-      provider: captchaProvider,
+      enforceSignupCaptcha: captcha.enforceSignupCaptcha,
+      provider: captcha.effectiveProvider,
     },
     signupPhoneEnforce: Boolean(row?.signupPhoneEnforce ?? true),
     // Signup freeze + invite waitlist

@@ -23,24 +23,23 @@ import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomi
 import { createNotification } from "../services/messaging";
 import { computeCloseSettlementCosts } from "../services/tradeCosts";
 import { clearTradeExcursion, resolveTradeExcursionForCloseDurable } from "../trades/excursionTracking";
+import { getAutoCloseRuntimeConfig } from "../services/runtimeConfig/autoClose";
+import { invalidateGlobalSettingsCache } from "../services/globalSettings";
 
-const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
-const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "false") === "true";
+let nextRunAtMs: number | null = null;
+let lastResolvedRuntime: Awaited<ReturnType<typeof getAutoCloseRuntimeConfig>> | null = null;
 
 async function getAutoCloseSettings() {
-  const gs = await db.query.globalSettings.findFirst({
-    where: eq(globalSettings.id, 1),
-  });
-  return {
-    enableAutoClose: gs?.enableAutoClose ?? true,
-    autoCloseAfterDays: Number(gs?.autoCloseAfterDays ?? 4),
-    autoCloseCheckFrequencyMinutes: Number(gs?.autoCloseCheckFrequencyMinutes ?? 60),
-  };
+  const runtime = await getAutoCloseRuntimeConfig();
+  lastResolvedRuntime = runtime;
+  return runtime;
 }
 
 async function runAutoCloseJob() {
   try {
-    const settings = await getAutoCloseSettings();
+    const runtime = await getAutoCloseSettings();
+    const settings = runtime.policy;
+    const deployGuards = runtime.deployGuards;
 
     if (!settings.enableAutoClose) {
       log("Auto-close is disabled in global settings");
@@ -82,11 +81,11 @@ async function runAutoCloseJob() {
 
         if (q.isStale) {
           const ageMin = (Date.now() - q.quoteTs.getTime()) / 60000;
-          if (ageMin <= STALE_DEFER_MAX_MIN) {
+          if (ageMin <= deployGuards.staleDeferMaxMinutes) {
             log(`Auto-close deferred (stale quote ${ageMin.toFixed(1)}m): trade=${trade.id} symbol=${q.symbol}`);
             continue;
           }
-          if (!ALLOW_STALE_CLOSE) {
+          if (!deployGuards.allowStaleClose) {
             log(`Auto-close deferred (stale quote beyond max, stale-close disabled): trade=${trade.id} symbol=${q.symbol}`);
             continue;
           }
@@ -321,7 +320,8 @@ export async function scheduleAutoClose() {
     return;
   }
 
-  const settings = await getAutoCloseSettings();
+  const runtime = await getAutoCloseSettings();
+  const settings = runtime.policy;
   const intervalMs = settings.autoCloseCheckFrequencyMinutes * 60 * 1000;
 
   if (currentIntervalId) {
@@ -330,6 +330,7 @@ export async function scheduleAutoClose() {
 
   log(`Auto-close scheduled to run every ${settings.autoCloseCheckFrequencyMinutes} minutes`);
   currentIntervalId = setInterval(runAutoCloseJob, intervalMs);
+  nextRunAtMs = Date.now() + intervalMs;
 }
 
 export async function startAutoCloseScheduler(): Promise<void> {
@@ -343,6 +344,9 @@ export async function startAutoCloseScheduler(): Promise<void> {
       unsubscribeLiveBus = onLiveEvent((event) => {
         if (!event || typeof event !== "object") return;
         if (event.type === "autoclose:reschedule" || event.type === "global-settings:updated") {
+          if (event.type === "global-settings:updated") {
+            invalidateGlobalSettingsCache();
+          }
           void scheduleAutoClose();
         }
       });
@@ -356,4 +360,12 @@ export async function startAutoCloseScheduler(): Promise<void> {
   });
 
   return startPromise;
+}
+
+export function getAutoCloseSchedulerState() {
+  return {
+    started,
+    nextRunAtMs,
+    runtime: lastResolvedRuntime,
+  };
 }

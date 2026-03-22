@@ -16,6 +16,9 @@ vi.mock("@/lib/wsUrl", () => ({
 
 vi.mock("@/lib/perfHints", () => ({
   usePerfHints: vi.fn(() => ({ tier: "CONSTRAINED" })),
+  resolvePerformanceSettings: vi.fn((settings) => settings),
+  tierPollIntervalMs: vi.fn((baseMs) => baseMs),
+  tierFlushIntervalMs: vi.fn(() => 50),
   wsReconnectBaseDelayMs: vi.fn(() => 3000),
   wsReconnectAttempts: vi.fn(() => 30),
 }));

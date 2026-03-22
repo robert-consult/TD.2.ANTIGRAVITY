@@ -1,4 +1,9 @@
 import { CSRF_HEADER_NAME, CSRF_TOKEN_ENDPOINT } from "@shared/security/csrf";
+import {
+  AUTH_CURRENT_USER_API_PATH,
+  AUTH_LOGOUT_API_PATH,
+  MOBILE_SESSION_POLL_INTERVAL_MS,
+} from "@shared/appSurfaceConfig";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const addListenerMock = vi.hoisted(() => vi.fn());
@@ -53,6 +58,13 @@ describe("mobile session manager", () => {
     ]);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      AUTH_CURRENT_USER_API_PATH,
+      expect.objectContaining({
+        method: "GET",
+        credentials: "include",
+      }),
+    );
     expect(first).toEqual(second);
     expect(first).toMatchObject({
       isAuthenticated: true,
@@ -87,7 +99,7 @@ describe("mobile session manager", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/auth/logout",
+      AUTH_LOGOUT_API_PATH,
       expect.objectContaining({
         method: "POST",
         credentials: "include",
@@ -136,7 +148,7 @@ describe("mobile session manager", () => {
       }),
     );
 
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(MOBILE_SESSION_POLL_INTERVAL_MS);
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
 
     cleanup();

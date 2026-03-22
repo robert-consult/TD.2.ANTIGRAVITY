@@ -1,11 +1,12 @@
 import { storage } from "../server/storage";
 import { db } from "@db";
-import { adminActions, globalSettings, legalAcceptances, orderIntentAudit, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
+import { adminActions, globalSettings, legalAcceptances, orderIntentAudit, tradeAudit, trades, userVerification } from "@shared/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { bootstrapDoc1Seed } from "../server/legal/bootstrapDoc1Seed";
 import { recordDoc1Acceptance } from "../server/legal/legalAcceptanceService";
 import { clearDoc1ReacceptRequirement } from "../server/legal/legalReacceptanceService";
 import { assembleDoc1Terms } from "../server/legal/termsEngineDb";
+import { ensureSystemConfigRow } from "../server/services/systemConfig";
 
 async function seed() {
   console.log("Seeding database...");
@@ -16,10 +17,7 @@ async function seed() {
   })();
   
   // Ensure singleton config rows exist (id=1) with defaults
-  await db
-    .insert(systemConfig)
-    .values({ id: 1, marketDataActiveProviderKey: "twelvedata", marketDataFallbackProviderKeysCsv: "" })
-    .onConflictDoNothing();
+  await ensureSystemConfigRow();
   await db.insert(globalSettings).values({ id: 1 }).onConflictDoNothing();
   if (process.env.SEED_RELAX_MARKET_HOURS === "1") {
     // E2E/CI must be deterministic regardless of the real-world day/time.

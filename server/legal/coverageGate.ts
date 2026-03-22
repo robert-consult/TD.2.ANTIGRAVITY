@@ -7,6 +7,7 @@ import { and, eq, desc } from "drizzle-orm";
 import { db } from "@db";
 import { legalDocuments, legalDocPointers, systemConfig } from "../../shared/schema";
 import { getJurisdictionRestrictionPolicy, getRegionForCountry, getCountriesInRegion, REGIONS } from "./regionRules";
+import { ensureSystemConfigRow } from "../services/systemConfig";
 
 export interface CoverageCheckResult {
   allowed: boolean;
@@ -42,6 +43,7 @@ export async function isEnforcementEnabled(): Promise<boolean> {
  */
 export async function setEnforcementEnabled(enabled: boolean): Promise<void> {
   const nowSec = Math.floor(Date.now() / 1000);
+  await ensureSystemConfigRow();
   await db.update(systemConfig)
     .set({
       legalCoverageEnforce: enabled,

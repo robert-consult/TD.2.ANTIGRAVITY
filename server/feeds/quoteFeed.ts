@@ -7,8 +7,14 @@ import { recalcAccount } from "../recalcAccount";
 import { onQuotesUpdated } from "../engine/orderEngine";
 import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils/marketDailyClose";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
+import {
+  getControlledReloadNodeId,
+  markControlledReloadApplied,
+  markControlledReloadFailed,
+} from "../services/controlledReload";
 import { getValkey, valkeyGetJson, writeToRollingBuffer, cachePrevClose, getCachedPrevClose } from "../services/valkey";
 import { isMarketOpenForSymbol } from "../services/marketHours";
+import { resolveEffectiveProviderSelection } from "../services/runtimeConfig/marketDataProviders";
 import { normalizeSymbol } from "./forgeUtils";
 import { getActiveProviderSelection, invalidateActiveProviderCache } from "../marketdata/providerManager";
 import type {
@@ -42,6 +48,7 @@ let dynamicConfig = {
   rolloverTz: "America/New_York",
   rolloverTime: "17:00",
 };
+let dynamicConfigReloadedAtSec: number | null = null;
 
 let pollTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastDynamicSetRefresh = 0;
@@ -112,6 +119,19 @@ export function getCacheStats() {
     upstreamWsSymbolCount: upstreamWsSymbolsKey ? upstreamWsSymbolsKey.split(",").filter(Boolean).length : 0,
     feedPollMs: dynamicConfig.pollIntervalMs,
     staleThresholdMs: dynamicConfig.staleThresholdMs,
+    fxRolloverTz: dynamicConfig.rolloverTz,
+    fxRolloverTime: dynamicConfig.rolloverTime,
+    feedConfigReloadedAtSec: dynamicConfigReloadedAtSec,
+  };
+}
+
+export function getAppliedQuoteTransportConfig() {
+  return {
+    feedPollMs: dynamicConfig.pollIntervalMs,
+    staleThresholdMs: dynamicConfig.staleThresholdMs,
+    fxRolloverTz: dynamicConfig.rolloverTz,
+    fxRolloverTime: dynamicConfig.rolloverTime,
+    lastReloadedAt: dynamicConfigReloadedAtSec,
   };
 }
 
@@ -294,19 +314,70 @@ async function loadFeedConfig() {
   }
 }
 
-export async function reloadFeedConfig() {
-  const newConfig = await loadFeedConfig();
-  const oldPoll = dynamicConfig.pollIntervalMs;
-  dynamicConfig = newConfig;
-  console.log(`[FeedConfig] Reloaded: poll=${dynamicConfig.pollIntervalMs}ms, stale=${dynamicConfig.staleThresholdMs}ms`);
-  if (oldPoll !== dynamicConfig.pollIntervalMs) {
-    console.log(`[FeedConfig] Poll interval changed from ${oldPoll}ms to ${dynamicConfig.pollIntervalMs}ms`);
-  }
+export async function reloadFeedConfig(params?: { version?: number | null; changedKeys?: string[] }) {
+  const version = Number(params?.version ?? 0);
   try {
-    invalidateActiveProviderCache();
-    void refreshDynamicSet(true);
-  } catch {
-    // ignore provider cache invalidation failures
+    const newConfig = await loadFeedConfig();
+    const oldPoll = dynamicConfig.pollIntervalMs;
+    dynamicConfig = newConfig;
+    dynamicConfigReloadedAtSec = Math.floor(Date.now() / 1000);
+    console.log(`[FeedConfig] Reloaded: poll=${dynamicConfig.pollIntervalMs}ms, stale=${dynamicConfig.staleThresholdMs}ms`);
+    if (oldPoll !== dynamicConfig.pollIntervalMs) {
+      console.log(`[FeedConfig] Poll interval changed from ${oldPoll}ms to ${dynamicConfig.pollIntervalMs}ms`);
+    }
+    try {
+      invalidateActiveProviderCache();
+      void refreshDynamicSet(true);
+    } catch {
+      // ignore provider cache invalidation failures
+    }
+
+    if (version > 0) {
+      const effectiveState = getAppliedQuoteTransportConfig();
+      await markControlledReloadApplied({
+        domain: "quotes.transport.feed",
+        version,
+        role: "ingestor",
+        effectiveState,
+      });
+      publishLiveEvent({
+        type: "feed:config-applied",
+        payload: {
+          domain: "quotes.transport.feed",
+          version,
+          status: "applied",
+          role: "ingestor",
+          nodeId: getControlledReloadNodeId(),
+          updatedAt: Date.now(),
+          changedKeys: params?.changedKeys ?? [],
+          effectiveState,
+        },
+      });
+    }
+  } catch (error: any) {
+    if (version > 0) {
+      await markControlledReloadFailed({
+        domain: "quotes.transport.feed",
+        version,
+        role: "ingestor",
+        error: String(error?.message ?? error),
+        effectiveState: getAppliedQuoteTransportConfig(),
+      });
+      publishLiveEvent({
+        type: "feed:config-applied",
+        payload: {
+          domain: "quotes.transport.feed",
+          version,
+          status: "failed",
+          role: "ingestor",
+          nodeId: getControlledReloadNodeId(),
+          updatedAt: Date.now(),
+          changedKeys: params?.changedKeys ?? [],
+          error: String(error?.message ?? error),
+        },
+      });
+    }
+    throw error;
   }
 }
 
@@ -964,20 +1035,53 @@ function uniqueSymbols(rows: any[]): string[] {
 
 async function persistQuotes(rows: any[], isStale: boolean) {
   if (!rows.length) return;
-  const client = await dbClient.connect();
   const nowMs = Date.now();
   const nowSec = Math.floor(nowMs / 1000);
+
+  type PreparedQuoteRow = {
+    symbol: string;
+    price: number;
+    bid: number | null;
+    ask: number | null;
+    lastApiUpdateMs: number;
+  };
+
+  const sanitized = rows
+    .map((q) => {
+      if (!q?.symbol) return null;
+      const lastUpdatedMs = typeof q.lastUpdated === "number" ? q.lastUpdated : nowMs;
+      return {
+        symbol: String(q.symbol),
+        price: typeof q.price === "number" && Number.isFinite(q.price) ? q.price : 0,
+        bid: typeof q.bid === "number" ? q.bid : null,
+        ask: typeof q.ask === "number" ? q.ask : null,
+        lastApiUpdateMs: Math.trunc(lastUpdatedMs),
+      };
+    })
+    .filter((entry): entry is PreparedQuoteRow => entry !== null);
+
+  if (!sanitized.length) return;
+
+  const client = await dbClient.connect();
+  const CHUNK_SIZE = 128;
   try {
     await client.query("BEGIN");
-    for (const q of rows) {
-      if (!q?.symbol) continue;
-      const lastUpdatedMs = typeof q.lastUpdated === "number" ? q.lastUpdated : nowMs;
-      const lastApiUpdateMs = Math.trunc(lastUpdatedMs);
+    for (let i = 0; i < sanitized.length; i += CHUNK_SIZE) {
+      const chunk = sanitized.slice(i, i + CHUNK_SIZE);
+      const placeholders: string[] = [];
+      const params: any[] = [];
+      let paramIndex = 1;
+      for (const row of chunk) {
+        placeholders.push(
+          `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`,
+        );
+        params.push(row.symbol, row.price, row.bid, row.ask, nowSec, isStale, row.lastApiUpdateMs);
+      }
 
       await client.query(
         `
         INSERT INTO quotes (symbol, price, bid, ask, updated_at, is_stale, last_api_update)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ${placeholders.join(",")}
         ON CONFLICT (symbol) DO UPDATE SET
           price = EXCLUDED.price,
           bid = EXCLUDED.bid,
@@ -986,15 +1090,7 @@ async function persistQuotes(rows: any[], isStale: boolean) {
           is_stale = EXCLUDED.is_stale,
           last_api_update = EXCLUDED.last_api_update
         `,
-        [
-          q.symbol,
-          q.price || 0,
-          q.bid ?? null,
-          q.ask ?? null,
-          nowSec,
-          isStale,
-          lastApiUpdateMs,
-        ],
+        params,
       );
     }
     await client.query("COMMIT");
@@ -1245,6 +1341,7 @@ export async function startQuoteFeed(): Promise<void> {
 
   startPromise = (async () => {
     dynamicConfig = await loadFeedConfig();
+    dynamicConfigReloadedAtSec = Math.floor(Date.now() / 1000);
     console.log(
       `[FeedConfig] Initial: poll=${dynamicConfig.pollIntervalMs}ms, stale=${dynamicConfig.staleThresholdMs}ms`,
     );
@@ -1262,13 +1359,76 @@ export async function startQuoteFeed(): Promise<void> {
         }
         if (event.type === "feed:config-updated") {
           void (async () => {
-            await reloadFeedConfig();
+            const version = Number(event?.payload?.version ?? 0);
+            const changedKeys = Array.isArray(event?.payload?.changedKeys)
+              ? event.payload.changedKeys.map((key: unknown) => String(key))
+              : [];
+            await reloadFeedConfig({ version, changedKeys });
             await refreshSymbolsAndPull("feed:config-updated");
           })();
           return;
         }
         if (event.type === "market-data:providers-updated") {
-          void refreshSymbolsAndPull("market-data:providers-updated");
+          void (async () => {
+            const version = Number(event?.payload?.version ?? 0);
+            const changedKeys = Array.isArray(event?.payload?.changedKeys)
+              ? event.payload.changedKeys.map((key: unknown) => String(key))
+              : [];
+            try {
+              await refreshSymbolsAndPull("market-data:providers-updated");
+              if (version > 0) {
+                const effective = await resolveEffectiveProviderSelection();
+                const effectiveState = {
+                  effectiveProviderKey: effective.effectiveProviderKey,
+                  effectiveProviderDisplayName: effective.effectiveProviderDisplayName,
+                  effectiveProviderDriver: effective.effectiveProviderDriver,
+                  candidateOrder: effective.candidateOrder,
+                };
+                await markControlledReloadApplied({
+                  domain: "quotes.providers",
+                  version,
+                  role: "ingestor",
+                  effectiveState,
+                });
+                publishLiveEvent({
+                  type: "market-data:providers-applied",
+                  payload: {
+                    domain: "quotes.providers",
+                    version,
+                    status: "applied",
+                    role: "ingestor",
+                    nodeId: getControlledReloadNodeId(),
+                    updatedAt: Date.now(),
+                    changedKeys,
+                    effectiveProviderKey: effective.effectiveProviderKey,
+                    effectiveState,
+                  },
+                });
+              }
+            } catch (error: any) {
+              if (version > 0) {
+                await markControlledReloadFailed({
+                  domain: "quotes.providers",
+                  version,
+                  role: "ingestor",
+                  error: String(error?.message ?? error),
+                });
+                publishLiveEvent({
+                  type: "market-data:providers-applied",
+                  payload: {
+                    domain: "quotes.providers",
+                    version,
+                    status: "failed",
+                    role: "ingestor",
+                    nodeId: getControlledReloadNodeId(),
+                    updatedAt: Date.now(),
+                    changedKeys,
+                    error: String(error?.message ?? error),
+                  },
+                });
+              }
+            }
+          })();
           return;
         }
         if (event.type === "quote-subscriptions:updated") {

@@ -975,3 +975,19 @@ export const systemConfig = pgTable("system_config", {
 });
 
 export const insertSystemConfigSchema = createInsertSchema(systemConfig);
+
+export const runtimeReloadStatus = pgTable("runtime_reload_status", {
+  domain: text("domain").primaryKey(),
+  requestedVersion: integer("requested_version").notNull().default(0),
+  requestedAt: integer("requested_at").notNull().default(nowUnix),
+  requestedBy: text("requested_by"),
+  requiredScope: text("required_scope").notNull().default("reload"),
+  changedKeysJson: text("changed_keys_json").notNull().default("[]"),
+  status: text("status").notNull().default("idle"),
+  acknowledgementsJson: text("acknowledgements_json").notNull().default("[]"),
+  effectiveStateJson: text("effective_state_json").notNull().default("{}"),
+  lastAppliedVersion: integer("last_applied_version"),
+  lastAppliedAt: integer("last_applied_at"),
+  lastError: text("last_error"),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+});

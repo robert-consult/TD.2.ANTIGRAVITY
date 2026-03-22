@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
 import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   WS_MSG_ACCOUNT_SNAPSHOT,
@@ -36,11 +37,8 @@ export function useAccountSummary(options: UseAccountSummaryOptions = {}) {
   const enabled = options.enabled ?? true;
   const perfHints = usePerfHints();
   const performanceSettings = usePerformanceSettings();
-  const accountPollIntervalMs = tierPollIntervalMs(
-    performanceSettings.restFallbackPollMs,
-    perfHints,
-    performanceSettings,
-  );
+  const runtimeIntervals = resolveRuntimeIntervals(perfHints, performanceSettings);
+  const accountPollIntervalMs = runtimeIntervals.accountSummary.restFallbackPollMs;
 
   const { isConnected: isWsConnected, sendMessage, subscribe } = useLiveUpdates();
   const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);

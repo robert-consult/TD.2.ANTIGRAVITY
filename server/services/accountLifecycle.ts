@@ -23,6 +23,7 @@ import {
 } from "@shared/schema";
 import { randomToken } from "./crypto";
 import { revokeAllSessionsForUser } from "../security/sessionTrail";
+import { getActivityLifecycleConfig } from "./runtimeConfig/botConfig";
 
 export type ActivityConfig = {
   inactivityThresholdDays: number;
@@ -203,24 +204,7 @@ async function computeLastActiveAtSecTx(tx: any, userId: number, fallbackCreated
 }
 
 export async function getActivityConfig(): Promise<ActivityConfig> {
-  const row = await db.query.systemConfig.findFirst({ where: eq(systemConfig.id, 1) });
-  if (!row) {
-    return {
-      inactivityThresholdDays: 90,
-      deletionGraceDays: 30,
-      botScoreThreshold: 40,
-      autoQueueInactive: true,
-      autoSoftDelete: false,
-    };
-  }
-
-  return {
-    inactivityThresholdDays: toInt((row as any).inactivityThresholdDays, 90),
-    deletionGraceDays: toInt((row as any).deletionGraceDays, 30),
-    botScoreThreshold: toInt((row as any).botScoreThreshold, 40),
-    autoQueueInactive: toBool((row as any).activityAutoQueueInactive, true),
-    autoSoftDelete: toBool((row as any).activityAutoSoftDelete, false),
-  };
+  return getActivityLifecycleConfig();
 }
 
 export type AdminActivityRow = {

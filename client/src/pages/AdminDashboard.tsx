@@ -43,13 +43,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   mergeGlobalSettingsPerformance,
   resolveGlobalPerformanceSettingsPayload,
 } from "@/lib/globalSettingsPerformance";
-import { PERFORMANCE_TIERS, flushIntervalForTier, pollIntervalForTier } from "@/lib/perfHints";
 import { useLocation } from "wouter";
 import {
+  DEFAULT_MARKET_PERFORMANCE_SETTINGS,
   FieldHintLabel,
   INSTRUMENTS_FIELD_HELP,
   parseUserAgent,
@@ -82,6 +85,8 @@ export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { checkAuth } = useAuth();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
   const [, navigate] = useLocation();
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<UserSettings>({
@@ -189,37 +194,15 @@ export default function AdminDashboard() {
     defaultChallengeVirtualCapitalUsd: 100000,
     lotPresetCards: "[1,5,10,25,50]",
     lotDropdownMax: 50,
-    restFallbackPollMs: 500,
-    wsPushFrequencyMs: 0,
-    quoteFlushIntervalMs: 50,
-    maxWsReconnectAttempts: 30,
-    wsReconnectBaseDelayMs: 1500,
-    prefetchStrategy: "all",
-    prefetchMaxConcurrency: 4,
-    prefetchStartDelayMs: 0,
-    prefetchFastConcurrencyCap: 3,
-    prefetchModerateConcurrencyCap: 2,
-    prefetchConstrainedConcurrencyCap: 1,
-    prefetchNetworkFastStartDelayMs: 75,
-    prefetchNetworkModerateStartDelayMs: 200,
-    prefetchNetworkConstrainedStartDelayMs: 450,
-    prefetchDeviceModerateStartDelayMs: 50,
-    prefetchDeviceConstrainedStartDelayMs: 150,
-    prefetchDeviceMinimalStartDelayMs: 300,
-    pollInstantMs: 200,
-    pollFastMs: 500,
-    pollModerateMs: 1500,
-    pollConstrainedMs: 4000,
-    pollMinimalMs: 6000,
-    flushInstantMs: 50,
-    flushFastMs: 150,
-    flushModerateMs: 300,
-    flushConstrainedMs: 500,
-    flushMinimalMs: 1000,
+    ...DEFAULT_MARKET_PERFORMANCE_SETTINGS,
     updatedAt: null
   });
   const [riskParamsHydrated, setRiskParamsHydrated] = useState(false);
   const [pendingTradeSettingsSection, setPendingTradeSettingsSection] = useState<TradeSettingsSaveSection | null>(null);
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/admin/users"],
@@ -240,7 +223,7 @@ export default function AdminDashboard() {
   const { data: scoutTabConfig } = useQuery<Pick<SystemConfigData, "scoutTabEnabled">>({
     queryKey: ["/api/admin/system-config", "tab-visibility"],
     queryFn: () => axios.get("/api/admin/system-config").then((r) => r.data),
-    refetchInterval: 30000,
+    refetchInterval: runtimeIntervals.admin.standardPollMs,
     refetchOnWindowFocus: false,
     retry: false,
   });
@@ -634,7 +617,17 @@ export default function AdminDashboard() {
   }, [policyConfigData, policyConfigChanged]);
 
   const policyConfigMutation = useMutation({
-    mutationFn: (payload: PolicyConfigData) => axios.post("/api/admin/system-config/policy", payload),
+    mutationFn: (payload: PolicyConfigData) => {
+      const expectedUpdatedAt =
+        typeof policyConfigData?.config?.updatedAt === "number" ? policyConfigData.config.updatedAt : null;
+      if (expectedUpdatedAt === null) {
+        throw new Error("Policy config is stale. Refresh before saving.");
+      }
+      return axios.post("/api/admin/system-config/policy", {
+        ...payload,
+        expectedUpdatedAt,
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config/policy"] });
       toast({ title: "Policy config updated" });
@@ -868,7 +861,7 @@ export default function AdminDashboard() {
   }>({
     queryKey: ["/api/admin/online-users"],
     queryFn: () => axios.get("/api/admin/online-users").then(r => r.data),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: runtimeIntervals.admin.standardPollMs,
   });
 
   // Filter users based on selected tab

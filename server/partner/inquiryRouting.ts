@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@db";
 import { nowSec } from "@shared/scalars";
 import { systemConfig, users } from "@shared/schema";
+import { ensureSystemConfigRow } from "../services/systemConfig";
 
 const DEFAULT_INQUIRY_INBOX_ALIAS = "inquiries@";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -98,14 +99,7 @@ export async function upsertPartnerInquiryRoutingConfig(input: {
       ? current.viewerAdminEmails
       : normalizeEmailList(input.viewerAdminEmails);
 
-  const [existing] = await db.select({ id: systemConfig.id }).from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-  if (!existing) {
-    await db.insert(systemConfig).values({
-      id: 1,
-      marketDataActiveProviderKey: "twelvedata",
-      marketDataFallbackProviderKeysCsv: "",
-    });
-  }
+  await ensureSystemConfigRow();
 
   await db
     .update(systemConfig)

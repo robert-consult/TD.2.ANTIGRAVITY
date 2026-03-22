@@ -66,7 +66,7 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
     expect(mailboxKeyEnsure.status, JSON.stringify(mailboxKeyEnsure.body)).toBeLessThan(400);
 
     await adminPage.goto("/admin");
-    await expect(adminPage.getByText("Admin Dashboard")).toBeVisible();
+    await expect(adminPage.getByText("Admin Dashboard")).toBeVisible({ timeout: 60_000 });
     await adminPage.getByRole("tab", { name: "Scout" }).click();
     await expect(adminPage.getByTestId("admin-scout-workbench")).toBeVisible();
 

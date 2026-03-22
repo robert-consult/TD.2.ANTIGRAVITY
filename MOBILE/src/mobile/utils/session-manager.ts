@@ -4,6 +4,11 @@
  */
 
 import { App } from "@capacitor/app";
+import {
+    AUTH_CURRENT_USER_API_PATH,
+    AUTH_LOGOUT_API_PATH,
+    MOBILE_SESSION_POLL_INTERVAL_MS,
+} from "@shared/appSurfaceConfig";
 import { isNativeApp } from "./mobile-utils";
 import { fetchCsrfToken } from "./csrf";
 
@@ -24,7 +29,7 @@ async function fetchCurrentUserStatus(): Promise<SessionStatus> {
 
     currentUserStatusRequest = (async () => {
         try {
-            const response = await fetch("/api/auth/current-user", {
+            const response = await fetch(AUTH_CURRENT_USER_API_PATH, {
                 method: "GET",
                 credentials: "include",
                 cache: "no-store",
@@ -121,7 +126,7 @@ export function initSessionMonitoring(callbacks: {
         } catch {
             // Silent fail for background checks
         }
-    }, 5 * 60 * 1000);
+    }, MOBILE_SESSION_POLL_INTERVAL_MS);
 
     // Return cleanup function
     return () => {
@@ -138,7 +143,7 @@ export function initSessionMonitoring(callbacks: {
 export async function secureLogout(): Promise<boolean> {
     try {
         const token = await fetchCsrfToken();
-        const response = await fetch("/api/auth/logout", {
+        const response = await fetch(AUTH_LOGOUT_API_PATH, {
             method: "POST",
             credentials: "include",
             headers: token ? { "x-csrf-token": token } : undefined,

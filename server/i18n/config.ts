@@ -2,6 +2,7 @@ import { db } from "@db";
 import { systemConfig } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { I18nConfig } from "./types";
+import { ensureSystemConfigRow } from "../services/systemConfig";
 
 const DEFAULT_SUPPORTED = [
   "en",
@@ -156,10 +157,7 @@ export async function updateI18nConfig(
   const supportedLocales = normalizeLocales(next.supportedLocales, next.defaultLocale);
   const now = Math.floor(Date.now() / 1000);
 
-  await db
-    .insert(systemConfig)
-    .values({ id: 1, marketDataActiveProviderKey: "twelvedata", marketDataFallbackProviderKeysCsv: "" })
-    .onConflictDoNothing();
+  await ensureSystemConfigRow();
   await db
     .update(systemConfig)
     .set({

@@ -5,6 +5,7 @@ import { db } from "@db";
 import { clampIntOr } from "@shared/scalars";
 import { rememberMeTokens, systemConfig } from "@shared/schema";
 import { sha256Hex } from "./crypto";
+import { onLiveEvent } from "./liveBus";
 import {
   buildGeoContext,
   extractClientIdentity,
@@ -47,6 +48,13 @@ let cachedRememberMeConfig:
 export function invalidateRememberMeConfigCache(): void {
   cachedRememberMeConfig = null;
 }
+
+onLiveEvent((event) => {
+  if (!event || typeof event !== "object") return;
+  if (event.type === "system-config:updated") {
+    invalidateRememberMeConfigCache();
+  }
+});
 
 export type RememberMeConfig = {
   enabled: boolean;

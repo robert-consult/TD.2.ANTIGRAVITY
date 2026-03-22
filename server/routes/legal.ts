@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from "@db";
 import { systemConfig, users } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { resolveCaptchaProvider } from "../security/captcha";
+import { resolveCaptchaRuntimeConfig } from "../security/captcha";
 import { getClientIp, getUserAgent } from "../security/sessionTrail";
 import { recordDoc1Acceptance } from "../legal/legalAcceptanceService";
 import { clearDoc1ReacceptRequirement, computeDoc1ReacceptStatusWithTerms, upsertDoc1ReacceptRequirement } from "../legal/legalReacceptanceService";
@@ -32,14 +32,15 @@ router.get("/public-config", async (req, res) => {
     .from(systemConfig)
     .where(eq(systemConfig.id, 1))
     .limit(1);
-  const enforceSignupCaptcha = Boolean(cfg?.signupCaptchaEnforce ?? true);
-  const selectedCaptchaProvider = String(cfg?.captchaProvider ?? "SLIDER").toUpperCase() as any;
-  const captchaProvider = resolveCaptchaProvider(selectedCaptchaProvider).provider;
+  const captcha = resolveCaptchaRuntimeConfig({
+    signupCaptchaEnforce: cfg?.signupCaptchaEnforce,
+    captchaProvider: cfg?.captchaProvider,
+  });
   res.json({
     ok: true,
     captcha: {
-      enforceSignupCaptcha,
-      provider: captchaProvider,
+      enforceSignupCaptcha: captcha.enforceSignupCaptcha,
+      provider: captcha.effectiveProvider,
     },
     signupPhoneEnforce: Boolean(cfg?.signupPhoneEnforce ?? false),
     legalCoverageEnforce: Boolean(cfg?.legalCoverageEnforce ?? false),

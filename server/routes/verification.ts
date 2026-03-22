@@ -13,6 +13,7 @@ import { promotePerformerIfEligible } from "../policy/performerPromotion";
 import { buildAuditContext } from "../lib/auditContext";
 
 import { appendIdentityAudit } from "../services/identityAudit";
+import { buildServerVerifyEmailUrl } from "../services/appLinks";
 
 const router = Router();
 
@@ -82,7 +83,7 @@ async function sendVerificationEmail(email: string, token: string, kind: "INITIA
     return false;
   }
 
-  const verifyUrl = `${process.env.APP_URL || "http://localhost:5000"}/verify-email?token=${token}`;
+  const verifyUrl = buildServerVerifyEmailUrl(token);
   const isReverify = kind === "REVERIFY";
   const subject = isReverify ? "Re-verify your TradeQuip email address" : "Verify your TradeQuip email address";
 

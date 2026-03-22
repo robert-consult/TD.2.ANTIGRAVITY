@@ -1,8 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { ConfigSync } from "@/live/ConfigSync";
+import { useAuth } from "@/hooks/use-auth";
+import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   mergeGlobalSettingsPerformance,
   resolveGlobalPerformanceSettingsPayload,
 } from "@/lib/globalSettingsPerformance";
+
+vi.mock("@/hooks/use-auth");
+vi.mock("@/live/LiveUpdatesProvider");
+vi.mock("@tanstack/react-query");
 
 describe("mergeGlobalSettingsPerformance", () => {
   it("merges updates under performanceSettings without polluting the root object", () => {
@@ -104,5 +113,74 @@ describe("mergeGlobalSettingsPerformance", () => {
 
     expect(resolved.restFallbackPollMs).toBe(900);
     expect((resolved as any).unknownKey).toBeUndefined();
+  });
+});
+
+describe("ConfigSync", () => {
+  const invalidateQueries = vi.fn();
+  const checkAuth = vi.fn();
+  let liveUpdateHandler: ((message: unknown) => void) | null = null;
+
+  beforeEach(() => {
+    invalidateQueries.mockReset();
+    checkAuth.mockReset();
+    liveUpdateHandler = null;
+
+    vi.mocked(useAuth).mockReturnValue({
+      isAuthenticated: true,
+      checkAuth,
+    } as any);
+
+    vi.mocked(useQueryClient).mockReturnValue({
+      invalidateQueries,
+      setQueryData: vi.fn(),
+    } as any);
+
+    vi.mocked(useLiveUpdates).mockReturnValue({
+      isConnected: false,
+      sendMessage: vi.fn(),
+      subscribe: (listener: (message: unknown) => void) => {
+        liveUpdateHandler = listener;
+        return () => {};
+      },
+    } as any);
+  });
+
+  it("invalidates policy, jurisdiction, and enforcement caches when system config changes", () => {
+    render(<ConfigSync />);
+    expect(liveUpdateHandler).toBeTruthy();
+    liveUpdateHandler?.({ type: "system-config:updated" });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/system-config/policy"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/system-config/jurisdiction-restrictions"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/legal-docs-v2/system-config/enforcement"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/runtime-config/governance"] });
+  });
+
+  it("invalidates grift and activity caches when abuse config changes", () => {
+    render(<ConfigSync />);
+    expect(liveUpdateHandler).toBeTruthy();
+
+    liveUpdateHandler?.({ type: "grift-config:updated" });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/grift/config"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/grift/config/effective"] });
+
+    liveUpdateHandler?.({ type: "activity-config:updated" });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["admin-activity-config"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["admin-activity-users"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/activity/config/effective"] });
+  });
+
+  it("invalidates the governance snapshot when global or provider runtime state changes", () => {
+    render(<ConfigSync />);
+    expect(liveUpdateHandler).toBeTruthy();
+
+    liveUpdateHandler?.({
+      type: "global-settings:updated",
+      payload: { performanceSettings: { restFallbackPollMs: 700 } },
+    });
+    liveUpdateHandler?.({ type: "market-data:providers-updated" });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["/api/admin/runtime-config/governance"] });
   });
 });

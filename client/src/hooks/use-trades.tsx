@@ -5,7 +5,8 @@ import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
 import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   WS_MSG_TRADES_SUBSCRIBE,
@@ -22,11 +23,8 @@ export function useTrades() {
   const { user } = useAuth();
   const perfHints = usePerfHints();
   const performanceSettings = usePerformanceSettings();
-  const tradesPollIntervalMs = tierPollIntervalMs(
-    performanceSettings.restFallbackPollMs,
-    perfHints,
-    performanceSettings,
-  );
+  const runtimeIntervals = resolveRuntimeIntervals(perfHints, performanceSettings);
+  const tradesPollIntervalMs = runtimeIntervals.trades.restFallbackPollMs;
 
   const { isConnected: isTradeWsConnected, sendMessage, subscribe } = useLiveUpdates();
   const wsFallbackRefetchMode = isTradeWsConnected ? false : ("always" as const);

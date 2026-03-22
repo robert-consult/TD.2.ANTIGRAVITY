@@ -12,6 +12,7 @@ import adminLegalRouter from "./routes/adminLegal";
 import { adminLegalDocsRouter } from "./routes/adminLegalDocs";
 import { adminLegalAcceptancesRouter } from "./routes/adminLegalAcceptances";
 import { adminMarketDataRouter } from "./routes/adminMarketData";
+import { adminGovernanceRouter } from "./routes/adminGovernance";
 import { adminSystemConfigRouter } from "./routes/adminSystemConfig";
 import { adminMigrationRouter } from "./routes/adminMigration";
 import { adminDataExportsRouter } from "./routes/adminDataExports";
@@ -144,6 +145,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // so /api/admin/view-as/stop remains reachable while the effective session is non-admin.
   app.use("/api/admin", adminDataRollupsRouter);
   app.use("/api/admin", adminInstitutionalAuditRouter);
+  app.use("/api/admin", adminGovernanceRouter);
   app.use("/api/admin", adminTraderScoutingRouter);
   app.use("/api/admin", adminOpsRouter);
   app.use("/api/admin", adminKycRouter);

@@ -5,7 +5,7 @@
 
 import { db } from "@db";
 import { and, desc, eq, lte, sql } from "drizzle-orm";
-import { trades, users, userSettings, symbolConfigs, globalSettings } from "@shared/schema";
+import { trades, users, userSettings, symbolConfigs } from "@shared/schema";
 import { nowSec as nowUnixSec, toFiniteNumber } from "@shared/scalars";
 import { normalizeTimeInForce } from "@shared/trading/timeInForce";
 import { requiredMargin } from "../lib/margin";
@@ -26,6 +26,11 @@ import {
   trackTradeExcursion,
 } from "../trades/excursionTracking";
 import { getActiveTradeConstraintsForUser } from "../recruitment/challengesV4/challengeService";
+import {
+  getTradingRiskSnapshot,
+  resolveEffectiveTradeLeverage,
+  resolveTradeConcurrencyLimits,
+} from "../services/runtimeConfig/tradingRisk";
 import { 
   writeTradeAudit, 
   generateCorrelationId, 
@@ -38,18 +43,6 @@ import {
 } from "../lib/auditWriter";
 
 const DEFAULT_QUOTE_SOURCE = process.env.QUOTE_SOURCE ?? "quote_feed";
-
-async function getGlobalLimits() {
-  const gs = await db.query.globalSettings.findFirst({
-    where: eq(globalSettings.id, 1),
-  });
-  return {
-    maxTradesPerUser: Number(gs?.maxTradesPerUser ?? 10),
-    maxTradesPerInstrument: Number(gs?.maxTradesPerInstrument ?? 3),
-    maxConcurrentLots: Number(gs?.maxConcurrentLots ?? 50),
-    defaultLeverage: Number(gs?.defaultLeverage ?? 50),
-  };
-}
 
 type Quote = {
   symbol: string;
@@ -636,18 +629,16 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         positionSide: side,
       });
 
-    // Get global limits dynamically
-    const globalLimits = await getGlobalLimits();
-    // User override takes precedence over global (can exceed)
-    const effectiveMaxConcurrent = Number(r.s?.maxConcurrent ?? globalLimits.maxTradesPerUser);
-    const effectiveMaxConcurrentLots = Number(r.s?.maxConcurrentLots ?? globalLimits.maxConcurrentLots);
-    const effectiveMaxTradesPerInstrument = Number(r.s?.maxConcurrentPerInstrument ?? globalLimits.maxTradesPerInstrument);
+    const tradingRisk = await getTradingRiskSnapshot();
+    const effectiveLimits = resolveTradeConcurrencyLimits(tradingRisk, r.s ?? null);
+    const effectiveMaxConcurrent = effectiveLimits.maxTradesPerUser;
+    const effectiveMaxConcurrentLots = effectiveLimits.maxConcurrentLots;
+    const effectiveMaxTradesPerInstrument = effectiveLimits.maxTradesPerInstrument;
     const challengeConstraints = await getActiveTradeConstraintsForUser(u.id);
-    const challengeLeverageMultiplier = Math.max(0.01, Number(challengeConstraints?.leverageMultiplier ?? 1));
-    // Leverage: user override takes precedence over global (can exceed)
-    const effectiveLeverage = Math.max(
-      0.01,
-      Number(u.leverage ?? globalLimits.defaultLeverage) * challengeLeverageMultiplier,
+    const effectiveLeverage = resolveEffectiveTradeLeverage(
+      tradingRisk,
+      u.leverage,
+      challengeConstraints?.leverageMultiplier,
     );
 
     const executionId = generateExecutionId();

@@ -231,8 +231,12 @@ function parseRoles(raw: string): Set<string> {
 const roles = parseRoles(process.env.APP_ROLE ?? "monolith");
 const RUN_WORKER_TASKS = roles.has("worker");
 const RUN_INGESTOR_TASKS = roles.has("ingestor");
+const DISABLE_BACKGROUND_JOBS = String(process.env.E2E_DISABLE_BACKGROUND_JOBS ?? "").trim() === "1";
 
 console.log(`[Role] APP_ROLE=${process.env.APP_ROLE ?? "monolith"} => ${[...roles].join(",")}`);
+if (DISABLE_BACKGROUND_JOBS) {
+  console.log("[Role] Background schedulers/workers disabled (E2E_DISABLE_BACKGROUND_JOBS=1)");
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -508,7 +512,7 @@ app.use((req, res, next) => {
       }
 
       // Seed baseline legal terms + kick off ip2asn import (worker only)
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           await bootstrapDoc1Seed();
         } catch (e) {
@@ -532,11 +536,15 @@ app.use((req, res, next) => {
           console.error("[Grift] Failed to evaluate/import ip2asn dataset:", asnErr);
         }
       } else {
-        log("[Role] Skipping bootstrap tasks (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping bootstrap tasks (background jobs disabled)."
+            : "[Role] Skipping bootstrap tasks (worker only).",
+        );
       }
 
       // i18n: ingest built manifest (if present) and start worker
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startAdminDataExportWorker();
           console.log("[admin-export] Worker started");
@@ -576,7 +584,11 @@ app.use((req, res, next) => {
           console.warn("[i18n] Worker failed to start:", e);
         }
       } else {
-        log("[Role] Skipping i18n worker (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping i18n/admin-export workers (background jobs disabled)."
+            : "[Role] Skipping i18n worker (worker only).",
+        );
       }
 
       // Import feed/cron AFTER schema is ensured
@@ -591,12 +603,16 @@ app.use((req, res, next) => {
           } catch (e) {
             console.warn("[Trades] Excursion Tracking PubSub init failed:", e);
           }
-          const { startAutoCloseScheduler } = await import("./cron/autoClose");
-          await startAutoCloseScheduler();
+          if (!DISABLE_BACKGROUND_JOBS) {
+            const { startAutoCloseScheduler } = await import("./cron/autoClose");
+            await startAutoCloseScheduler();
 
-          const { startMarginCallScheduler } = await import("./cron/marginCall");
-          await startMarginCallScheduler();
-          log("Price feed and auto-close services initialized");
+            const { startMarginCallScheduler } = await import("./cron/marginCall");
+            await startMarginCallScheduler();
+            log("Price feed and auto-close services initialized");
+          } else {
+            log("Price feed initialized (background ingestor schedulers disabled)");
+          }
         } catch (error) {
           console.error("Error initializing feed/cron services:", error);
         }
@@ -618,7 +634,7 @@ app.use((req, res, next) => {
       }
 
       // Start grift detection scheduler
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startGriftEvaluationScheduler();
           log("Grift detection scheduler initialized");
@@ -626,11 +642,15 @@ app.use((req, res, next) => {
           console.error("Error starting grift scheduler:", error);
         }
       } else {
-        log("[Role] Skipping grift scheduler (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping grift scheduler (background jobs disabled)."
+            : "[Role] Skipping grift scheduler (worker only).",
+        );
       }
 
       // Start verification reminder cron
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startVerificationReminderCron();
           log("Verification reminder cron initialized");
@@ -638,11 +658,15 @@ app.use((req, res, next) => {
           console.error("Error starting verification reminder cron:", error);
         }
       } else {
-        log("[Role] Skipping verification reminder cron (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping verification reminder cron (background jobs disabled)."
+            : "[Role] Skipping verification reminder cron (worker only).",
+        );
       }
 
       // Start trade audit-chain verification cron
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startTradeAuditVerificationCron();
           log("Trade audit verification cron initialized");
@@ -650,11 +674,15 @@ app.use((req, res, next) => {
           console.error("Error starting trade audit verification cron:", error);
         }
       } else {
-        log("[Role] Skipping trade audit verification cron (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping trade audit verification cron (background jobs disabled)."
+            : "[Role] Skipping trade audit verification cron (worker only).",
+        );
       }
 
       // Start account lifecycle sweep scheduler (inactive users + deletion grace)
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startAccountLifecycleSweepScheduler();
           log("Account lifecycle sweep scheduler initialized");
@@ -662,11 +690,15 @@ app.use((req, res, next) => {
           console.error("Error starting account lifecycle sweep scheduler:", error);
         }
       } else {
-        log("[Role] Skipping account lifecycle sweep (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping account lifecycle sweep (background jobs disabled)."
+            : "[Role] Skipping account lifecycle sweep (worker only).",
+        );
       }
 
       // Start nightly scout metrics calculation scheduler
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startScoutMetricsCron();
           log("Scout metrics cron initialized");
@@ -674,11 +706,15 @@ app.use((req, res, next) => {
           console.error("Error starting scout metrics cron:", error);
         }
       } else {
-        log("[Role] Skipping scout metrics cron (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping scout metrics cron (background jobs disabled)."
+            : "[Role] Skipping scout metrics cron (worker only).",
+        );
       }
 
       // Start challenge evaluation scheduler
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startChallengeEvaluationCron();
           log("Challenge evaluation cron initialized");
@@ -686,11 +722,15 @@ app.use((req, res, next) => {
           console.error("Error starting challenge evaluation cron:", error);
         }
       } else {
-        log("[Role] Skipping challenge evaluation cron (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping challenge evaluation cron (background jobs disabled)."
+            : "[Role] Skipping challenge evaluation cron (worker only).",
+        );
       }
 
       // Start partner allocation sync scheduler
-      if (RUN_WORKER_TASKS) {
+      if (RUN_WORKER_TASKS && !DISABLE_BACKGROUND_JOBS) {
         try {
           startPartnerAllocationSyncCron();
           log("Partner allocation sync cron initialized");
@@ -698,7 +738,11 @@ app.use((req, res, next) => {
           console.error("Error starting partner allocation sync cron:", error);
         }
       } else {
-        log("[Role] Skipping partner allocation sync cron (worker only).");
+        log(
+          DISABLE_BACKGROUND_JOBS
+            ? "[Role] Skipping partner allocation sync cron (background jobs disabled)."
+            : "[Role] Skipping partner allocation sync cron (worker only).",
+        );
       }
 
       log("Deferred initialization complete");

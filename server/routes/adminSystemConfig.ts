@@ -7,25 +7,52 @@ import { Router } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@db";
 import { requireAdmin } from "../middleware/requireAdmin";
-import { systemConfig, userSessions, users } from "../../shared/schema";
+import { userSessions, users } from "../../shared/schema";
 import { evaluateLoginJurisdiction } from "../policy/jurisdictionControl";
 import { revokeSession } from "../security/sessionTrail";
-import { invalidateJurisdictionRestrictionPolicyCache, parseRestrictedCountriesCsv } from "../legal/regionRules";
+import { parseRestrictedCountriesCsv } from "../legal/regionRules";
+import {
+  buildSystemConfigMutationActor,
+  buildSystemConfigAllSnapshot,
+  buildSystemConfigJurisdictionRestrictionsSnapshot,
+  buildSystemConfigLegalCoverageSnapshot,
+  buildSystemConfigPolicySnapshot,
+  ensureSystemConfigRow,
+  isSystemConfigConflictError,
+  isSystemConfigValidationError,
+  updateSystemConfigJurisdictionRestrictions,
+  updateSystemConfigLegalCoverage,
+  updateSystemConfigPolicy,
+} from "../services/systemConfig";
 
 export const adminSystemConfigRouter = Router();
 adminSystemConfigRouter.use(requireAdmin);
-const nowUnix = () => Math.floor(Date.now() / 1000);
+
+function respondMutationError(res: any, error: unknown, fallback: string) {
+  if (isSystemConfigValidationError(error)) {
+    return res.status(400).json({ ok: false, error: error.message });
+  }
+  if (isSystemConfigConflictError(error)) {
+    return res.status(409).json({
+      ok: false,
+      error: error.message,
+      currentUpdatedAt: error.currentUpdatedAt,
+    });
+  }
+  return res.status(400).json({ ok: false, error: (error as any)?.message || fallback });
+}
 
 // GET /api/admin/system-config/legal-coverage
 // Returns the current legal coverage enforcement state
 adminSystemConfigRouter.get("/legal-coverage", async (_req, res) => {
   try {
-    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const config = await ensureSystemConfigRow();
+    const snapshot = buildSystemConfigLegalCoverageSnapshot(config);
     
     return res.json({
       ok: true,
-      legalCoverageEnforce: !!config?.legalCoverageEnforce,
-      updatedAt: config?.updatedAt || null,
+      legalCoverageEnforce: snapshot.legalCoverageEnforce,
+      updatedAt: snapshot.updatedAt,
     });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to get config." });
@@ -36,27 +63,20 @@ adminSystemConfigRouter.get("/legal-coverage", async (_req, res) => {
 // body: { enforce: boolean }
 adminSystemConfigRouter.post("/legal-coverage", async (req, res) => {
   try {
-    const enforce = !!req.body?.enforce;
-    const adminUserId = Number((req as any).user?.id || 0) || null;
-    const nowSec = nowUnix();
-
-    await db.update(systemConfig)
-      .set({
-        legalCoverageEnforce: enforce,
-        updatedAt: nowSec,
-      })
-      .where(eq(systemConfig.id, 1));
-
-    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const actor = buildSystemConfigMutationActor(req);
+    const result = await updateSystemConfigLegalCoverage({
+      actor,
+      enforce: req.body?.enforce,
+    });
 
     return res.json({
       ok: true,
-      legalCoverageEnforce: !!updated?.legalCoverageEnforce,
-      updatedAt: updated?.updatedAt || null,
-      updatedByAdminId: adminUserId,
+      legalCoverageEnforce: result.snapshot.legalCoverageEnforce,
+      updatedAt: result.snapshot.updatedAt,
+      updatedByAdminId: actor.adminUserId,
     });
-  } catch (e: any) {
-    return res.status(400).json({ ok: false, error: e?.message || "Failed to set config." });
+  } catch (error) {
+    return respondMutationError(res, error, "Failed to set config.");
   }
 });
 
@@ -64,17 +84,14 @@ adminSystemConfigRouter.post("/legal-coverage", async (req, res) => {
 // Returns restricted ISO2 list + message
 adminSystemConfigRouter.get("/jurisdiction-restrictions", async (_req, res) => {
   try {
-    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-    const restrictedCountriesCsv = String(config?.jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY");
-    const restrictedMessage = String(
-      config?.jurisdictionRestrictedMessage ?? "This jurisdiction is not supported due to regulatory restrictions."
-    );
+    const config = await ensureSystemConfigRow();
+    const snapshot = buildSystemConfigJurisdictionRestrictionsSnapshot(config);
 
     return res.json({
       ok: true,
-      restrictedCountriesCsv,
-      restrictedMessage,
-      countries: parseRestrictedCountriesCsv(restrictedCountriesCsv),
+      restrictedCountriesCsv: snapshot.restrictedCountriesCsv,
+      restrictedMessage: snapshot.restrictedMessage,
+      countries: parseRestrictedCountriesCsv(snapshot.restrictedCountriesCsv),
     });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to get restrictions." });
@@ -85,39 +102,20 @@ adminSystemConfigRouter.get("/jurisdiction-restrictions", async (_req, res) => {
 // body: { restrictedCountriesCsv: string; restrictedMessage: string }
 adminSystemConfigRouter.post("/jurisdiction-restrictions", async (req, res) => {
   try {
-    const restrictedCountriesCsvRaw =
-      typeof req.body?.restrictedCountriesCsv === "string" ? String(req.body.restrictedCountriesCsv) : "";
-    const restrictedMessageRaw =
-      typeof req.body?.restrictedMessage === "string" ? String(req.body.restrictedMessage) : "";
-
-    const countries = parseRestrictedCountriesCsv(restrictedCountriesCsvRaw);
-    const restrictedCountriesCsv = countries.join(",");
-    const restrictedMessage =
-      restrictedMessageRaw.trim() || "This jurisdiction is not supported due to regulatory restrictions.";
-
-    await db.update(systemConfig)
-      .set({
-        jurisdictionRestrictedIso2Csv: restrictedCountriesCsv,
-        jurisdictionRestrictedMessage: restrictedMessage,
-        updatedAt: nowUnix(),
-      })
-      .where(eq(systemConfig.id, 1));
-
-    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-
-    try {
-      invalidateJurisdictionRestrictionPolicyCache();
-    } catch {}
+    const result = await updateSystemConfigJurisdictionRestrictions({
+      actor: buildSystemConfigMutationActor(req),
+      bodyRaw: req.body,
+    });
 
     return res.json({
       ok: true,
-      restrictedCountriesCsv: String(updated?.jurisdictionRestrictedIso2Csv ?? restrictedCountriesCsv),
-      restrictedMessage: String(updated?.jurisdictionRestrictedMessage ?? restrictedMessage),
-      countries: parseRestrictedCountriesCsv(String(updated?.jurisdictionRestrictedIso2Csv ?? restrictedCountriesCsv)),
-      updatedAt: updated?.updatedAt || null,
+      restrictedCountriesCsv: result.snapshot.restrictedCountriesCsv,
+      restrictedMessage: result.snapshot.restrictedMessage,
+      countries: parseRestrictedCountriesCsv(result.snapshot.restrictedCountriesCsv),
+      updatedAt: typeof result.updated.updatedAt === "number" ? result.updated.updatedAt : null,
     });
-  } catch (e: any) {
-    return res.status(400).json({ ok: false, error: e?.message || "Failed to set restrictions." });
+  } catch (error) {
+    return respondMutationError(res, error, "Failed to set restrictions.");
   }
 });
 
@@ -183,40 +181,11 @@ adminSystemConfigRouter.post("/jurisdiction-enforcement/revoke-active", async (r
 // Returns all system config values
 adminSystemConfigRouter.get("/all", async (_req, res) => {
   try {
-    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-    
-    if (!config) {
-      return res.json({ ok: true, config: null });
-    }
+    const config = await ensureSystemConfigRow();
 
     return res.json({
       ok: true,
-      config: {
-        maintenanceMode: config.maintenanceMode,
-        tradingHalt: config.tradingHalt,
-        closeOnlyMode: config.closeOnlyMode,
-        blockOpenOnStaleQuotes: config.blockOpenOnStaleQuotes,
-        maintenanceMessage: config.maintenanceMessage,
-        quoteRefreshMs: config.quoteRefreshMs,
-        feedPollMs: config.feedPollMs,
-        staleThresholdMs: config.staleThresholdMs,
-        legalCoverageEnforce: config.legalCoverageEnforce,
-        policyContenderPath1MinAgeDays: config.policyContenderPath1MinAgeDays,
-        policyContenderPath1MinTradesLifetime: config.policyContenderPath1MinTradesLifetime,
-        policyContenderPath1MinBalancePct: config.policyContenderPath1MinBalancePct,
-        policyContenderPath2MinAgeDays: config.policyContenderPath2MinAgeDays,
-        policyContenderPath2MinTradesLast90: config.policyContenderPath2MinTradesLast90,
-        policyContenderPath2MinReturnLast90: config.policyContenderPath2MinReturnLast90,
-        policyContenderPath2MaxDaysSinceLastTrade: config.policyContenderPath2MaxDaysSinceLastTrade,
-        policyAutoPromotePerformer: config.policyAutoPromotePerformer,
-        policyEmailResendCooldownSec: config.policyEmailResendCooldownSec,
-        policyEmailDailySendCap: config.policyEmailDailySendCap,
-        policySmsDailySendCap: config.policySmsDailySendCap,
-        policySmsResendCooldownSec: config.policySmsResendCooldownSec,
-        policyOtpMaxAttempts: config.policyOtpMaxAttempts,
-        policyOtpLockMinutes: config.policyOtpLockMinutes,
-        updatedAt: config.updatedAt,
-      },
+      config: buildSystemConfigAllSnapshot(config),
     });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to get config." });
@@ -227,30 +196,11 @@ adminSystemConfigRouter.get("/all", async (_req, res) => {
 // Returns contender thresholds used for performer selection
 adminSystemConfigRouter.get("/policy", async (_req, res) => {
   try {
-    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
-    if (!config) {
-      return res.json({ ok: true, config: null });
-    }
+    const config = await ensureSystemConfigRow();
 
     return res.json({
       ok: true,
-      config: {
-        policyContenderPath1MinAgeDays: config.policyContenderPath1MinAgeDays,
-        policyContenderPath1MinTradesLifetime: config.policyContenderPath1MinTradesLifetime,
-        policyContenderPath1MinBalancePct: config.policyContenderPath1MinBalancePct,
-        policyContenderPath2MinAgeDays: config.policyContenderPath2MinAgeDays,
-        policyContenderPath2MinTradesLast90: config.policyContenderPath2MinTradesLast90,
-        policyContenderPath2MinReturnLast90: config.policyContenderPath2MinReturnLast90,
-        policyContenderPath2MaxDaysSinceLastTrade: config.policyContenderPath2MaxDaysSinceLastTrade,
-        policyAutoPromotePerformer: config.policyAutoPromotePerformer,
-        policyEmailResendCooldownSec: config.policyEmailResendCooldownSec,
-        policyEmailDailySendCap: config.policyEmailDailySendCap,
-        policySmsDailySendCap: config.policySmsDailySendCap,
-        policySmsResendCooldownSec: config.policySmsResendCooldownSec,
-        policyOtpMaxAttempts: config.policyOtpMaxAttempts,
-        policyOtpLockMinutes: config.policyOtpLockMinutes,
-        updatedAt: config.updatedAt,
-      },
+      config: buildSystemConfigPolicySnapshot(config),
     });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to get config." });
@@ -261,85 +211,16 @@ adminSystemConfigRouter.get("/policy", async (_req, res) => {
 // body: { policyContenderPath1MinAgeDays?, policyContenderPath1MinTradesLifetime?, ... }
 adminSystemConfigRouter.post("/policy", async (req, res) => {
   try {
-    const body = req.body ?? {};
-    const updates: any = {};
-
-    if (body.policyContenderPath1MinAgeDays !== undefined) {
-      updates.policyContenderPath1MinAgeDays = Number(body.policyContenderPath1MinAgeDays);
-    }
-    if (body.policyContenderPath1MinTradesLifetime !== undefined) {
-      updates.policyContenderPath1MinTradesLifetime = Number(body.policyContenderPath1MinTradesLifetime);
-    }
-    if (body.policyContenderPath1MinBalancePct !== undefined) {
-      updates.policyContenderPath1MinBalancePct = Number(body.policyContenderPath1MinBalancePct);
-    }
-    if (body.policyContenderPath2MinAgeDays !== undefined) {
-      updates.policyContenderPath2MinAgeDays = Number(body.policyContenderPath2MinAgeDays);
-    }
-    if (body.policyContenderPath2MinTradesLast90 !== undefined) {
-      updates.policyContenderPath2MinTradesLast90 = Number(body.policyContenderPath2MinTradesLast90);
-    }
-    if (body.policyContenderPath2MinReturnLast90 !== undefined) {
-      updates.policyContenderPath2MinReturnLast90 = Number(body.policyContenderPath2MinReturnLast90);
-    }
-    if (body.policyContenderPath2MaxDaysSinceLastTrade !== undefined) {
-      updates.policyContenderPath2MaxDaysSinceLastTrade = Number(body.policyContenderPath2MaxDaysSinceLastTrade);
-    }
-    if (body.policyAutoPromotePerformer !== undefined) {
-      updates.policyAutoPromotePerformer = body.policyAutoPromotePerformer ? 1 : 0;
-    }
-    if (body.policyEmailResendCooldownSec !== undefined) {
-      updates.policyEmailResendCooldownSec = Number(body.policyEmailResendCooldownSec);
-    }
-    if (body.policyEmailDailySendCap !== undefined) {
-      updates.policyEmailDailySendCap = Number(body.policyEmailDailySendCap);
-    }
-    if (body.policySmsDailySendCap !== undefined) {
-      updates.policySmsDailySendCap = Number(body.policySmsDailySendCap);
-    }
-    if (body.policySmsResendCooldownSec !== undefined) {
-      updates.policySmsResendCooldownSec = Number(body.policySmsResendCooldownSec);
-    }
-    if (body.policyOtpMaxAttempts !== undefined) {
-      updates.policyOtpMaxAttempts = Number(body.policyOtpMaxAttempts);
-    }
-    if (body.policyOtpLockMinutes !== undefined) {
-      updates.policyOtpLockMinutes = Number(body.policyOtpLockMinutes);
-    }
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ ok: false, error: "No policy config updates provided." });
-    }
-
-    updates.updatedAt = nowUnix();
-
-    await db.update(systemConfig)
-      .set(updates)
-      .where(eq(systemConfig.id, 1));
-
-    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const result = await updateSystemConfigPolicy({
+      actor: buildSystemConfigMutationActor(req),
+      bodyRaw: req.body,
+    });
 
     return res.json({
       ok: true,
-      config: {
-        policyContenderPath1MinAgeDays: updated?.policyContenderPath1MinAgeDays,
-        policyContenderPath1MinTradesLifetime: updated?.policyContenderPath1MinTradesLifetime,
-        policyContenderPath1MinBalancePct: updated?.policyContenderPath1MinBalancePct,
-        policyContenderPath2MinAgeDays: updated?.policyContenderPath2MinAgeDays,
-        policyContenderPath2MinTradesLast90: updated?.policyContenderPath2MinTradesLast90,
-        policyContenderPath2MinReturnLast90: updated?.policyContenderPath2MinReturnLast90,
-        policyContenderPath2MaxDaysSinceLastTrade: updated?.policyContenderPath2MaxDaysSinceLastTrade,
-        policyAutoPromotePerformer: updated?.policyAutoPromotePerformer,
-        policyEmailResendCooldownSec: updated?.policyEmailResendCooldownSec,
-        policyEmailDailySendCap: updated?.policyEmailDailySendCap,
-        policySmsDailySendCap: updated?.policySmsDailySendCap,
-        policySmsResendCooldownSec: updated?.policySmsResendCooldownSec,
-        policyOtpMaxAttempts: updated?.policyOtpMaxAttempts,
-        policyOtpLockMinutes: updated?.policyOtpLockMinutes,
-        updatedAt: updated?.updatedAt || null,
-      },
+      config: result.snapshot,
     });
-  } catch (e: any) {
-    return res.status(400).json({ ok: false, error: e?.message || "Failed to set policy config." });
+  } catch (error) {
+    return respondMutationError(res, error, "Failed to set policy config.");
   }
 });

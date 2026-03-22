@@ -33,10 +33,19 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
+  DEFAULT_RESOLVED_PERFORMANCE_SETTINGS,
+  resolvePerformanceSettings,
+  type ResolvedPerformanceSettings,
+} from "@shared/performanceSettings";
+import type {
+  EffectiveProviderSelection,
+  EffectiveQuoteTransportState,
+} from "@shared/runtimeConfig";
+import {
   mergeGlobalSettingsPerformance,
   resolveGlobalPerformanceSettingsPayload,
 } from "@/lib/globalSettingsPerformance";
-import { PERFORMANCE_TIERS, flushIntervalForTier, pollIntervalForTier } from "@/lib/perfHints";
+import { PERFORMANCE_TIERS } from "@/lib/perfHints";
 
 export function parseUserAgent(ua: string | null | undefined): string | null {
   if (!ua) return null;
@@ -130,66 +139,9 @@ export interface GlobalSettings {
   updatedAt: number | null;
 }
 
-export type MarketPerformanceSettings = Pick<
-  GlobalSettings,
-  "restFallbackPollMs" |
-  "wsPushFrequencyMs" |
-  "quoteFlushIntervalMs" |
-  "maxWsReconnectAttempts" |
-  "wsReconnectBaseDelayMs" |
-  "prefetchStrategy" |
-  "prefetchMaxConcurrency" |
-  "prefetchStartDelayMs" |
-  "prefetchFastConcurrencyCap" |
-  "prefetchModerateConcurrencyCap" |
-  "prefetchConstrainedConcurrencyCap" |
-  "prefetchNetworkFastStartDelayMs" |
-  "prefetchNetworkModerateStartDelayMs" |
-  "prefetchNetworkConstrainedStartDelayMs" |
-  "prefetchDeviceModerateStartDelayMs" |
-  "prefetchDeviceConstrainedStartDelayMs" |
-  "prefetchDeviceMinimalStartDelayMs" |
-  "pollInstantMs" |
-  "pollFastMs" |
-  "pollModerateMs" |
-  "pollConstrainedMs" |
-  "pollMinimalMs" |
-  "flushInstantMs" |
-  "flushFastMs" |
-  "flushModerateMs" |
-  "flushConstrainedMs" |
-  "flushMinimalMs"
->;
+export type MarketPerformanceSettings = ResolvedPerformanceSettings;
 
-export const DEFAULT_MARKET_PERFORMANCE_SETTINGS: MarketPerformanceSettings = {
-  restFallbackPollMs: 500,
-  wsPushFrequencyMs: 0,
-  quoteFlushIntervalMs: 50,
-  maxWsReconnectAttempts: 30,
-  wsReconnectBaseDelayMs: 1500,
-  prefetchStrategy: "all",
-  prefetchMaxConcurrency: 4,
-  prefetchStartDelayMs: 0,
-  prefetchFastConcurrencyCap: 3,
-  prefetchModerateConcurrencyCap: 2,
-  prefetchConstrainedConcurrencyCap: 1,
-  prefetchNetworkFastStartDelayMs: 75,
-  prefetchNetworkModerateStartDelayMs: 200,
-  prefetchNetworkConstrainedStartDelayMs: 450,
-  prefetchDeviceModerateStartDelayMs: 50,
-  prefetchDeviceConstrainedStartDelayMs: 150,
-  prefetchDeviceMinimalStartDelayMs: 300,
-  pollInstantMs: 200,
-  pollFastMs: 500,
-  pollModerateMs: 1500,
-  pollConstrainedMs: 4000,
-  pollMinimalMs: 6000,
-  flushInstantMs: 50,
-  flushFastMs: 150,
-  flushModerateMs: 300,
-  flushConstrainedMs: 500,
-  flushMinimalMs: 1000,
-};
+export const DEFAULT_MARKET_PERFORMANCE_SETTINGS: MarketPerformanceSettings = DEFAULT_RESOLVED_PERFORMANCE_SETTINGS;
 
 type MarketPerformanceNumericKey = Exclude<keyof MarketPerformanceSettings, "prefetchStrategy">;
 type PerformanceTierKey = (typeof PERFORMANCE_TIERS)[number];
@@ -210,118 +162,9 @@ export const TIER_FLUSH_SETTING_KEYS: Record<PerformanceTierKey, MarketPerforman
   MINIMAL: "flushMinimalMs",
 };
 
-const clampIntSetting = (value: unknown, min: number, max: number, fallback: number) => {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(n)));
-};
-
 export function resolveMarketPerformanceSettings(candidate: Partial<GlobalSettings> | null | undefined): MarketPerformanceSettings {
   const source = resolveGlobalPerformanceSettingsPayload(candidate);
-  const restFallbackPollMs = clampIntSetting(source.restFallbackPollMs, 100, 60_000, 500);
-  const quoteFlushIntervalMs = clampIntSetting(source.quoteFlushIntervalMs, 20, 5_000, 50);
-  const prefetchRaw = String(source.prefetchStrategy ?? "all").trim().toLowerCase();
-  const prefetchStrategy = prefetchRaw === "critical" || prefetchRaw === "none" ? prefetchRaw : "all";
-
-  return {
-    restFallbackPollMs,
-    wsPushFrequencyMs: clampIntSetting(source.wsPushFrequencyMs, 0, 1_000, 0),
-    quoteFlushIntervalMs,
-    maxWsReconnectAttempts: clampIntSetting(source.maxWsReconnectAttempts, 1, 30, 30),
-    wsReconnectBaseDelayMs: clampIntSetting(source.wsReconnectBaseDelayMs, 100, 30_000, 1500),
-    prefetchStrategy: prefetchStrategy as MarketPerformanceSettings["prefetchStrategy"],
-    prefetchMaxConcurrency: clampIntSetting(source.prefetchMaxConcurrency, 1, 6, 4),
-    prefetchStartDelayMs: clampIntSetting(source.prefetchStartDelayMs, 0, 15_000, 0),
-    prefetchFastConcurrencyCap: clampIntSetting(source.prefetchFastConcurrencyCap, 1, 6, 3),
-    prefetchModerateConcurrencyCap: clampIntSetting(source.prefetchModerateConcurrencyCap, 1, 6, 2),
-    prefetchConstrainedConcurrencyCap: clampIntSetting(source.prefetchConstrainedConcurrencyCap, 1, 6, 1),
-    prefetchNetworkFastStartDelayMs: clampIntSetting(source.prefetchNetworkFastStartDelayMs, 0, 15_000, 75),
-    prefetchNetworkModerateStartDelayMs: clampIntSetting(
-      source.prefetchNetworkModerateStartDelayMs,
-      0,
-      15_000,
-      200,
-    ),
-    prefetchNetworkConstrainedStartDelayMs: clampIntSetting(
-      source.prefetchNetworkConstrainedStartDelayMs,
-      0,
-      15_000,
-      450,
-    ),
-    prefetchDeviceModerateStartDelayMs: clampIntSetting(
-      source.prefetchDeviceModerateStartDelayMs,
-      0,
-      15_000,
-      50,
-    ),
-    prefetchDeviceConstrainedStartDelayMs: clampIntSetting(
-      source.prefetchDeviceConstrainedStartDelayMs,
-      0,
-      15_000,
-      150,
-    ),
-    prefetchDeviceMinimalStartDelayMs: clampIntSetting(source.prefetchDeviceMinimalStartDelayMs, 0, 15_000, 300),
-    pollInstantMs: clampIntSetting(
-      source.pollInstantMs,
-      100,
-      60_000,
-      pollIntervalForTier("INSTANT", restFallbackPollMs),
-    ),
-    pollFastMs: clampIntSetting(
-      source.pollFastMs,
-      100,
-      60_000,
-      pollIntervalForTier("FAST", restFallbackPollMs),
-    ),
-    pollModerateMs: clampIntSetting(
-      source.pollModerateMs,
-      100,
-      60_000,
-      pollIntervalForTier("MODERATE", restFallbackPollMs),
-    ),
-    pollConstrainedMs: clampIntSetting(
-      source.pollConstrainedMs,
-      100,
-      60_000,
-      pollIntervalForTier("CONSTRAINED", restFallbackPollMs),
-    ),
-    pollMinimalMs: clampIntSetting(
-      source.pollMinimalMs,
-      100,
-      60_000,
-      pollIntervalForTier("MINIMAL", restFallbackPollMs),
-    ),
-    flushInstantMs: clampIntSetting(
-      source.flushInstantMs,
-      20,
-      5_000,
-      flushIntervalForTier("INSTANT", quoteFlushIntervalMs),
-    ),
-    flushFastMs: clampIntSetting(
-      source.flushFastMs,
-      20,
-      5_000,
-      flushIntervalForTier("FAST", quoteFlushIntervalMs),
-    ),
-    flushModerateMs: clampIntSetting(
-      source.flushModerateMs,
-      20,
-      5_000,
-      flushIntervalForTier("MODERATE", quoteFlushIntervalMs),
-    ),
-    flushConstrainedMs: clampIntSetting(
-      source.flushConstrainedMs,
-      20,
-      5_000,
-      flushIntervalForTier("CONSTRAINED", quoteFlushIntervalMs),
-    ),
-    flushMinimalMs: clampIntSetting(
-      source.flushMinimalMs,
-      20,
-      5_000,
-      flushIntervalForTier("MINIMAL", quoteFlushIntervalMs),
-    ),
-  };
+  return resolvePerformanceSettings(source);
 }
 
 const MARKET_PERFORMANCE_SETTING_KEYS: readonly (keyof MarketPerformanceSettings)[] = [
@@ -1362,6 +1205,12 @@ export interface SystemConfigData {
   fxRolloverTime: string;
   signupCaptchaEnforce: boolean;
   captchaProvider: string;
+  captchaEffectiveProvider: string;
+  captchaFallbackUsed: boolean;
+  captchaFallbackReason: string | null;
+  captchaTurnstileSecretConfigured: boolean;
+  captchaHcaptchaSecretConfigured: boolean;
+  captchaSelectedProviderSecretConfigured: boolean;
   signupPhoneEnforce: boolean;
   legalCoverageEnforce: boolean;
   jurisdictionRestrictedIso2Csv: string;
@@ -1524,8 +1373,12 @@ export interface SystemHealthData {
 export interface MarketDataProvidersResp {
   ok: boolean;
   activeKey: string | null;
+  fallbackKeys: string[];
   rows: Array<{ providerKey: string; displayName: string; driver: string; isEnabled: boolean; deletedAt: number | null }>;
 }
+
+export type EffectiveQuoteTransportData = EffectiveQuoteTransportState;
+export type MarketDataProvidersEffectiveResp = EffectiveProviderSelection;
 
 export interface LoginHistoryEntry {
   id: number;

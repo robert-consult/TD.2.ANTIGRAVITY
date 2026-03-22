@@ -53,19 +53,40 @@ export function ConfigSync() {
         }
         queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/runtime-config/governance"] });
         return;
       }
 
       if (message.type === "system-config:updated") {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/runtime-config/effective/quote-transport"] });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/config"] });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers/effective"] });
         queryClient.invalidateQueries({ queryKey: ["/api/trader/leaderboard-mode"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config/policy"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config/jurisdiction-restrictions"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/legal-docs-v2/system-config/enforcement"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/runtime-config/governance"] });
         return;
       }
 
       if (message.type === "market-data:providers-updated") {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/runtime-config/governance"] });
+        return;
+      }
+
+      if (message.type === "grift-config:updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/config"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/config/effective"] });
+        return;
+      }
+
+      if (message.type === "activity-config:updated") {
+        queryClient.invalidateQueries({ queryKey: ["admin-activity-config"] });
+        queryClient.invalidateQueries({ queryKey: ["admin-activity-users"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/activity/config/effective"] });
         return;
       }
 

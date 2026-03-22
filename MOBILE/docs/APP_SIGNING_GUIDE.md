@@ -11,9 +11,10 @@ App signing is required for Play Store distribution. This guide covers both debu
 ## Generate Release Keystore
 
 ```bash
-cd MOBILE/android
+install -d -m 700 ~/.config/tradequip/android-signing
+cd ~/.config/tradequip/android-signing
 
-# Generate keystore (keep this file secure!)
+# Generate keystore outside the repo (keep this file secure!)
 keytool -genkey -v \
   -keystore tradequip-release-key.keystore \
   -alias tradequip \
@@ -34,44 +35,26 @@ keytool -genkey -v \
 
 ## Configure Gradle for Signing
 
-### Create `android/key.properties` (DO NOT commit to git)
+### Create an operator-managed `key.properties` file outside the repo
 
 ```properties
 storePassword=your_keystore_password
 keyPassword=your_key_password
 keyAlias=tradequip
-storeFile=../tradequip-release-key.keystore
+storeFile=tradequip-release-key.keystore
 ```
 
-### Update `android/app/build.gradle`
+The wrapper now expects release signing configuration through one of these inputs:
 
-```gradle
-// Load signing config
-def keystorePropertiesFile = rootProject.file("key.properties")
-def keystoreProperties = new Properties()
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-}
+- default local operator path: `~/.config/tradequip/android-signing/key.properties`
+- `TRADEQUIP_ANDROID_KEY_PROPERTIES=/secure/path/key.properties`
+- `-PtradequipAndroidKeyPropertiesPath=/secure/path/key.properties`
 
-android {
-    signingConfigs {
-        release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-        }
-    }
-    
-    buildTypes {
-        release {
-            signingConfig signingConfigs.release
-            minifyEnabled true
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-        }
-    }
-}
-```
+Do not place populated `key.properties` or release keystores under `MOBILE/android/`. Keep the external directory `0700` and the populated `key.properties` / keystore `0600`.
+
+### Reference build.gradle wiring
+
+The current Gradle wiring checks the standard external path first, then allows explicit overrides through the env var or Gradle property. Release builds fail closed if no operator-managed signing file is available.
 
 ---
 
@@ -89,6 +72,13 @@ cd MOBILE/android
 ./gradlew bundleRelease
 
 # AAB location: app/build/outputs/bundle/release/app-release.aab
+```
+
+If you keep the signing file somewhere else, override it explicitly:
+
+```bash
+TRADEQUIP_ANDROID_KEY_PROPERTIES=/secure/path/key.properties ./gradlew assembleRelease
+./gradlew -PtradequipAndroidKeyPropertiesPath=/secure/path/key.properties bundleRelease
 ```
 
 ---
@@ -151,7 +141,7 @@ android {
 ## Checklist Before Release
 
 - [ ] Generate release keystore
-- [ ] Configure key.properties
+- [ ] Configure `~/.config/tradequip/android-signing/key.properties` or an equivalent operator-managed override path outside the repo
 - [ ] Update versionCode and versionName
 - [ ] Test release build on device
 - [ ] Enable ProGuard/R8

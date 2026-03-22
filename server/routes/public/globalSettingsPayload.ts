@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@db";
 import { globalSettings } from "@shared/schema";
+import { resolvePerformanceSettings, type ResolvedPerformanceSettings } from "@shared/performanceSettings";
 import { clampIntOr } from "@shared/scalars";
 import { sanitizeMinPriceDistancePips } from "../../services/globalSettings";
 
@@ -56,6 +57,7 @@ export type PublicGlobalSettingsPayload = {
   updatedAt: number | null;
   wsPushFrequencyMs: number;
   wsReconnectBaseDelayMs: number;
+  performanceSettings: ResolvedPerformanceSettings;
 };
 
 export async function buildPublicGlobalSettingsPayload(): Promise<PublicGlobalSettingsPayload> {
@@ -99,60 +101,7 @@ export async function buildPublicGlobalSettingsPayload(): Promise<PublicGlobalSe
 
   const lotDropdownMax = clampIntOr(settings?.lotDropdownMax, ABSOLUTE_MAX_LOTS, 1, ABSOLUTE_MAX_LOTS);
   const minPriceDistancePips = sanitizeMinPriceDistancePips(settings?.minPriceDistancePips);
-  const restFallbackPollMs = clampIntOr(settings?.restFallbackPollMs, 500, 100, 60_000);
-  const wsPushFrequencyMs = clampIntOr(settings?.wsPushFrequencyMs, 0, 0, 1_000);
-  const quoteFlushIntervalMs = clampIntOr(settings?.quoteFlushIntervalMs, 50, 20, 5_000);
-  const maxWsReconnectAttempts = clampIntOr(settings?.maxWsReconnectAttempts, 30, 1, 30);
-  const wsReconnectBaseDelayMs = clampIntOr(settings?.wsReconnectBaseDelayMs, 1500, 100, 30_000);
-  const prefetchMaxConcurrency = clampIntOr(settings?.prefetchMaxConcurrency, 4, 1, 6);
-  const prefetchStartDelayMs = clampIntOr(settings?.prefetchStartDelayMs, 0, 0, 15_000);
-  const prefetchFastConcurrencyCap = clampIntOr(settings?.prefetchFastConcurrencyCap, 3, 1, 6);
-  const prefetchModerateConcurrencyCap = clampIntOr(settings?.prefetchModerateConcurrencyCap, 2, 1, 6);
-  const prefetchConstrainedConcurrencyCap = clampIntOr(settings?.prefetchConstrainedConcurrencyCap, 1, 1, 6);
-  const prefetchNetworkFastStartDelayMs = clampIntOr(settings?.prefetchNetworkFastStartDelayMs, 75, 0, 15_000);
-  const prefetchNetworkModerateStartDelayMs = clampIntOr(
-    settings?.prefetchNetworkModerateStartDelayMs,
-    200,
-    0,
-    15_000,
-  );
-  const prefetchNetworkConstrainedStartDelayMs = clampIntOr(
-    settings?.prefetchNetworkConstrainedStartDelayMs,
-    450,
-    0,
-    15_000,
-  );
-  const prefetchDeviceModerateStartDelayMs = clampIntOr(
-    settings?.prefetchDeviceModerateStartDelayMs,
-    50,
-    0,
-    15_000,
-  );
-  const prefetchDeviceConstrainedStartDelayMs = clampIntOr(
-    settings?.prefetchDeviceConstrainedStartDelayMs,
-    150,
-    0,
-    15_000,
-  );
-  const prefetchDeviceMinimalStartDelayMs = clampIntOr(
-    settings?.prefetchDeviceMinimalStartDelayMs,
-    300,
-    0,
-    15_000,
-  );
-  const pollInstantMs = clampIntOr(settings?.pollInstantMs, 200, 100, 60_000);
-  const pollFastMs = clampIntOr(settings?.pollFastMs, 500, 100, 60_000);
-  const pollModerateMs = clampIntOr(settings?.pollModerateMs, 1500, 100, 60_000);
-  const pollConstrainedMs = clampIntOr(settings?.pollConstrainedMs, 4000, 100, 60_000);
-  const pollMinimalMs = clampIntOr(settings?.pollMinimalMs, 6000, 100, 60_000);
-  const flushInstantMs = clampIntOr(settings?.flushInstantMs, 50, 20, 5_000);
-  const flushFastMs = clampIntOr(settings?.flushFastMs, 150, 20, 5_000);
-  const flushModerateMs = clampIntOr(settings?.flushModerateMs, 300, 20, 5_000);
-  const flushConstrainedMs = clampIntOr(settings?.flushConstrainedMs, 500, 20, 5_000);
-  const flushMinimalMs = clampIntOr(settings?.flushMinimalMs, 1000, 20, 5_000);
-  const prefetchStrategyRaw = String(settings?.prefetchStrategy ?? "all").trim().toLowerCase();
-  const prefetchStrategy =
-    prefetchStrategyRaw === "critical" || prefetchStrategyRaw === "none" ? prefetchStrategyRaw : "all";
+  const performanceSettings = resolvePerformanceSettings(settings ?? null);
 
   const presetsParsed = parsePresetCards(settings?.lotPresetCards, lotDropdownMax);
   const lotPresetCardsArray =
@@ -166,34 +115,9 @@ export async function buildPublicGlobalSettingsPayload(): Promise<PublicGlobalSe
     lotDropdownMax,
     lotDropdownOptions: Array.from({ length: lotDropdownMax }, (_value, index) => index + 1),
     minPriceDistancePips,
-    restFallbackPollMs,
-    wsPushFrequencyMs,
-    quoteFlushIntervalMs,
-    maxWsReconnectAttempts,
-    wsReconnectBaseDelayMs,
-    prefetchStrategy,
-    prefetchMaxConcurrency,
-    prefetchStartDelayMs,
-    prefetchFastConcurrencyCap,
-    prefetchModerateConcurrencyCap,
-    prefetchConstrainedConcurrencyCap,
-    prefetchNetworkFastStartDelayMs,
-    prefetchNetworkModerateStartDelayMs,
-    prefetchNetworkConstrainedStartDelayMs,
-    prefetchDeviceModerateStartDelayMs,
-    prefetchDeviceConstrainedStartDelayMs,
-    prefetchDeviceMinimalStartDelayMs,
-    pollInstantMs,
-    pollFastMs,
-    pollModerateMs,
-    pollConstrainedMs,
-    pollMinimalMs,
-    flushInstantMs,
-    flushFastMs,
-    flushModerateMs,
-    flushConstrainedMs,
-    flushMinimalMs,
+    ...performanceSettings,
     absoluteMaxLots: ABSOLUTE_MAX_LOTS,
     updatedAt: typeof settings?.updatedAt === "number" ? settings.updatedAt : null,
+    performanceSettings,
   };
 }

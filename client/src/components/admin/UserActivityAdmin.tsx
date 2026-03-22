@@ -24,6 +24,16 @@ type ActivityConfig = {
 
   activityAutoQueueInactive: boolean;
   activityAutoSoftDelete: boolean;
+  effective?: {
+    botGuard: {
+      tradePowChallengeScore: number;
+      heuristicVersion: string;
+      powChallengeScore: number;
+    };
+    diagnostics: {
+      cacheTtlMs: number;
+    };
+  };
 };
 
 type Row = {
@@ -496,6 +506,29 @@ export default function UserActivityAdmin() {
                   Valkey enabled
                 </label>
               </div>
+              {cfg?.effective ? (
+                <div className="rounded-md border border-cyan-700/30 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+                  <div className="font-medium text-cyan-100">Effective Bot Guard State</div>
+                  <div className="mt-2 grid gap-2 md:grid-cols-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Signup/Login proof score</div>
+                      <div>{cfg.effective.botGuard.powChallengeScore}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Trade proof score</div>
+                      <div>{cfg.effective.botGuard.tradePowChallengeScore}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-cyan-200/70">Heuristic version</div>
+                      <div>{cfg.effective.botGuard.heuristicVersion}</div>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[11px] text-cyan-100/75">
+                    Coarse anti-bot controls are operator-editable. Action-specific scoring ladders remain code-owned and versioned.
+                    Cache TTL: {cfg.effective.diagnostics.cacheTtlMs} ms.
+                  </p>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>

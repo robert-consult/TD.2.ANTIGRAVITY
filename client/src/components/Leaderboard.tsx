@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useMemo } from "react";
+import { usePerfHints } from "@/lib/perfHints";
+import { resolveRuntimeIntervals } from "@/lib/runtimeIntervals";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 
 type LeaderboardItem = {
   userId: number;
@@ -9,9 +13,15 @@ type LeaderboardItem = {
 };
 
 export function Leaderboard() {
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const runtimeIntervals = useMemo(
+    () => resolveRuntimeIntervals(perfHints, performanceSettings),
+    [perfHints, performanceSettings],
+  );
   const { data: leaderboard = [], isLoading } = useQuery<LeaderboardItem[]>({
     queryKey: ["/api/leaderboard"],
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: runtimeIntervals.leaderboard.entriesPollMs,
   });
 
   return (

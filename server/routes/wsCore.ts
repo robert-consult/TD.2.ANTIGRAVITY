@@ -109,9 +109,27 @@ const wsMaxPayloadBytes = Math.max(
 
 // --- Internal WebSocket server for live updates (quotes + trades) ---
 const wss = new WebSocketServer({
-  server: httpServer,
-  path: "/ws",
+  noServer: true,
   maxPayload: wsMaxPayloadBytes,
+});
+
+httpServer.on("upgrade", (request, socket, head) => {
+  let pathname = "";
+  try {
+    const host = String(request.headers.host ?? "localhost");
+    pathname = new URL(request.url ?? "/", `http://${host}`).pathname;
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  if (pathname !== "/ws") {
+    return;
+  }
+
+  wss.handleUpgrade(request, socket, head, (client) => {
+    wss.emit("connection", client, request);
+  });
 });
 
 function wsEnvFlagEnabled(raw: string | undefined, fallback: boolean): boolean {
@@ -484,6 +502,42 @@ let queuedQuoteSeq = 0;
 let queuedQuoteAsOf = 0;
 let queuedQuoteFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedQuoteAnonRowId = 0;
+const quoteSubscriptionGroups = new Map<string, Set<LiveClient>>();
+
+function addClientToQuoteGroup(key: string, client: LiveClient) {
+  if (!key) return;
+  let bucket = quoteSubscriptionGroups.get(key);
+  if (!bucket) {
+    bucket = new Set();
+    quoteSubscriptionGroups.set(key, bucket);
+  }
+  bucket.add(client);
+}
+
+function removeClientFromQuoteGroup(key: string, client: LiveClient) {
+  if (!key) return;
+  const bucket = quoteSubscriptionGroups.get(key);
+  if (!bucket) return;
+  bucket.delete(client);
+  if (bucket.size === 0) {
+    quoteSubscriptionGroups.delete(key);
+  }
+}
+
+function updateClientQuoteGroup(client: LiveClient, nextKey: string) {
+  const prevKey = client.quoteKey ?? "";
+  if (prevKey === nextKey) {
+    client.quoteKey = nextKey;
+    return;
+  }
+  if (prevKey) removeClientFromQuoteGroup(prevKey, client);
+  client.quoteKey = nextKey;
+  if (nextKey) addClientToQuoteGroup(nextKey, client);
+}
+
+function cleanupQuoteGroupForClient(client: LiveClient) {
+  updateClientQuoteGroup(client, "");
+}
 
 function applyLiveWsPushFrequencyMs(value: unknown) {
   liveWsPushFrequencyMs = clampWsPushFrequencyMs(value);
@@ -580,7 +634,7 @@ function computeQuoteKey(symbols: Set<string> | undefined): string {
 }
 
 function syncClientQuoteKey(client: LiveClient) {
-  client.quoteKey = computeQuoteKey(client.quoteSymbols);
+  updateClientQuoteGroup(client, computeQuoteKey(client.quoteSymbols));
 }
 
 function normIso2(v: any): string | undefined {
@@ -655,6 +709,15 @@ async function destroyCookieSession(sid: string) {
 function wsSendJson(socket: WebSocket, payload: any) {
   try {
     socket.send(JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
+
+function safeSendPayload(client: LiveClient, payload: string) {
+  if (client.readyState !== WebSocket.OPEN) return;
+  try {
+    client.send(payload);
   } catch {
     // ignore
   }
@@ -771,9 +834,9 @@ function appendImpersonationWsConnectAudit(client: LiveClient) {
 function broadcast(event: any, filter?: (client: LiveClient) => boolean) {
   const payload = JSON.stringify(event);
   for (const client of wss.clients as Set<LiveClient>) {
-    if (client.readyState === WebSocket.OPEN && (!filter || filter(client))) {
-      client.send(payload);
-    }
+    if (client.readyState !== WebSocket.OPEN) continue;
+    if (filter && !filter(client)) continue;
+    safeSendPayload(client, payload);
   }
 }
 
@@ -872,6 +935,7 @@ wss.on("connection", async (socket, req) => {
   const client = socket as LiveClient;
   const pendingMessages: any[] = [];
   let wsReady = false;
+  socket.once("close", () => cleanupQuoteGroupForClient(client));
 
   if (wsTransportTlsRequired && !isWsRequestTransportSecure(req)) {
     wsSendJson(socket, {
@@ -1238,34 +1302,23 @@ wsPolicyRecheckTimer.unref?.();
 function broadcastQuoteRowsUpdate(rows: any[], seq: number, asOf: number) {
   if (!Array.isArray(rows) || rows.length === 0) return;
 
-  // Pre-serialize per subscription key to avoid per-socket JSON.stringify work.
-  const groups = new Map<string, LiveClient[]>();
-  for (const ws of wss.clients as Set<LiveClient>) {
-    if (ws.readyState !== WebSocket.OPEN) continue;
-    const client = ws as LiveClient;
-    const key = client.quoteKey ?? computeQuoteKey(client.quoteSymbols);
-    if (!key) continue;
-    const list = groups.get(key);
-    if (list) list.push(client);
-    else groups.set(key, [client]);
+  const rowsBySymbol = new Map<string, any>();
+  for (const row of rows) {
+    if (!row?.symbol) continue;
+    rowsBySymbol.set(String(row.symbol).toUpperCase(), row);
   }
+  if (rowsBySymbol.size === 0) return;
 
-  if (groups.size === 0) return;
+  for (const [key, clients] of quoteSubscriptionGroups.entries()) {
+    if (!key || clients.size === 0) continue;
 
-  const rowsWithSymbols = rows
-    .map((row: any) => {
-      if (!row?.symbol) return null;
-      return { row, symbol: String(row.symbol).toUpperCase() };
-    })
-    .filter(Boolean) as Array<{ row: any; symbol: string }>;
-
-  for (const [, clients] of groups.entries()) {
-    const symbols = clients[0]?.quoteSymbols;
-    if (!symbols || symbols.size === 0) continue;
+    const symbols = key.split(",").filter(Boolean);
+    if (!symbols.length) continue;
 
     const rowsForGroup: any[] = [];
-    for (const item of rowsWithSymbols) {
-      if (symbols.has(item.symbol)) rowsForGroup.push(item.row);
+    for (const symbol of symbols) {
+      const cached = rowsBySymbol.get(symbol);
+      if (cached) rowsForGroup.push(cached);
     }
     if (rowsForGroup.length === 0) continue;
 
@@ -1282,13 +1335,9 @@ function broadcastQuoteRowsUpdate(rows: any[], seq: number, asOf: number) {
       continue;
     }
 
-    for (const client of clients) {
-      if (client.readyState !== WebSocket.OPEN) continue;
-      try {
-        client.send(serialized);
-      } catch {
-        // ignore
-      }
+    const snapshot = Array.from(clients);
+    for (const client of snapshot) {
+      safeSendPayload(client, serialized);
     }
   }
 }

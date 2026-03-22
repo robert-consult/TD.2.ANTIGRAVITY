@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
     autoCloseCheckFrequencyMinutes: 60,
   },
   getOldOpenTrades: vi.fn(),
-  liveHandler: undefined as ((event: unknown) => void) | undefined,
+  liveHandlers: [] as Array<(event: unknown) => void>,
   log: vi.fn(),
 }));
 
@@ -64,9 +64,9 @@ vi.mock("../lib/auditWriter", () => ({
 
 vi.mock("../services/liveBus", () => ({
   onLiveEvent: (handler: (event: unknown) => void) => {
-    state.liveHandler = handler;
+    state.liveHandlers.push(handler);
     return () => {
-      state.liveHandler = undefined;
+      state.liveHandlers = state.liveHandlers.filter((entry) => entry !== handler);
     };
   },
   publishLiveEvent: () => {},
@@ -118,7 +118,7 @@ beforeEach(() => {
   };
   state.getOldOpenTrades.mockReset();
   state.getOldOpenTrades.mockResolvedValue([]);
-  state.liveHandler = undefined;
+  state.liveHandlers = [];
   state.log.mockClear();
 });
 
@@ -148,8 +148,10 @@ test("reschedules when live settings updates are published", async () => {
   await startAutoCloseScheduler();
 
   state.settings.autoCloseCheckFrequencyMinutes = 5;
-  expect(state.liveHandler).toBeTypeOf("function");
-  state.liveHandler?.({ type: "global-settings:updated" });
+  expect(state.liveHandlers.length).toBeGreaterThan(0);
+  for (const handler of state.liveHandlers) {
+    handler({ type: "global-settings:updated" });
+  }
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();

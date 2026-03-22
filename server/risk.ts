@@ -1,7 +1,7 @@
 import { storage } from './storage';
 import { Request, Response, NextFunction } from 'express';
 import dayjs from 'dayjs';
-import { Trade, globalSettings, systemConfig, symbolConfigs } from '@shared/schema';
+import { Trade, systemConfig, symbolConfigs } from '@shared/schema';
 import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { getLatestQuoteRow } from './services/quoteService';
@@ -10,6 +10,12 @@ import { appendIdentityAudit } from "./services/identityAudit";
 import { appendChallengeEvent } from "./recruitment/challengesV4/challengeEvents";
 import { getSystemChallengeConfig } from "./recruitment/challengesV4/challengeConfig";
 import { recalcAccount } from "./recalcAccount";
+import { isTradingAllowedBySchedule } from "@shared/tradingRiskConfig";
+import {
+  getTradingRiskSnapshot,
+  getUserEffectiveMinHoldSec,
+  getUserTradeLimits,
+} from "./services/runtimeConfig/tradingRisk";
 
 /**
  * Risk management middleware for the TradeQuip platform
@@ -22,16 +28,6 @@ import { recalcAccount } from "./recalcAccount";
  */
 
 const INITIAL_BALANCE_USD = 1_000_000;
-
-const DEFAULTS = {
-  maxTradesPerUser: 10,
-  maxTradesPerInstrument: 3,
-  maxConcurrentLots: 50,
-  dailyLossLimitPct: 10,
-  lifetimeLossLimitPct: 20,
-  enableLossLimits: true,
-  minHoldSec: 60,
-};
 
 type NewsBlackoutWindow = {
   startAt: number;
@@ -193,13 +189,6 @@ function emitChallengeTradeBlockTelemetry(input: {
   });
 }
 
-async function getGlobalSettings() {
-  const gs = await db.query.globalSettings.findFirst({
-    where: eq(globalSettings.id, 1),
-  });
-  return gs ?? null;
-}
-
 async function getSystemConfig() {
   const sc = await db.query.systemConfig.findFirst({
     where: eq(systemConfig.id, 1),
@@ -208,99 +197,11 @@ async function getSystemConfig() {
 }
 
 /**
- * Checks if trading is allowed based on configured market hours.
- * NOTE: All times are interpreted as UTC. Admin should configure times in UTC format.
- * Example: For US Eastern (EST = UTC-5), if markets open 9:30 AM EST, configure "14:30".
- */
-function checkMarketHours(gs: any): { allowed: boolean; reason: string } {
-  const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 6 = Saturday (use UTC day)
-  
-  // Check weekend trading
-  const allowWeekendTrading = gs?.allowWeekendTrading ?? true;
-  if (!allowWeekendTrading && (dayOfWeek === 0 || dayOfWeek === 6)) {
-    return { 
-      allowed: false, 
-      reason: "Weekend trading is disabled. Markets open Monday." 
-    };
-  }
-  
-  // Check market hours (configured as UTC)
-  const marketOpenTime = gs?.marketOpenTime ?? "00:00";
-  const marketCloseTime = gs?.marketCloseTime ?? "23:59";
-  
-  // Parse times
-  const [openHour, openMin] = marketOpenTime.split(":").map(Number);
-  const [closeHour, closeMin] = marketCloseTime.split(":").map(Number);
-  
-  const currentHour = now.getUTCHours();
-  const currentMin = now.getUTCMinutes();
-  const currentTime = currentHour * 60 + currentMin;
-  const openTime = openHour * 60 + openMin;
-  const closeTime = closeHour * 60 + closeMin;
-  
-  // Handle overnight markets (close time < open time means next day)
-  let isWithinHours: boolean;
-  if (closeTime < openTime) {
-    // Overnight market: open at e.g. 22:00, close at 21:00 next day
-    isWithinHours = currentTime >= openTime || currentTime < closeTime;
-  } else {
-    // Normal hours: open at e.g. 08:00, close at 17:00
-    isWithinHours = currentTime >= openTime && currentTime < closeTime;
-  }
-  
-  if (!isWithinHours) {
-    return { 
-      allowed: false, 
-      reason: `Trading is only available between ${marketOpenTime} and ${marketCloseTime} UTC.` 
-    };
-  }
-  
-  return { allowed: true, reason: "" };
-}
-
-async function getEffectiveLimits(userId: number) {
-  const gs = await getGlobalSettings();
-  const us = await storage.getUserSettingsById(userId);
-
-  const gMaxTradesPerUser = Number(gs?.maxTradesPerUser ?? DEFAULTS.maxTradesPerUser);
-  const gMaxTradesPerInstrument = Number(gs?.maxTradesPerInstrument ?? DEFAULTS.maxTradesPerInstrument);
-  const gMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? DEFAULTS.maxConcurrentLots);
-  const gEnableLossLimits = gs?.enableLossLimits ?? DEFAULTS.enableLossLimits;
-  const gDailyLossLimitPct = Number(gs?.dailyLossLimitPct ?? DEFAULTS.dailyLossLimitPct);
-  const gLifetimeLossLimitPct = Number(gs?.lifetimeLossLimitPct ?? DEFAULTS.lifetimeLossLimitPct);
-
-  // User overrides take precedence over global (can exceed global limits)
-  const effectiveMaxTradesPerUser = Number(us?.maxConcurrent ?? gMaxTradesPerUser);
-  const effectiveMaxConcurrentLots = Number(us?.maxConcurrentLots ?? gMaxConcurrentLots);
-  const effectiveMaxTradesPerInstrument = Number(us?.maxConcurrentPerInstrument ?? gMaxTradesPerInstrument);
-
-  return {
-    maxTradesPerInstrument: effectiveMaxTradesPerInstrument,
-    maxTradesPerUser: effectiveMaxTradesPerUser,
-    maxConcurrentLots: effectiveMaxConcurrentLots,
-    enableLossLimits: gEnableLossLimits,
-    dailyLossLimitPct: gDailyLossLimitPct,
-    lifetimeLossLimitPct: gLifetimeLossLimitPct,
-  };
-}
-
-/**
  * Get effective minimum hold time in seconds for a user.
  * User-level override takes precedence over global default.
  */
 export async function getEffectiveMinHoldSec(userId: number): Promise<number> {
-  const gs = await getGlobalSettings();
-  const us = await storage.getUserSettingsById(userId);
-
-  const globalMinHoldSec = Number(gs?.minHoldSec ?? DEFAULTS.minHoldSec);
-  
-  // User override takes precedence (if set and > 0)
-  if (us?.minHoldSec != null && Number(us.minHoldSec) > 0) {
-    return Number(us.minHoldSec);
-  }
-  
-  return globalMinHoldSec;
+  return getUserEffectiveMinHoldSec(userId);
 }
 
 export async function riskMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -405,18 +306,18 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
   }
 
   // Check market hours enforcement
-  const gs = await getGlobalSettings();
-  const marketHoursCheck = checkMarketHours(gs);
+  const tradingRisk = await getTradingRiskSnapshot();
+  const marketHoursCheck = isTradingAllowedBySchedule(tradingRisk);
   if (!marketHoursCheck.allowed) {
     return res.status(403).json({ 
       message: marketHoursCheck.reason,
-      marketOpen: gs?.marketOpenTime ?? "00:00",
-      marketClose: gs?.marketCloseTime ?? "23:59",
-      allowWeekendTrading: gs?.allowWeekendTrading ?? true
+      marketOpen: tradingRisk.marketOpenTime,
+      marketClose: tradingRisk.marketCloseTime,
+      allowWeekendTrading: tradingRisk.allowWeekendTrading,
     });
   }
 
-  const limits = await getEffectiveLimits(userId);
+  const limits = await getUserTradeLimits(userId, tradingRisk);
 
   // Get OPEN + PENDING trades (count both as "active/concurrent")
   const openTrades = await storage.getOpenTradesByUserId(userId);

@@ -13,8 +13,8 @@ Operational and developer tooling: DB ensure/audit/dump, activity audits, i18n t
 - Activity audit: `scripts/activityAuditVerify.ts`
 - Admin smoke: `scripts/adminSmoke.ts`
 - Load tests: `scripts/loadtest/publishQuotes.ts`, `scripts/loadtest/wsFanout.ts`
+- Docs automation: `scripts/docs/AGENTS.md`, `scripts/docs/README.md`
 
 ## Required checks before finalizing
 - If you changed DB tooling: run `npm run db:audit`
 - If you changed load tests: run the modified script locally with a safe target
-

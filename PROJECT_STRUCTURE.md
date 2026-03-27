@@ -11,7 +11,7 @@
 | Component | Path | Technology | Dependencies Location |
 |-----------|------|------------|----------------------|
 | Public Website | `WEBSITE/` | React 18 + Vite + Express + build-time markdown sync | `WEBSITE/node_modules/` |
-| Web Frontend | `client/` | React 18 + Vite | `node_modules/` (root) |
+| Web Frontend | `client/` | React 19 + Vite | `node_modules/` (root) |
 | Backend API | `server/` | Express + Node | `node_modules/` (root) |
 | Shared Types & Schemas | `shared/` | TypeScript + Zod + Drizzle | `node_modules/` (root) |
 | Database Layer | `db/` | Drizzle ORM + PostgreSQL | `node_modules/` (root) |
@@ -45,6 +45,15 @@ TD.2.ANTIGRAVITY/                        ← Root workspace
 │   └── security/                        ← Repo-local security
 │       ├── AGENTS.md                    # Security agent guidance
 │       └── vuln-db/                     # Vulnerability database (YAML files)
+│
+├── 📚 DOCUMENTATION PROGRAM
+│   └── Documentation/                   ← Public/internal/generated docs hub
+│       ├── SUMMARY.md                   # Landing page for public + internal lanes
+│       ├── public/                      # GitBook-safe public documentation
+│       ├── internal/                    # Developer/operator/agent reference
+│       ├── generated/                   # Source-derived catalogs (REST/WS/env/runtime)
+│       ├── 08_Documentation_Enhancement/ # Audit, gap register, architecture, migration
+│       └── 00_... through 07_...        # Legacy numbered docs retained during migration
 │
 ├── 🌍 PUBLIC WEBSITE MODULE
 │   └── WEBSITE/                         ← Standalone marketing + education site
@@ -602,7 +611,7 @@ npm install     # Alternative
 - `ws` — WebSocket server
 - `passport` — Authentication
 - `bull` / `bullmq` — Job queues
-- `i18next` — Internationalization
+- Custom i18n runtime in `client/src/i18n/` and `server/i18n/`
 
 ---
 
@@ -620,7 +629,7 @@ npm install
 
 **Sync after web or plugin changes:**
 ```bash
-npm run sync
+cd MOBILE && npm run sync
 ```
 
 **Key packages:**
@@ -644,7 +653,7 @@ cd TD.2.ANTIGRAVITY/NATIVE
 npm install
 
 # iOS only (macOS + Xcode):
-npm run pod:install
+cd NATIVE && npm run pod:install
 ```
 
 **Key packages:**
@@ -687,14 +696,14 @@ npm run pod:install
 
 1. Define schema in `shared/schema.pg.*.ts` (appropriate domain schema file)
 2. Generate migration: `npm run db:generate`
-3. Apply migration: `npm run db:migrate`
+3. Apply migration: `npm run db:migrate:drizzle`
 4. Add queries in `server/storage.ts` or appropriate service
 
 ### Adding a New Mobile Feature
 
 | Type | Where to Add |
 |------|--------------| 
-| Capacitor plugin or wrapper shell change | `MOBILE/`, then `npm run sync` |
+| Capacitor plugin or wrapper shell change | `MOBILE/`, then `cd MOBILE && npm run sync` |
 | Wrapper route/lifecycle bridge | `MOBILE/src/mobile/` plus `client/src/components/MobileWrapperBridge.tsx` |
 | Native module | `NATIVE/android/` or `NATIVE/ios/` |
 | Shared native screen/component | `NATIVE/src/components/` or `NATIVE/src/screens/` |
@@ -729,16 +738,14 @@ npm run start
 ### Database
 ```bash
 npm run db:generate        # Generate migrations from schema
-npm run db:migrate          # Apply migrations (alias: db:migrate:drizzle)
+npm run db:migrate:drizzle  # Apply migrations
 npm run db:ensure           # Bootstrap local DB
-npm run db:studio           # Open Drizzle Studio
 npm run db:audit            # Run DB audit
 npm run db:audit:auto       # Schema dump + audit
 ```
 
 ### Testing
 ```bash
-npm run test               # Unit tests (Vitest)
 npm run e2e                # Playwright E2E tests
 npm run e2e:install        # Install Playwright browsers
 npm run smoke:admin        # Admin smoke test
@@ -765,40 +772,34 @@ cd petascale && docker compose up -d
 
 ### MOBILE (Capacitor)
 ```bash
-cd MOBILE
-
-# Install/update dependencies
-npm install
+cd MOBILE && npm install
 
 # Sync the live web build into both shells
-npm run sync
+cd MOBILE && npm run sync
 
 # Android diagnostics / build
-npm run doctor
-npm run run:android
-npm run build:android:release
+cd MOBILE && npm run doctor
+cd MOBILE && npm run run:android
+cd MOBILE && npm run build:android:release
 
 # iOS wrapper (macOS + Xcode only)
-npm run run:ios
+cd MOBILE && npm run run:ios
 ```
 
 ### NATIVE (React Native)
 ```bash
-cd NATIVE
-
-# Development / validation
-npm test
-npm run lint
-npm run android
+cd NATIVE && npm test
+cd NATIVE && npm run lint
+cd NATIVE && npm run android
 
 # Android release
-npm run build:android
-npm run build:android:bundle
+cd NATIVE && npm run build:android
+cd NATIVE && npm run build:android:bundle
 
 # iOS (macOS + Xcode only)
-npm run pod:install
-npm run ios
-npm run build:ios
+cd NATIVE && npm run pod:install
+cd NATIVE && npm run ios
+cd NATIVE && npm run build:ios
 ```
 
 ### Mobile/Native End-to-End
@@ -850,7 +851,7 @@ cd MOBILE && npx cap sync  # Sync to Capacitor
 ### When Schema Changes:
 1. Update schema in `shared/schema.pg.*.ts`
 2. Generate migration: `npm run db:generate`
-3. Apply migration: `npm run db:migrate`
+3. Apply migration: `npm run db:migrate:drizzle`
 4. Update `server/storage.ts` queries
 5. Update client hooks as needed
 
@@ -898,13 +899,11 @@ npm run dev
 
 # Database operations
 npm run db:generate        # Generate migrations
-npm run db:migrate          # Apply migrations
+npm run db:migrate:drizzle  # Apply migrations
 npm run db:ensure           # Bootstrap local DB
-npm run db:studio           # Open Drizzle Studio
 npm run db:audit            # Audit DB schema
 
 # Testing
-npm run test               # Unit tests
 npm run e2e                # Playwright E2E
 npm run smoke:admin        # Admin smoke test
 

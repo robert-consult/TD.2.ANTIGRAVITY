@@ -114,6 +114,10 @@ Key references:
 
 ## Additional Docs
 
+- public docs: `Documentation/public/`
+- internal docs: `Documentation/internal/`
+- generated reference: `Documentation/generated/`
+- documentation program: `Documentation/08_Documentation_Enhancement/`
 - structure map: `PROJECT_STRUCTURE.md`
 - agent and checklists: `AGENTS.md`, `.agents/`
 - deployment manifests: `k8s/`

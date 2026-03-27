@@ -69,7 +69,7 @@ export const APP_CONFIG = {
   - `/home/bcodex/PUBLIC WEBSITE/education_module_development`
 - WEBSITE consumes those inputs only during `npm run content:sync`.
 - Runtime reads only the generated files in `server/content/generated/`.
-- `npm run audit:website-isolation` still enforces that WEBSITE code does not import from outside `WEBSITE/`.
+- the repo-root `audit:website-isolation` script still enforces that WEBSITE code does not import from outside `WEBSITE/`.
 
 ## Local Runtime
 
@@ -84,4 +84,4 @@ export const APP_CONFIG = {
 - **Zero shared database** — website server has no DB connection
 - **Zero shared auth** — website has no concept of "logged in" users
 - **Deletable** — removing `WEBSITE/` has zero effect on the trading app
-- **Auditable** — `npm run audit:website-isolation` fails on cross-imports in either direction
+- **Auditable** — the repo-root `audit:website-isolation` script fails on cross-imports in either direction

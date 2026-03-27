@@ -10,30 +10,42 @@ echo "========================================"
 
 cd "$(dirname "$0")"
 
-# Check for key.properties
-if [ ! -f "android/key.properties" ]; then
+DEFAULT_SIGNING_HOME="${HOME}/.config/tradequip/android-signing"
+KEY_PROPERTIES_PATH="${TRADEQUIP_ANDROID_KEY_PROPERTIES:-${DEFAULT_SIGNING_HOME}/key.properties}"
+
+if [ ! -f "$KEY_PROPERTIES_PATH" ]; then
     echo ""
-    echo "ERROR: android/key.properties not found!"
+    echo "ERROR: Android signing config not found at $KEY_PROPERTIES_PATH"
     echo ""
-    echo "Create android/key.properties with:"
+    echo "Create an operator-managed key.properties file outside the repo with:"
     echo "  storePassword=your_password"
     echo "  keyPassword=your_password"
     echo "  keyAlias=tradequip"
-    echo "  storeFile=../tradequip-release-key.keystore"
+    echo "  storeFile=tradequip-release-key.keystore"
     echo ""
+    echo "Recommended path: ${DEFAULT_SIGNING_HOME}/key.properties"
+    echo "Override with TRADEQUIP_ANDROID_KEY_PROPERTIES=/secure/path/key.properties"
     echo "See docs/APP_SIGNING_GUIDE.md for details."
     exit 1
 fi
 
-# Check for keystore
-KEYSTORE_PATH="android/tradequip-release-key.keystore"
+KEYSTORE_PATH="$(awk -F '=' '/^storeFile=/{print $2}' "$KEY_PROPERTIES_PATH" | tr -d '\r' | xargs)"
+if [ -z "$KEYSTORE_PATH" ]; then
+    echo ""
+    echo "ERROR: storeFile is missing from $KEY_PROPERTIES_PATH"
+    echo ""
+    exit 1
+fi
+
+if [[ "$KEYSTORE_PATH" != /* ]]; then
+    KEYSTORE_PATH="$(cd "$(dirname "$KEY_PROPERTIES_PATH")" && pwd)/$KEYSTORE_PATH"
+fi
+
 if [ ! -f "$KEYSTORE_PATH" ]; then
     echo ""
     echo "ERROR: Keystore not found at $KEYSTORE_PATH"
     echo ""
-    echo "Generate with:"
-    echo "  keytool -genkey -v -keystore tradequip-release-key.keystore \\"
-    echo "    -alias tradequip -keyalg RSA -keysize 2048 -validity 10000"
+    echo "Generate or restore it under $(dirname "$KEY_PROPERTIES_PATH") and reference it from key.properties"
     exit 1
 fi
 
@@ -50,7 +62,8 @@ npx cap sync android
 echo ""
 echo "[3/3] Building release APK and AAB..."
 cd android
-./gradlew clean assembleRelease bundleRelease
+./gradlew clean assembleRelease bundleRelease \
+  -PtradequipAndroidKeyPropertiesPath="$KEY_PROPERTIES_PATH"
 
 echo ""
 echo "========================================"

@@ -33,17 +33,35 @@ Stand-alone scripts, fuzzers, and templates used for neutralizing injection vect
 - Optional internal-TLS bundle (requires cert-manager CRDs): `kubectl apply -f ops/kubernetes/75-internal-tls.yaml`
 
 ### Pre-apply prerequisites
-- Ensure dashboard ConfigMaps exist (`tradehub-dashboards`, `pigsty-*`) as referenced by `ops/kubernetes/grafana-deployment.yaml`.
-- Create MinIO monitor app/static ConfigMaps:
-  - `kubectl create configmap tradehub-minio-monitor-app --from-file=app.py=ops/minio-monitor/app.py -n tradehub --dry-run=client -o yaml | kubectl apply -f -`
-  - `kubectl create configmap tradehub-minio-monitor-static --from-file=index.html=ops/minio-monitor/static/index.html --from-file=app.js=ops/minio-monitor/static/app.js --from-file=styles.css=ops/minio-monitor/static/styles.css -n tradehub --dry-run=client -o yaml | kubectl apply -f -`
+- `kubectl apply -k ops/kubernetes` generates the dashboard, MinIO monitor, and Headlamp plugin ConfigMaps automatically.
+- If `ops/headlamp-plugin/src/index.tsx` changed, rebuild and sync the shipped plugin asset before `kubectl apply -k ops/kubernetes`:
+  - `npm run build --prefix ops/headlamp-plugin`
+  - `mkdir -p ops/kubernetes/assets/headlamp-plugin`
+  - `cp ops/headlamp-plugin/dist/main.js ops/kubernetes/assets/headlamp-plugin/main.js`
+- The manual `kubectl create configmap ...` steps are only needed if you bypass the canonical kustomize apply path and apply individual manifests by hand.
 
 ### Auth-gated admin surfaces
+- Grafana ingress uses app-session auth:
+  - `ops/kubernetes/grafana-ingress.yaml` -> `resource=grafana` (`admin`, `superadmin`)
+- Prometheus ingress uses app-session auth:
+  - `ops/kubernetes/prometheus-ingress.yaml` -> `resource=prometheus` (`superadmin`)
 - Headlamp ingress uses app-session auth:
-  - `ops/kubernetes/headlamp-ingress.yaml` -> `resource=headlamp`
+  - `ops/kubernetes/headlamp-ingress.yaml` -> `resource=headlamp` (`superadmin`)
 - Bull-board ingress uses app-session auth:
-  - `ops/kubernetes/bull-board-ingress.yaml` -> `resource=bullboard`
+  - `ops/kubernetes/bull-board-ingress.yaml` -> `resource=bullboard` (`superadmin`)
 - MinIO monitor ingress uses app-session auth:
-  - `ops/kubernetes/minio-monitor-deployment.yaml` -> `resource=minio-monitor`
+  - `ops/kubernetes/minio-monitor-deployment.yaml` -> `resource=minio-monitor` (`superadmin`)
 - Auth backend endpoint:
-  - `GET /api/admin/ops/ingress-auth?resource=<headlamp|bullboard|minio-monitor|grafana>`
+  - `GET /api/admin/ops/ingress-auth?resource=<grafana|prometheus|headlamp|bullboard|minio-monitor>`
+
+### Canonical operator paths
+- Grafana (`admin`, `superadmin`): `/grafana`
+- Prometheus (`superadmin`): `/prometheus`
+- Headlamp (`superadmin`): `/headlamp`
+- MinIO monitor (`superadmin`): `/minio-monitor`
+- Bull Board (`superadmin`): `/api/admin/data-exports/queues`
+
+### Local fallback access
+- Grafana: `kubectl port-forward -n tradehub svc/tradehub-grafana 3000:3000` then open `http://127.0.0.1:3000/grafana`
+- Prometheus: `kubectl port-forward -n tradehub svc/tradehub-prometheus 9090:9090` then open `http://127.0.0.1:9090/`
+- Headlamp: `kubectl port-forward -n tradehub svc/tradehub-headlamp 4466:4466` then open `http://127.0.0.1:4466/`

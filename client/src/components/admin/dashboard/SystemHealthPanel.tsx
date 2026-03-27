@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuth } from "@/hooks/use-auth";
 import { FieldHintLabel, SYSTEM_HEALTH_FIELD_HELP, type MarketDataProvidersResp, type SystemHealthData } from "./AdminDashboardSupport";
+import { OPS_TOOLS } from "./opsAccess";
 
 interface SystemHealthPanelProps {
   healthProviderKey: string;
@@ -26,6 +28,12 @@ export function SystemHealthPanel({
   probeProviderPending,
   onProbeProvider,
 }: SystemHealthPanelProps) {
+  const { user } = useAuth();
+  const isSuperAdmin = Boolean(user?.isSuperAdmin);
+  const grafanaHref = "/grafana/d/tradehub-http-observability";
+  const businessFlowHref = "/grafana/d/tradehub-business-flow-health";
+  const prometheusHref = OPS_TOOLS.find((tool) => tool.key === "prometheus")?.href ?? "/prometheus";
+
   return (
     <TabsContent value="health">
       <Card className="bg-neutral-700 border-gray-600">
@@ -182,6 +190,26 @@ export function SystemHealthPanel({
             ) : (
               <p className="text-gray-400">Loading health data...</p>
             )}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button asChild variant="outline" size="sm" className="bg-neutral-600 hover:bg-neutral-500">
+                <a href={grafanaHref} target="_blank" rel="noreferrer">
+                  Open HTTP Dashboard
+                </a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="bg-neutral-600 hover:bg-neutral-500">
+                <a href={businessFlowHref} target="_blank" rel="noreferrer">
+                  Open Business Flow Dashboard
+                </a>
+              </Button>
+              {isSuperAdmin ? (
+                <Button asChild variant="outline" size="sm" className="bg-neutral-600 hover:bg-neutral-500">
+                  <a href={prometheusHref} target="_blank" rel="noreferrer">
+                    Open Prometheus
+                  </a>
+                </Button>
+              ) : null}
+            </div>
           </TooltipProvider>
         </CardContent>
       </Card>

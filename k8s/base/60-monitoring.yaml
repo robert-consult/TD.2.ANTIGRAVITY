@@ -22,6 +22,7 @@ data:
       evaluation_interval: 15s
     rule_files:
       - /etc/prometheus/alerts-admin-data-slo.yml
+      - /etc/prometheus/tradehub-observability-rules.yml
       - /etc/prometheus-ops/*.yaml
     scrape_configs:
       - job_name: "node-exporter"
@@ -73,6 +74,38 @@ data:
       - job_name: "tradehub-valkey-exporter"
         static_configs:
           - targets: ["tradehub-valkey-exporter.tradehub.svc.cluster.local:9121"]
+      - job_name: "tradehub-postgres-exporter"
+        scrape_interval: 30s
+        static_configs:
+          - targets: ["tradehub-postgres-exporter.tradehub.svc.cluster.local:9630"]
+            labels:
+              cls: tradehub
+              ins: tradehub-postgres
+              ip: postgres.tradehub.svc.cluster.local
+      - job_name: "tradehub-pgbouncer-exporter"
+        scrape_interval: 30s
+        static_configs:
+          - targets: ["tradehub-pgbouncer-exporter.tradehub.svc.cluster.local:9630"]
+            labels:
+              cls: tradehub
+              ins: tradehub-pgbouncer
+              ip: pgbouncer.tradehub.svc.cluster.local
+      - job_name: "tradehub-victoria-logs"
+        scrape_interval: 30s
+        static_configs:
+          - targets: ["tradehub-victoria-logs.tradehub.svc.cluster.local:9428"]
+            labels:
+              cls: vlogs
+              ins: tradehub-victoria-logs
+              ip: tradehub-victoria-logs.tradehub.svc.cluster.local
+      - job_name: "tradehub-victoria-traces"
+        scrape_interval: 30s
+        static_configs:
+          - targets: ["tradehub-victoria-traces.tradehub.svc.cluster.local:10428"]
+            labels:
+              cls: vtraces
+              ins: tradehub-victoria-traces
+              ip: tradehub-victoria-traces.tradehub.svc.cluster.local
   alerts-admin-data-slo.yml: |
     groups:
       - name: tradehub-admin-data-slo
@@ -134,6 +167,173 @@ data:
             annotations:
               summary: "ClickHouse sync is stale"
               description: "No successful ClickHouse sync observed for over 30 minutes."
+  tradehub-observability-rules.yml: |
+    groups:
+      - name: tradehub-http-recording
+        interval: 30s
+        rules:
+          - record: tradehub:http_requests:rate5m
+            expr: sum by (service, route, operation) (rate(http_requests_total[5m]))
+          - record: tradehub:http_errors:rate5m
+            expr: sum by (service, route, operation) (rate(http_request_errors_total[5m]))
+          - record: tradehub:http_5xx:rate5m
+            expr: sum by (service, route, operation) (rate(http_requests_total{status_class="5xx"}[5m]))
+          - record: tradehub:http_error_ratio:rate5m
+            expr: tradehub:http_errors:rate5m / clamp_min(tradehub:http_requests:rate5m, 0.001)
+          - record: tradehub:http_5xx_ratio:rate5m
+            expr: tradehub:http_5xx:rate5m / clamp_min(tradehub:http_requests:rate5m, 0.001)
+          - record: tradehub:http_latency:p95_5m
+            expr: histogram_quantile(0.95, sum by (service, route, operation, le) (rate(http_request_duration_seconds_bucket[5m])))
+          - record: tradehub:http_latency:p99_5m
+            expr: histogram_quantile(0.99, sum by (service, route, operation, le) (rate(http_request_duration_seconds_bucket[5m])))
+          - record: tradehub:http_in_flight:max
+            expr: max by (service, route, operation) (http_requests_in_flight)
+      - name: tradehub-business-recording
+        interval: 30s
+        rules:
+          - record: tradehub:business_flow_steps:rate5m
+            expr: sum by (service, flow, step, outcome) (rate(business_flow_steps_total[5m]))
+          - record: tradehub:business_flow_latency:p95_5m
+            expr: histogram_quantile(0.95, sum by (service, flow, step, outcome, le) (rate(business_flow_step_duration_seconds_bucket[5m])))
+          - record: tradehub:operation_failures:rate15m
+            expr: sum by (service, operation, reason) (rate(operation_failures_total[15m]))
+          - record: tradehub:background_job_duration:p95_15m
+            expr: histogram_quantile(0.95, sum by (service, job, outcome, le) (rate(background_job_duration_seconds_bucket[15m])))
+      - name: tradehub-observability-alerts
+        interval: 30s
+        rules:
+          - alert: TradehubPostgresExporterDown
+            expr: min_over_time(up{job="tradehub-postgres-exporter"}[10m]) == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "TradeHub Postgres exporter is down"
+              description: "Prometheus cannot scrape the canonical Postgres exporter for at least 10 minutes."
+          - alert: TradehubPgbouncerExporterDown
+            expr: min_over_time(up{job="tradehub-pgbouncer-exporter"}[10m]) == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "TradeHub PgBouncer exporter is down"
+              description: "Prometheus cannot scrape the canonical PgBouncer exporter for at least 10 minutes."
+          - alert: TradehubVictoriaTracesDown
+            expr: min_over_time(up{job="tradehub-victoria-traces"}[10m]) == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "TradeHub VictoriaTraces is down"
+              description: "Prometheus cannot scrape VictoriaTraces for at least 10 minutes."
+          - alert: TradehubCriticalOperationsErrorBudgetBurnFast
+            expr: |
+              (
+                (
+                  sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",status_class="5xx"}[5m]))
+                  /
+                  clamp_min(sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[5m])), 0.001)
+                ) / 0.005
+              ) > 14.4
+              and
+              (
+                (
+                  sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",status_class="5xx"}[1h]))
+                  /
+                  clamp_min(sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[1h])), 0.001)
+                ) / 0.005
+              ) > 14.4
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Critical operation 5xx burn rate is exhausting the error budget"
+              description: "Critical API operations are burning a 99.5% availability budget faster than the multi-window SRE threshold."
+          - alert: TradehubCriticalOperationsErrorBudgetBurnSlow
+            expr: |
+              (
+                (
+                  sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",status_class="5xx"}[30m]))
+                  /
+                  clamp_min(sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[30m])), 0.001)
+                ) / 0.005
+              ) > 6
+              and
+              (
+                (
+                  sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",status_class="5xx"}[6h]))
+                  /
+                  clamp_min(sum(rate(http_requests_total{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[6h])), 0.001)
+                ) / 0.005
+              ) > 6
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Critical operation 5xx burn rate is elevated"
+              description: "Critical API operations are burning a 99.5% availability budget above the long-window threshold."
+          - alert: TradehubCriticalOperationsLatencyBurnFast
+            expr: |
+              (
+                (
+                  sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[5m]))
+                  -
+                  sum(rate(http_request_duration_seconds_bucket{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",le="0.5"}[5m]))
+                )
+                /
+                clamp_min(sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[5m])), 0.001)
+              ) / 0.01 > 14.4
+              and
+              (
+                (
+                  sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[1h]))
+                  -
+                  sum(rate(http_request_duration_seconds_bucket{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",le="0.5"}[1h]))
+                )
+                /
+                clamp_min(sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[1h])), 0.001)
+              ) / 0.01 > 14.4
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Critical operation latency burn rate is exhausting the latency budget"
+              description: "More than 1% of critical requests are breaching 500ms latency fast enough to exhaust the multi-window latency budget."
+          - alert: TradehubCriticalOperationsLatencyBurnSlow
+            expr: |
+              (
+                (
+                  sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[30m]))
+                  -
+                  sum(rate(http_request_duration_seconds_bucket{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",le="0.5"}[30m]))
+                )
+                /
+                clamp_min(sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[30m])), 0.001)
+              ) / 0.01 > 6
+              and
+              (
+                (
+                  sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[6h]))
+                  -
+                  sum(rate(http_request_duration_seconds_bucket{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*",le="0.5"}[6h]))
+                )
+                /
+                clamp_min(sum(rate(http_request_duration_seconds_count{operation=~"auth\\..*|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[6h])), 0.001)
+              ) / 0.01 > 6
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Critical operation latency burn rate is elevated"
+              description: "Critical API operations are exceeding the 500ms latency SLO above the long-window burn threshold."
+          - alert: TradehubBusinessFlowFailuresElevated
+            expr: increase(operation_failures_total{operation=~"auth\\.register|legal\\.doc1_accept|challenge\\.(enroll|withdraw)|trade\\.(open|close|cancel)|partner\\.onboarding\\..*|admin\\.data_exports\\..*"}[15m]) > 25
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Business flow failures are elevated"
+              description: "Bounded business-operation failures crossed 25 events in the last 15 minutes."
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -160,6 +360,8 @@ spec:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
             - "--storage.tsdb.retention.time=24h"
+            - "--web.external-url=https://tradehub.example.com/prometheus/"
+            - "--web.route-prefix=/"
           ports:
             - containerPort: 9090
           volumeMounts:

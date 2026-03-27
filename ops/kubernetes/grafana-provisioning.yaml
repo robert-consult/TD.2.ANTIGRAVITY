@@ -125,6 +125,16 @@ data:
         jsonData:
           maxLines: 1000
 
+      - name: TradeHub VictoriaTraces
+        type: jaeger
+        uid: ds-tempo
+        access: proxy
+        url: http://tradehub-victoria-traces:10428/select/jaeger
+        editable: true
+        jsonData:
+          nodeGraph:
+            enabled: true
+
       - name: TradeHub Static
         type: marcusolsson-static-datasource
         uid: ds-static

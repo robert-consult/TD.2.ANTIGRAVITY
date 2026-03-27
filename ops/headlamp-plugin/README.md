@@ -21,24 +21,24 @@ monitoring views:
 
 ## Build & Deploy
 
-### 1. Build the custom Headlamp image
+### 1. Rebuild the shipped plugin artifact
 
 ```bash
-# From the repo root:
-docker build -t tradehub-headlamp:latest -f ops/headlamp-plugin/Dockerfile .
+npm run build --prefix ops/headlamp-plugin
+mkdir -p ops/kubernetes/assets/headlamp-plugin
+cp ops/headlamp-plugin/dist/main.js ops/kubernetes/assets/headlamp-plugin/main.js
 ```
 
 ### 2. Deploy to K8s
 
 ```bash
-# Ensure headlamp-viewer SA exists:
-kubectl apply -f ops/kubernetes/headlamp-rbac.yaml
+./ops/headlamp-plugin/deploy.sh
+```
 
-# Deploy the custom Headlamp:
-kubectl apply -f ops/kubernetes/headlamp-deployment.yaml
+Or use the canonical ops apply path after the asset has been synced:
 
-# Expose via ingress:
-kubectl apply -f ops/kubernetes/headlamp-ingress.yaml
+```bash
+kubectl apply -k ops/kubernetes
 ```
 
 ### 3. Access
@@ -48,7 +48,7 @@ will appear automatically.
 
 ## Plugin Architecture
 
-- Uses `@kinvolk/headlamp-plugin` SDK
+- Bundled with repo-local `esbuild` and runtime shims for Headlamp browser globals
 - Registers 8 sidebar entries under "TradeHub Ops" parent
 - Queries live K8s resources via `K8s.ResourceClasses.Pod/StatefulSet/Deployment`
 - Injects a TradeHub pod health chart into the Headlamp overview page
@@ -58,8 +58,10 @@ will appear automatically.
 
 ```
 ops/headlamp-plugin/
-├── Dockerfile           # Multi-stage build
-├── package.json         # Plugin dependencies
+├── Dockerfile           # Optional custom image build
+├── build.mjs            # Bundles src/index.tsx into dist/main.js
+├── dist/main.js         # Built plugin artifact
+├── package.json         # Plugin build scripts
 ├── tsconfig.json        # TypeScript config
 ├── README.md            # This file
 └── src/

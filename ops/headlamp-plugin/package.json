@@ -1,13 +1,11 @@
 {
     "name": "tradehub-ops",
     "version": "1.0.0",
+    "private": true,
     "description": "TradeHub Petascale Ops Dashboard Plugin for Headlamp — provides sidebar navigation and monitoring views for all petascale infrastructure: ClickHouse, MinIO, Valkey, BullMQ queues, export pipeline, and security events.",
     "scripts": {
-        "start": "headlamp-plugin start",
-        "build": "headlamp-plugin build",
-        "format": "headlamp-plugin format",
-        "lint": "headlamp-plugin lint",
-        "test": "headlamp-plugin test"
+        "build": "node build.mjs",
+        "deploy": "bash deploy.sh"
     },
     "keywords": [
         "headlamp",
@@ -16,8 +14,5 @@
         "tradehub",
         "petascale",
         "monitoring"
-    ],
-    "devDependencies": {
-        "@kinvolk/headlamp-plugin": "^0.29.2"
-    }
+    ]
 }

@@ -564,6 +564,23 @@ export async function secureClearAll(): Promise<void> {
   }
 }
 
+export async function deleteSecureCacheDatabase(): Promise<void> {
+  if (!hasIndexedDb()) return;
+
+  disposeDefaultCache();
+
+  await new Promise<void>((resolve) => {
+    try {
+      const request = indexedDB.deleteDatabase(DEFAULT_DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export function getSecureCacheScope(): string {
   return readStoredScope();
 }

@@ -27,6 +27,14 @@ Kubernetes scraping is configured in:
 When you add a new hot path or high-risk control (rate limit, queue size, WS fanout change), add or extend metrics
 so operations can detect regressions quickly.
 
+## Operator Surfaces
+- Public observability/control entrypoints must stay explicit and auth-gated:
+  - `/grafana` for `admin` and `superadmin`
+  - `/prometheus`, `/headlamp`, `/minio-monitor`, and `/api/admin/data-exports/queues` for `superadmin`
+- Ingress auth enforcement lives at `GET /api/admin/ops/ingress-auth`.
+- Browser-facing launch links must never point to `*.svc.cluster.local`.
+- The shipped Headlamp plugin artifact is `ops/kubernetes/assets/headlamp-plugin/main.js`; rebuild/sync it whenever `ops/headlamp-plugin/src/index.tsx` changes before applying `ops/kubernetes/`.
+
 ## Traces (if you introduce them)
 - Prefer low-cardinality labels; never include PII in attributes.
 - Keep spans around network calls, DB calls, and background jobs.

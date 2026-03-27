@@ -287,6 +287,37 @@ export async function ensureTradeCapacity(
   }
 }
 
+type WaitForFreshQuoteOptions = {
+  symbol?: string;
+  timeoutMs?: number;
+};
+
+export async function waitForFreshQuote(page: Page, options?: WaitForFreshQuoteOptions): Promise<void> {
+  const symbol = String(options?.symbol ?? "USDJPY").toUpperCase();
+  const timeoutMs = Math.max(1_000, Number(options?.timeoutMs ?? 60_000));
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (targetSymbol) => {
+          try {
+            const res = await fetch(`/api/quotes/${encodeURIComponent(targetSymbol)}`, {
+              credentials: "include",
+            });
+            if (!res.ok) return false;
+            const data = await res.json().catch(() => null);
+            const ask = data?.ask ?? data?.price ?? null;
+            const numericAsk = typeof ask === "number" ? ask : Number(ask);
+            return data?.isStale === false && Number.isFinite(numericAsk);
+          } catch {
+            return false;
+          }
+        }, symbol),
+      { timeout: timeoutMs },
+    )
+    .toBe(true);
+}
+
 export function installTradingViewStub(page: Page, tracker?: { called: () => void }) {
   const stub = [
     "(() => {",

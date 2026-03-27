@@ -8,13 +8,16 @@ configMapGenerator:
     files:
       - assets/dashboards/app-red-metrics.json
       - assets/dashboards/bare-metal-health.json
+      - assets/dashboards/business-flow-health.json
       - assets/dashboards/cache-session-health.json
       - assets/dashboards/clickhouse-olap.json
       - assets/dashboards/export-analytics-pipeline.json
+      - assets/dashboards/http-endpoint-observability.json
       - assets/dashboards/kubernetes-health.json
       - assets/dashboards/minio-storage.json
       - assets/dashboards/ops-overview.json
       - assets/dashboards/security-events.json
+      - assets/dashboards/slo-burn-rate.json
   - name: pigsty-pgsql-dashboards
     files:
       - assets/dashboards/pigsty-pgsql/pgcat-database.json
@@ -88,18 +91,24 @@ configMapGenerator:
       - assets/minio-monitor/static/index.html
       - assets/minio-monitor/static/app.js
       - assets/minio-monitor/static/styles.css
+  - name: tradehub-ops-plugin
+    files:
+      - assets/headlamp-plugin/main.js
 resources:
   - prometheus-ops-config.yaml
   - grafana-provisioning.yaml
   - grafana-deployment.yaml
+  - grafana-ingress.yaml
   - kube-state-metrics.yaml
   - node-exporter.yaml
   - victoria-logs.yaml
+  - victoria-traces.yaml
   - pigsty-meta-bootstrap.yaml
   - headlamp-rbac.yaml
   - headlamp-plugins.yaml
   - headlamp-deployment.yaml
   - headlamp-ingress.yaml
+  - prometheus-ingress.yaml
   - bull-board-ingress.yaml
   - minio-monitor-deployment.yaml
   - 75-internal-tls.yaml

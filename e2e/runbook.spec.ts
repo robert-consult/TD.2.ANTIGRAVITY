@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { acceptDoc1IfPrompted, installTradingViewStub, login, setupSlow4gMidCpuAudit } from "./utils";
+import {
+  acceptDoc1IfPrompted,
+  installTradingViewStub,
+  login,
+  setupSlow4gMidCpuAudit,
+  waitForFreshQuote,
+} from "./utils";
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 const ADMIN = { email: "admin@local.test", password: "changeme" };
@@ -214,6 +220,7 @@ test("RUNBOOK: no fast polling + trade flow works under Slow 4G", async ({ page 
 
   await page.getByRole("button", { name: "Trade" }).first().click();
   await expect(page.locator('[data-testid="trade-tab-scroll"]')).toBeVisible();
+  await waitForFreshQuote(page, { symbol: "USDJPY" });
 
   const buyButton = page.locator("button.btn-buy");
   await expect(buyButton).toBeEnabled({ timeout: 60_000 });

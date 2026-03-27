@@ -65,6 +65,7 @@ import { AdminInstrumentsTab } from "@/components/admin/dashboard/AdminInstrumen
 import { AdminTradeSettingsTab } from "@/components/admin/dashboard/AdminTradeSettingsTab";
 import { AdminUserManagementTab } from "@/components/admin/dashboard/AdminUserManagementTab";
 import { AdminViewAsTab } from "@/components/admin/dashboard/AdminViewAsTab";
+import { AdminOpsAccessTab } from "@/components/admin/dashboard/AdminOpsAccessTab";
 import { SystemConfigTab } from "@/components/admin/dashboard/SystemConfigTab";
 import type {
   AdminNote,
@@ -1228,6 +1229,9 @@ export default function AdminDashboard() {
                   Scout
                 </TabsTrigger>
               )}
+              <TabsTrigger value="ops" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-violet-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
+                Ops
+              </TabsTrigger>
               <TabsTrigger value="system" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-slate-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">System Config</span>
                 <span className="md:hidden">Config</span>
@@ -1339,6 +1343,8 @@ export default function AdminDashboard() {
                 <ScoutWorkbench />
               </TabsContent>
             )}
+
+            <AdminOpsAccessTab onSelectAdminTab={setActiveTab} />
 
             <TabsContent value="system" className="p-4">
               <SystemConfigTab />

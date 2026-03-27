@@ -20,7 +20,6 @@ import { buildAuditContext } from "../lib/auditContext";
 import { sha256 } from "../legal/cryptoUtils";
 import { appendAuditEntry } from "../grift/griftAdminAudit";
 import { getGriftDb } from "../grift/griftDb";
-import { observeHttpRequestDuration } from "./metricsState";
 
 const TRADER_SCOUT_CATEGORY_CACHE_TTL_MS = 60_000;
 let traderScoutCategoryLiveBusSubscribed = false;
@@ -164,23 +163,16 @@ export const adminTraderScoutingRouter = Router();
 adminTraderScoutingRouter.use(requireAdmin);
 
 adminTraderScoutingRouter.get("/trader-scouting/categories", async (_req, res) => {
-  const startedAt = process.hrtime.bigint();
   try {
     const allowed = await loadTraderScoutAllowedCategories();
     return res.json({ ok: true, categories: allowed.categories });
   } catch (error) {
     console.error("Trader scouting categories list error:", error);
     return res.status(500).json({ message: "Internal server error" });
-  } finally {
-    observeHttpRequestDuration(
-      "/api/admin/trader-scouting/categories",
-      Number(process.hrtime.bigint() - startedAt) / 1e9,
-    );
   }
 });
 
 adminTraderScoutingRouter.get("/trader-scouting/search", async (req: Request, res) => {
-  const startedAt = process.hrtime.bigint();
   try {
     const parsedResult = TraderScoutSearchQuerySchema.safeParse({
       ...req.query,
@@ -304,16 +296,10 @@ adminTraderScoutingRouter.get("/trader-scouting/search", async (req: Request, re
   } catch (error) {
     console.error("Trader scouting search error:", error);
     return res.status(500).json({ message: "Internal server error" });
-  } finally {
-    observeHttpRequestDuration(
-      "/api/admin/trader-scouting/search",
-      Number(process.hrtime.bigint() - startedAt) / 1e9,
-    );
   }
 });
 
 adminTraderScoutingRouter.get("/trader-scouting/:userId/asset-classes", async (req: Request, res) => {
-  const startedAt = process.hrtime.bigint();
   try {
     const userIdResult = PositiveIntParamSchema.safeParse(req.params.userId);
     if (!userIdResult.success) return res.status(400).json({ message: "Invalid userId" });
@@ -384,16 +370,10 @@ ORDER BY net_profit DESC;
   } catch (error) {
     console.error("Trader scouting categories drilldown error:", error);
     return res.status(500).json({ message: "Internal server error" });
-  } finally {
-    observeHttpRequestDuration(
-      "/api/admin/trader-scouting/:userId/asset-classes",
-      Number(process.hrtime.bigint() - startedAt) / 1e9,
-    );
   }
 });
 
 adminTraderScoutingRouter.get("/trader-scouting/:userId/trade-extremes", async (req: Request, res) => {
-  const startedAt = process.hrtime.bigint();
   try {
     const userIdResult = PositiveIntParamSchema.safeParse(req.params.userId);
     if (!userIdResult.success) return res.status(400).json({ message: "Invalid userId" });
@@ -486,10 +466,5 @@ FROM (
   } catch (error) {
     console.error("Trader scouting trade extremes error:", error);
     return res.status(500).json({ message: "Internal server error" });
-  } finally {
-    observeHttpRequestDuration(
-      "/api/admin/trader-scouting/:userId/trade-extremes",
-      Number(process.hrtime.bigint() - startedAt) / 1e9,
-    );
   }
 });

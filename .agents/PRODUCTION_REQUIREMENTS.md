@@ -258,12 +258,50 @@ Failure Mode if Missing:
 - Date (UTC): `2026-02-15`
 - Scope: `Web app-shell caching safety boundary`
 - Requirement: Service Worker cache strategy must never cache or proxy authenticated API and WebSocket traffic (`/api/*`, `/ws`) and must serve worker script with revalidation semantics (no immutable worker caching).
+
 - Enforcement: Planned implementation in client SW module (`client/src/sw.ts` or `client/public/sw.js`) plus static serving behavior in `server/vite.ts` (worker delivery + SPA fallback exclusions).
 - Validation:
   - Register SW and inspect network behavior for `/api/*` and `/ws`; requests must always hit network.
   - Verify worker script (`/sw.js`) is fetched with `Cache-Control: no-cache` semantics and updates are detected after deploy.
   - Validate offline shell still works for static assets without serving stale API data.
 - Failure Mode if Missing: stale/poisoned worker state can persist, API responses may be incorrectly cached, and authentication/session behavior may become inconsistent or unsafe.
+
+### PRD-OBS-004
+- ID: `PRD-OBS-004`
+- Date (UTC): `2026-03-23`
+- Scope: `Operator-facing observability access surfaces`
+- Requirement: Every browser-facing observability/control tool must be exposed through one stable public path or documented localhost port-forward path, and browser-visible launch links must never target cluster-internal `*.svc.cluster.local` addresses.
+- Enforcement: `ops/kubernetes/grafana-ingress.yaml`, `ops/kubernetes/prometheus-ingress.yaml`, `ops/kubernetes/headlamp-ingress.yaml`, `ops/kubernetes/minio-monitor-deployment.yaml`, `ops/kubernetes/bull-board-ingress.yaml`, `server/routes/adminOps.ts`, `client/src/components/admin/dashboard/opsAccess.ts`, `client/src/components/admin/dashboard/AdminOpsAccessTab.tsx`, `ops/headlamp-plugin/src/index.tsx`, and `ops/kubernetes/headlamp-plugins.yaml`.
+- Validation:
+  - Render `kubectl kustomize ops/kubernetes` and verify public tool paths `/grafana`, `/prometheus`, `/headlamp`, `/minio-monitor`, and `/api/admin/data-exports/queues`.
+  - Verify ingress auth allows `admin` access to `grafana` and only `superadmin` access to `prometheus`, `headlamp`, `minio-monitor`, and `bullboard`.
+  - Run `rg -n "svc\\.cluster\\.local" ops/headlamp-plugin/src/index.tsx ops/kubernetes/headlamp-plugins.yaml client/src/components/admin/dashboard` and confirm no browser-facing links resolve to cluster-internal hosts.
+  - Verify documented localhost fallbacks match the deployed subpath behavior: Grafana at `http://127.0.0.1:3000/grafana`, Prometheus at `http://127.0.0.1:9090/`, and Headlamp at `http://127.0.0.1:4466/`.
+- Failure Mode if Missing: operators are forced into ad hoc port-forward discovery, some links fail outside the cluster network, and observability/control access is inconsistent or unintentionally exposed.
+
+### PRD-OBS-005
+- ID: `PRD-OBS-005`
+- Date (UTC): `2026-03-26`
+- Scope: `Headlamp plugin deploy completeness`
+- Requirement: The canonical `ops/kubernetes` apply path must generate the `tradehub-ops-plugin` ConfigMap from the versioned plugin artifact at `ops/kubernetes/assets/headlamp-plugin/main.js`, and Headlamp ingress must not ship placeholder CIDR allowlists that block the declared `/headlamp` superadmin access path.
+- Enforcement: `ops/kubernetes/kustomization.yaml`, `ops/kubernetes/assets/headlamp-plugin/main.js`, `ops/headlamp-plugin/deploy.sh`, `ops/headlamp-plugin/README.md`, `ops/README.md`, and `ops/kubernetes/headlamp-ingress.yaml`.
+- Validation:
+  - Run `kubectl kustomize ops/kubernetes | rg "name: tradehub-ops-plugin|/headlamp\\(/\\|\\$\\)\\(\\.\\*\\)"` and confirm the generated ConfigMap and ingress are both present.
+  - Verify `ops/kubernetes/assets/headlamp-plugin/main.js` contains the expected public tool links (`/grafana`, `/prometheus`, `/api/admin/data-exports/queues`, `/minio-monitor`).
+  - Deploy Headlamp from the canonical ops path and confirm the TradeHub Ops sidebar loads without a separately hand-created plugin ConfigMap.
+- Failure Mode if Missing: fresh cluster applies can mount a missing or stale Headlamp plugin, and the advertised `/headlamp` access path can remain unreachable even for authorized superadmins.
+
+### PRD-OBS-006
+- ID: `PRD-OBS-006`
+- Date (UTC): `2026-03-26`
+- Scope: `Headlamp plugin artifact build parity`
+- Requirement: Every maintained Headlamp plugin build/deploy path must source the plugin from the repo-managed bundle flow (`ops/headlamp-plugin/build.mjs` -> `ops/headlamp-plugin/dist/main.js` -> `ops/kubernetes/assets/headlamp-plugin/main.js`) and must not depend on the stale upstream `headlamp-plugin` CLI contract.
+- Enforcement: `ops/headlamp-plugin/build.mjs`, `ops/headlamp-plugin/package.json`, `ops/headlamp-plugin/deploy.sh`, `ops/headlamp-plugin/Dockerfile`, `ops/headlamp-plugin/README.md`, and `ops/README.md`.
+- Validation:
+  - Run `npm run build --prefix ops/headlamp-plugin` and confirm it exits 0 and produces `ops/headlamp-plugin/dist/main.js`.
+  - Sync the artifact into `ops/kubernetes/assets/headlamp-plugin/main.js` and confirm `cmp -s ops/headlamp-plugin/dist/main.js ops/kubernetes/assets/headlamp-plugin/main.js`.
+  - Search `ops/` for `headlamp-plugin build`, `headlamp-plugin start`, or `@kinvolk/headlamp-plugin build` and confirm no maintained deploy path still references the stale CLI.
+- Failure Mode if Missing: operators can follow a documented deploy or custom-image path that no longer rebuilds the plugin, causing silent drift between the mounted Headlamp UI and the checked-in source.
 
 ### PRD-SEC-004
 - ID: `PRD-SEC-004`
@@ -1460,3 +1498,39 @@ Failure Mode if Missing:
   - Call `GET /api/admin/runtime-config/governance` and verify the response contains sections for identity/session, market data, exports/analytics, schedulers, deployment snapshot, reload traces, and documentation reconciliation.
   - Verify the governance tab renders deploy-owned values as read-only, shows secret readiness instead of secret values, and exposes reload versions plus acknowledgement state for feed/provider domains.
 - Failure Mode if Missing: operators cannot distinguish runtime-effective state from deploy-owned posture, reload rollback context remains implicit, and document/live drift becomes invisible until incidents or audits surface it.
+
+### PRD-OBS-001
+- ID: `PRD-OBS-001`
+- Date (UTC): `2026-03-22`
+- Scope: `Canonical PostgreSQL query observability`
+- Requirement: Production PostgreSQL must preload `pg_stat_statements` and `auto_explain`, enable `compute_query_id`, persist `pg_stat_statements`, and ensure `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` is executed for the TradeHub database before query dashboards are relied upon.
+- Enforcement: `k8s/03-postgres.yaml`, `k8s/base/03-postgres.yaml`, `server/db/ensureSchema.ts`, and `scripts/dbEnsure.ts`.
+- Validation:
+  - Run `kubectl kustomize k8s | rg "pg_stat_statements|auto_explain|compute_query_id=on"`.
+  - After deploy, run `SHOW shared_preload_libraries;` and confirm both `pg_stat_statements` and `auto_explain` are present.
+  - Run `SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';` against the TradeHub database and verify one row is returned.
+- Failure Mode if Missing: slow-query plans, normalized query metrics, and `pg_stat_statements`-backed dashboards/alerts remain blind or partially empty during production incidents.
+
+### PRD-OBS-002
+- ID: `PRD-OBS-002`
+- Date (UTC): `2026-03-22`
+- Scope: `Canonical observability scrape path`
+- Requirement: Base Prometheus must scrape the canonical Postgres exporter, PgBouncer exporter, VictoriaLogs, and VictoriaTraces every 30 seconds with stable `cls`, `ins`, and `ip` labels so the shipped database/infra dashboards and alerts resolve against one deployment path.
+- Enforcement: `k8s/06-postgres-exporters.yaml`, `k8s/base/06-postgres-exporters.yaml`, `k8s/60-monitoring.yaml`, `k8s/base/60-monitoring.yaml`, and `ops/kubernetes/victoria-traces.yaml`.
+- Validation:
+  - Run `kubectl kustomize k8s | rg "tradehub-postgres-exporter|tradehub-pgbouncer-exporter|tradehub-victoria-traces|tradehub-victoria-logs"`.
+  - Open Prometheus targets and verify `tradehub-postgres-exporter`, `tradehub-pgbouncer-exporter`, `tradehub-victoria-logs`, and `tradehub-victoria-traces` are `UP`.
+  - Verify Grafana dashboards under PostgreSQL and Infrastructure folders resolve `cls`, `ins`, and `ip` variables without empty target errors.
+- Failure Mode if Missing: canonical DB pool/query dashboards, VictoriaTraces health views, and exporter-down alerts silently fail or drift to non-canonical ops-only config.
+
+### PRD-OBS-003
+- ID: `PRD-OBS-003`
+- Date (UTC): `2026-03-22`
+- Scope: `Trace exemplar compatibility`
+- Requirement: API and worker pods must export OTLP traces to VictoriaTraces, and Grafana datasource UID `ds-tempo` must remain a Jaeger datasource pointed at VictoriaTraces `/select/jaeger` so Prometheus exemplars continue opening traces without dashboard rewrites.
+- Enforcement: `server/observability/tracing.ts`, `k8s/10-api-deployment.yaml`, `k8s/base/10-api-deployment.yaml`, `k8s/12-worker-deployment.yaml`, `k8s/base/12-worker-deployment.yaml`, `ops/kubernetes/grafana-provisioning.yaml`, and `ops/grafana-config/provisioning/datasources/tradehub.yaml`.
+- Validation:
+  - Run `kubectl kustomize k8s | rg "OTEL_TRACING_ENABLED|OTEL_EXPORTER_OTLP_TRACES_ENDPOINT|OTEL_SERVICE_NAME"`.
+  - Issue a traced HTTP request to a critical route and verify `x-trace-id` is present in the response headers.
+  - In Grafana, open an HTTP latency panel with exemplars enabled and confirm the exemplar opens a trace through datasource `ds-tempo`.
+- Failure Mode if Missing: request traces stop flowing to the canonical backend, histogram exemplars become dead links, and cross-layer incident drill-down degrades back to metric-only triage.

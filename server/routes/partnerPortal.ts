@@ -28,6 +28,7 @@ import { getCommunicationSettings } from "../services/messaging";
 import { resolvePartnerInquiryRouting } from "../partner/inquiryRouting";
 import { appendIdentityAudit, appendIdentityAuditAwaitable } from "../services/identityAudit";
 import { buildAuditContext } from "../lib/auditContext";
+import { recordBusinessFlowStep, recordOperationFailure } from "../observability/business";
 import {
   PARTNER_GATE_KEYS,
   resolvePartnerOnboardingState,
@@ -593,13 +594,32 @@ function toOnboardingResponse(state: Awaited<ReturnType<typeof resolvePartnerOnb
 }
 
 partnerPortalRouter.get("/onboarding/state", async (req, res) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "partner_onboarding", step: "state", outcome: "attempt" });
   try {
     const partner = (req as any).partner as { id: number };
     const state = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!state) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    if (!state) {
+      recordOperationFailure({
+        operation: "partner.onboarding.state",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "state",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    recordBusinessFlowStep({ flow: "partner_onboarding", step: "state", outcome: "success", startedAtMs });
     return res.json(toOnboardingResponse(state));
   } catch (error) {
     console.error("[partner-portal] onboarding state error:", error);
+    recordOperationFailure({
+      operation: "partner.onboarding.state",
+      reason: "failed_to_fetch_onboarding_state",
+      flow: "partner_onboarding",
+      step: "state",
+      startedAtMs,
+    });
     return res.status(500).json({ message: "FAILED_TO_FETCH_ONBOARDING_STATE" });
   }
 });
@@ -607,17 +627,55 @@ partnerPortalRouter.get("/onboarding/state", async (req, res) => {
 
 
 partnerPortalRouter.post("/onboarding/profile", async (req, res) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "partner_onboarding", step: "profile", outcome: "attempt" });
   try {
     const partner = (req as any).partner as { id: number };
     const parsed = partnerProfileSchema.safeParse(req.body);
     if (!parsed.success) {
+      recordOperationFailure({
+        operation: "partner.onboarding.profile",
+        reason: "invalid_payload",
+        flow: "partner_onboarding",
+        step: "profile",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
     }
 
     const state = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!state) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
-    if (state.inviteStatus === "REVOKED") return res.status(403).json({ message: "PARTNER_REVOKED" });
-    if (state.isInviteExpired) return res.status(403).json({ message: "PARTNER_INVITE_EXPIRED" });
+    if (!state) {
+      recordOperationFailure({
+        operation: "partner.onboarding.profile",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "profile",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    if (state.inviteStatus === "REVOKED") {
+      recordOperationFailure({
+        operation: "partner.onboarding.profile",
+        reason: "partner_revoked",
+        flow: "partner_onboarding",
+        step: "profile",
+        outcome: "blocked",
+        startedAtMs,
+      });
+      return res.status(403).json({ message: "PARTNER_REVOKED" });
+    }
+    if (state.isInviteExpired) {
+      recordOperationFailure({
+        operation: "partner.onboarding.profile",
+        reason: "partner_invite_expired",
+        flow: "partner_onboarding",
+        step: "profile",
+        outcome: "blocked",
+        startedAtMs,
+      });
+      return res.status(403).json({ message: "PARTNER_INVITE_EXPIRED" });
+    }
 
     const ts = nowSec();
     const existingProfile = safeJsonParseObject(state.profileData);
@@ -630,6 +688,13 @@ partnerPortalRouter.post("/onboarding/profile", async (req, res) => {
       try {
         institutionProfile = normalizeInstitutionProfileForStorage(parsed.data.institutionProfile);
       } catch (error: any) {
+        recordOperationFailure({
+          operation: "partner.onboarding.profile",
+          reason: "invalid_institution_profile",
+          flow: "partner_onboarding",
+          step: "profile",
+          startedAtMs,
+        });
         return res.status(400).json({
           message: "INVALID_INSTITUTION_PROFILE",
           detail: String(error?.message || "INVALID_PROFILE_FIELD"),
@@ -672,32 +737,101 @@ partnerPortalRouter.post("/onboarding/profile", async (req, res) => {
     });
 
     const nextState = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!nextState) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    if (!nextState) {
+      recordOperationFailure({
+        operation: "partner.onboarding.profile",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "profile",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    recordBusinessFlowStep({ flow: "partner_onboarding", step: "profile", outcome: "success", startedAtMs });
     return res.json(toOnboardingResponse(nextState));
   } catch (error) {
     console.error("[partner-portal] onboarding profile update error:", error);
+    recordOperationFailure({
+      operation: "partner.onboarding.profile",
+      reason: "failed_to_update_onboarding_profile",
+      flow: "partner_onboarding",
+      step: "profile",
+      startedAtMs,
+    });
     return res.status(500).json({ message: "FAILED_TO_UPDATE_ONBOARDING_PROFILE" });
   }
 });
 
 partnerPortalRouter.post("/onboarding/legal", async (req, res) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "partner_onboarding", step: "legal", outcome: "attempt" });
   try {
     const partner = (req as any).partner as { id: number };
     const parsed = partnerLegalSchema.safeParse(req.body);
     if (!parsed.success) {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "invalid_payload",
+        flow: "partner_onboarding",
+        step: "legal",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
     }
     if (!parsed.data.agreedToAllocation || !parsed.data.agreedToNda) {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "legal_agreements_required",
+        flow: "partner_onboarding",
+        step: "legal",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "LEGAL_AGREEMENTS_REQUIRED" });
     }
 
     const state = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!state) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
-    if (state.inviteStatus === "REVOKED") return res.status(403).json({ message: "PARTNER_REVOKED" });
-    if (state.isInviteExpired) return res.status(403).json({ message: "PARTNER_INVITE_EXPIRED" });
+    if (!state) {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "legal",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    if (state.inviteStatus === "REVOKED") {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "partner_revoked",
+        flow: "partner_onboarding",
+        step: "legal",
+        outcome: "blocked",
+        startedAtMs,
+      });
+      return res.status(403).json({ message: "PARTNER_REVOKED" });
+    }
+    if (state.isInviteExpired) {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "partner_invite_expired",
+        flow: "partner_onboarding",
+        step: "legal",
+        outcome: "blocked",
+        startedAtMs,
+      });
+      return res.status(403).json({ message: "PARTNER_INVITE_EXPIRED" });
+    }
 
     const allowedSteps = new Set(["IDENTITY", "LEGAL", "WAITING_APPROVAL", "COMPLETED"]);
     if (!allowedSteps.has(state.onboardingStep)) {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "onboarding_step_invalid_for_legal",
+        flow: "partner_onboarding",
+        step: "legal",
+        startedAtMs,
+      });
       return res.status(409).json({
         message: "ONBOARDING_STEP_INVALID_FOR_LEGAL",
         onboardingStep: state.onboardingStep,
@@ -741,21 +875,69 @@ partnerPortalRouter.post("/onboarding/legal", async (req, res) => {
     });
 
     const nextState = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!nextState) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    if (!nextState) {
+      recordOperationFailure({
+        operation: "partner.onboarding.legal",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "legal",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    recordBusinessFlowStep({ flow: "partner_onboarding", step: "legal", outcome: "success", startedAtMs });
     return res.json(toOnboardingResponse(nextState));
   } catch (error) {
     console.error("[partner-portal] onboarding legal update error:", error);
+    recordOperationFailure({
+      operation: "partner.onboarding.legal",
+      reason: "failed_to_update_onboarding_legal",
+      flow: "partner_onboarding",
+      step: "legal",
+      startedAtMs,
+    });
     return res.status(500).json({ message: "FAILED_TO_UPDATE_ONBOARDING_LEGAL" });
   }
 });
 
 partnerPortalRouter.post("/onboarding/request-contact", async (req, res) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "partner_onboarding", step: "request_contact", outcome: "attempt" });
   try {
     const partner = (req as any).partner as { id: number };
     const state = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!state) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
-    if (state.inviteStatus === "REVOKED") return res.status(403).json({ message: "PARTNER_REVOKED" });
-    if (state.isInviteExpired) return res.status(403).json({ message: "PARTNER_INVITE_EXPIRED" });
+    if (!state) {
+      recordOperationFailure({
+        operation: "partner.onboarding.request_contact",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "request_contact",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    if (state.inviteStatus === "REVOKED") {
+      recordOperationFailure({
+        operation: "partner.onboarding.request_contact",
+        reason: "partner_revoked",
+        flow: "partner_onboarding",
+        step: "request_contact",
+        outcome: "blocked",
+        startedAtMs,
+      });
+      return res.status(403).json({ message: "PARTNER_REVOKED" });
+    }
+    if (state.isInviteExpired) {
+      recordOperationFailure({
+        operation: "partner.onboarding.request_contact",
+        reason: "partner_invite_expired",
+        flow: "partner_onboarding",
+        step: "request_contact",
+        outcome: "blocked",
+        startedAtMs,
+      });
+      return res.status(403).json({ message: "PARTNER_INVITE_EXPIRED" });
+    }
 
     const ts = nowSec();
     await db
@@ -772,10 +954,27 @@ partnerPortalRouter.post("/onboarding/request-contact", async (req, res) => {
     });
 
     const nextState = await resolvePartnerOnboardingState(Number(partner.id));
-    if (!nextState) return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    if (!nextState) {
+      recordOperationFailure({
+        operation: "partner.onboarding.request_contact",
+        reason: "partner_not_found",
+        flow: "partner_onboarding",
+        step: "request_contact",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "PARTNER_NOT_FOUND" });
+    }
+    recordBusinessFlowStep({ flow: "partner_onboarding", step: "request_contact", outcome: "success", startedAtMs });
     return res.json(toOnboardingResponse(nextState));
   } catch (error) {
     console.error("[partner-portal] onboarding request contact error:", error);
+    recordOperationFailure({
+      operation: "partner.onboarding.request_contact",
+      reason: "failed_to_request_contact_access",
+      flow: "partner_onboarding",
+      step: "request_contact",
+      startedAtMs,
+    });
     return res.status(500).json({ message: "FAILED_TO_REQUEST_CONTACT_ACCESS" });
   }
 });

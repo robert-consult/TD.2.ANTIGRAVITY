@@ -31,6 +31,7 @@ interface User {
   usedMargin?: number;
   leverage?: number;
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   createdAt?: string;
   // Tier system fields
   userTier?: "CANDIDATE" | "PERFORMER" | "SELECTED";

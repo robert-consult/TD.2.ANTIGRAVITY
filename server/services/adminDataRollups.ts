@@ -1,5 +1,6 @@
 import { dbClient } from "@db";
 import { nowSec } from "@shared/scalars";
+import { withObservedBackgroundJob } from "../observability/business";
 
 export type AdminDataRollupMetricKey =
   | "kpi_summary"
@@ -669,52 +670,61 @@ function parseRollupWindows(): number[] {
 
 export async function refreshAdminDataRollups(params?: { refreshedByRole?: string }): Promise<void> {
   const startedAtMs = Date.now();
-  rollupMetrics.runningGauge = 1;
-  rollupMetrics.lastRunAtSec = Math.floor(startedAtMs / 1000);
-  rollupMetrics.refreshTotal += 1;
-
   const role = params?.refreshedByRole || "worker";
-  const windows = parseRollupWindows();
-  const metricsWithWindow: AdminDataRollupMetricKey[] = [
-    "kpi_summary",
-    "signup_funnel",
-    "user_analytics",
-    "deactivated_summary",
-  ];
+  return withObservedBackgroundJob({
+    job: "admin_rollup_refresh",
+    spanName: "admin.rollups.refresh",
+    attributes: {
+      "tradehub.refreshed_by_role": role,
+    },
+    fn: async () => {
+      rollupMetrics.runningGauge = 1;
+      rollupMetrics.lastRunAtSec = Math.floor(startedAtMs / 1000);
+      rollupMetrics.refreshTotal += 1;
 
-  let refreshedCount = 0;
-  try {
-    for (const windowDays of windows) {
-      for (const metricKey of metricsWithWindow) {
+      const windows = parseRollupWindows();
+      const metricsWithWindow: AdminDataRollupMetricKey[] = [
+        "kpi_summary",
+        "signup_funnel",
+        "user_analytics",
+        "deactivated_summary",
+      ];
+
+      let refreshedCount = 0;
+      try {
+        for (const windowDays of windows) {
+          for (const metricKey of metricsWithWindow) {
+            await getOrRefreshAdminDataRollup({
+              metricKey,
+              windowDays,
+              maxAgeSec: 1,
+              forceRefresh: true,
+              refreshedByRole: role,
+            });
+            refreshedCount += 1;
+          }
+        }
+
         await getOrRefreshAdminDataRollup({
-          metricKey,
-          windowDays,
+          metricKey: "compliance",
+          windowDays: 0,
           maxAgeSec: 1,
           forceRefresh: true,
           refreshedByRole: role,
         });
         refreshedCount += 1;
+        rollupMetrics.lastSuccessAtSec = nowSec();
+      } catch (error) {
+        rollupMetrics.refreshFailedTotal += 1;
+        rollupMetrics.lastFailureAtSec = nowSec();
+        throw error;
+      } finally {
+        rollupMetrics.runningGauge = 0;
+        rollupMetrics.lastDurationMs = Math.max(0, Date.now() - startedAtMs);
+        rollupMetrics.lastRefreshedMetricCount = refreshedCount;
       }
-    }
-
-    await getOrRefreshAdminDataRollup({
-      metricKey: "compliance",
-      windowDays: 0,
-      maxAgeSec: 1,
-      forceRefresh: true,
-      refreshedByRole: role,
-    });
-    refreshedCount += 1;
-    rollupMetrics.lastSuccessAtSec = nowSec();
-  } catch (error) {
-    rollupMetrics.refreshFailedTotal += 1;
-    rollupMetrics.lastFailureAtSec = nowSec();
-    throw error;
-  } finally {
-    rollupMetrics.runningGauge = 0;
-    rollupMetrics.lastDurationMs = Math.max(0, Date.now() - startedAtMs);
-    rollupMetrics.lastRefreshedMetricCount = refreshedCount;
-  }
+    },
+  });
 }
 
 export function getAdminDataRollupMetricsSnapshot(): AdminDataRollupMetricsState {

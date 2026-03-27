@@ -24,6 +24,32 @@ async function ensure() {
   await ensurePostgresSchema();
 }
 
+export function isPgStatStatementsPermissionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeCode = "code" in error ? (error as { code?: unknown }).code : undefined;
+  const maybeMessage = "message" in error ? (error as { message?: unknown }).message : undefined;
+  return (
+    maybeCode === "42501" &&
+    typeof maybeMessage === "string" &&
+    maybeMessage.includes('permission denied to create extension "pg_stat_statements"')
+  );
+}
+
+export async function ensurePgStatStatementsExtension() {
+  await ensure();
+  try {
+    await dbClient.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
+  } catch (error) {
+    if (isPgStatStatementsPermissionError(error)) {
+      console.warn(
+        "[db] Skipping pg_stat_statements extension ensure; current database user lacks CREATE EXTENSION privileges.",
+      );
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function ensureCoreTradingSchema() {
   await ensure();
 }

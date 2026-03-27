@@ -1,4 +1,13 @@
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-observability
+  namespace: tradehub
+data:
+  010-observability.sql: |
+    CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: postgres
@@ -30,6 +39,27 @@ spec:
       containers:
         - name: postgres
           image: postgres:16
+          args:
+            - "-c"
+            - "shared_preload_libraries=pg_stat_statements,auto_explain"
+            - "-c"
+            - "compute_query_id=on"
+            - "-c"
+            - "pg_stat_statements.track=all"
+            - "-c"
+            - "pg_stat_statements.max=10000"
+            - "-c"
+            - "pg_stat_statements.save=on"
+            - "-c"
+            - "auto_explain.log_min_duration=250ms"
+            - "-c"
+            - "auto_explain.sample_rate=0.01"
+            - "-c"
+            - "auto_explain.log_analyze=off"
+            - "-c"
+            - "auto_explain.log_timing=off"
+            - "-c"
+            - "auto_explain.log_buffers=off"
           ports:
             - containerPort: 5432
           env:
@@ -58,6 +88,13 @@ spec:
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
+            - name: postgres-init-observability
+              mountPath: /docker-entrypoint-initdb.d/010-observability.sql
+              subPath: 010-observability.sql
+      volumes:
+        - name: postgres-init-observability
+          configMap:
+            name: postgres-init-observability
   volumeClaimTemplates:
     - metadata:
         name: pgdata

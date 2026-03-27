@@ -19,28 +19,38 @@ data:
       "plugins": {
         "prometheus": {
           "enabled": true,
-          "url": "http://tradehub-prometheus.tradehub.svc:9090"
+          "url": "/prometheus"
         }
       },
       "externalLinks": [
         {
-          "label": "Grafana — System Health",
-          "url": "/grafana/d/th-bare-metal",
+          "label": "Grafana — Ops Overview",
+          "url": "/grafana/d/tradehub-ops-overview",
           "icon": "dashboard"
         },
         {
-          "label": "Grafana — Export Pipeline",
-          "url": "/grafana/d/th-export-pipeline",
+          "label": "Grafana — HTTP Observability",
+          "url": "/grafana/d/tradehub-http-observability",
           "icon": "dashboard"
         },
         {
-          "label": "Grafana — Cache Health",
-          "url": "/grafana/d/th-cache-health",
+          "label": "Grafana — Business Flow",
+          "url": "/grafana/d/tradehub-business-flow-health",
           "icon": "dashboard"
         },
         {
-          "label": "MinIO Console",
-          "url": "http://tradehub-minio.tradehub.svc:9001",
+          "label": "Prometheus",
+          "url": "/prometheus",
+          "icon": "monitor"
+        },
+        {
+          "label": "Bull Board",
+          "url": "/api/admin/data-exports/queues",
+          "icon": "queue"
+        },
+        {
+          "label": "MinIO Monitor",
+          "url": "/minio-monitor",
           "icon": "storage"
         }
       ]

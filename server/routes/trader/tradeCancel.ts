@@ -52,6 +52,7 @@ import {
   incTradeCloseRejectedQuoteStaleTotal,
   incTradeTargetsRejectedQuoteStaleTotal,
 } from "../metricsState";
+import { recordBusinessFlowStep, recordOperationFailure } from "../../observability/business";
 import type { TraderRouterDeps } from "./types";
 
 export function registerTradeCancelRoute(router: Router, deps: TraderRouterDeps) {
@@ -71,29 +72,66 @@ export function registerTradeCancelRoute(router: Router, deps: TraderRouterDeps)
     next();
   },
   async (req: Request, res: Response) => {
+    const startedAtMs = Date.now();
+    recordBusinessFlowStep({ flow: "trade_lifecycle", step: "cancel", outcome: "attempt" });
     try {
       const session = req.session as SessionData;
       const userId = Number(session.userId);
       if (!Number.isInteger(userId) || userId <= 0) {
+        recordOperationFailure({
+          operation: "trade.cancel",
+          reason: "not_authenticated",
+          flow: "trade_lifecycle",
+          step: "cancel",
+          startedAtMs,
+        });
         return res.status(401).json({ message: "Not authenticated" });
       }
 
       const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const tradeId = Number.parseInt(String(tradeIdRaw ?? ""), 10);
       if (Number.isNaN(tradeId)) {
+        recordOperationFailure({
+          operation: "trade.cancel",
+          reason: "invalid_trade_id",
+          flow: "trade_lifecycle",
+          step: "cancel",
+          startedAtMs,
+        });
         return res.status(400).json({ message: "Invalid trade ID" });
       }
       const trade = await storage.getTradeById(tradeId);
 
       if (!trade) {
+        recordOperationFailure({
+          operation: "trade.cancel",
+          reason: "trade_not_found",
+          flow: "trade_lifecycle",
+          step: "cancel",
+          startedAtMs,
+        });
         return res.status(404).json({ message: "Trade not found" });
       }
 
       if (trade.userId !== userId) {
+        recordOperationFailure({
+          operation: "trade.cancel",
+          reason: "not_authorized",
+          flow: "trade_lifecycle",
+          step: "cancel",
+          startedAtMs,
+        });
         return res.status(403).json({ message: "Not authorized" });
       }
 
       if (trade.status !== "PENDING") {
+        recordOperationFailure({
+          operation: "trade.cancel",
+          reason: "trade_not_pending",
+          flow: "trade_lifecycle",
+          step: "cancel",
+          startedAtMs,
+        });
         return res.status(400).json({ message: "Trade is not pending" });
       }
 
@@ -211,9 +249,22 @@ export function registerTradeCancelRoute(router: Router, deps: TraderRouterDeps)
         }
       }
 
+      recordBusinessFlowStep({
+        flow: "trade_lifecycle",
+        step: "cancel",
+        outcome: "success",
+        startedAtMs,
+      });
       res.json(canceledTrade);
     } catch (error) {
       console.error("Error canceling trade:", error);
+      recordOperationFailure({
+        operation: "trade.cancel",
+        reason: "failed_to_cancel_trade",
+        flow: "trade_lifecycle",
+        step: "cancel",
+        startedAtMs,
+      });
       res.status(500).json({ message: "Failed to cancel trade" });
     }
   });

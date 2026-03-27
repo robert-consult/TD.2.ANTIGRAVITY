@@ -53,6 +53,7 @@ import {
   incTradeCloseRejectedQuoteRevalidationTotal,
   incTradeTargetsRejectedQuoteStaleTotal,
 } from "../metricsState";
+import { recordBusinessFlowStep, recordOperationFailure } from "../../observability/business";
 import type { TraderRouterDeps } from "./types";
 
 export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) {
@@ -72,14 +73,30 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
     next();
   },
   async (req: Request, res: Response) => {
+    const startedAtMs = Date.now();
+    recordBusinessFlowStep({ flow: "trade_lifecycle", step: "close", outcome: "attempt" });
     const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const tradeId = Number.parseInt(String(tradeIdRaw ?? ""), 10);
     if (isNaN(tradeId)) {
+      recordOperationFailure({
+        operation: "trade.close",
+        reason: "invalid_trade_id",
+        flow: "trade_lifecycle",
+        step: "close",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "Invalid trade ID" });
     }
     const session = req.session as SessionData;
     const userId = Number(session.userId);
     if (!Number.isInteger(userId) || userId <= 0) {
+      recordOperationFailure({
+        operation: "trade.close",
+        reason: "not_authenticated",
+        flow: "trade_lifecycle",
+        step: "close",
+        startedAtMs,
+      });
       return res.status(401).json({ message: "Not authenticated" });
     }
 
@@ -88,14 +105,35 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
       const trade = await storage.getTradeById(tradeId);
 
       if (!trade) {
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "trade_not_found",
+          flow: "trade_lifecycle",
+          step: "close",
+          startedAtMs,
+        });
         return res.status(404).json({ message: "Trade not found" });
       }
 
       if (trade.userId !== userId) {
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "not_authorized",
+          flow: "trade_lifecycle",
+          step: "close",
+          startedAtMs,
+        });
         return res.status(403).json({ message: "Not authorized to close this trade" });
       }
 
       if (trade.status === "CLOSED") {
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "trade_already_closed",
+          flow: "trade_lifecycle",
+          step: "close",
+          startedAtMs,
+        });
         return res.status(400).json({ message: "Trade is already closed" });
       }
 
@@ -120,6 +158,14 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
 
           if (holdDurationSec < minHoldSec) {
             const remainingSec = Math.ceil(minHoldSec - holdDurationSec);
+            recordOperationFailure({
+              operation: "trade.close",
+              reason: "min_hold_time",
+              flow: "trade_lifecycle",
+              step: "close",
+              outcome: "blocked",
+              startedAtMs,
+            });
             return res.status(403).json({
               code: "MIN_HOLD_TIME",
               message: `Trade must be held for at least ${minHoldSec} seconds. ${remainingSec} seconds remaining.`,
@@ -134,6 +180,13 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
       // Get symbol config for the trade
       const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
       if (!symbolConfig) {
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "symbol_configuration_not_found",
+          flow: "trade_lifecycle",
+          step: "close",
+          startedAtMs,
+        });
         return res.status(404).json({ message: "Symbol configuration not found" });
       }
 
@@ -142,11 +195,26 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
       try {
         q = await getExecutionQuote(symbolConfig.symbol, trade.type as "BUY" | "SELL", "CLOSE");
       } catch (quoteError) {
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "live_price_unavailable",
+          flow: "trade_lifecycle",
+          step: "close",
+          startedAtMs,
+        });
         return res.status(503).json({ message: "Live price unavailable. Try again shortly." });
       }
 
       // Reject if market is closed
       if (!q.marketOpen) {
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "market_closed",
+          flow: "trade_lifecycle",
+          step: "close",
+          outcome: "blocked",
+          startedAtMs,
+        });
         return res.status(409).json({ message: "Market is closed. Try again when market re-opens." });
       }
 
@@ -161,6 +229,12 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
         closeAuditCtx.correlationId = correlationId;
 
         incTradeCloseRejectedQuoteStaleTotal();
+        recordBusinessFlowStep({
+          flow: "trade_lifecycle",
+          step: "close",
+          outcome: "failure",
+          startedAtMs,
+        });
 
         try {
           await db.update(trades)
@@ -388,6 +462,12 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
       if (closeResult.action === "QUOTE_REVALIDATION_FAILED") {
         const quoteRevalidation = (closeResult as any).quoteRevalidation ?? {};
         incTradeCloseRejectedQuoteRevalidationTotal();
+        recordBusinessFlowStep({
+          flow: "trade_lifecycle",
+          step: "close",
+          outcome: "failure",
+          startedAtMs,
+        });
         try {
           await db.update(trades)
             .set({
@@ -438,6 +518,13 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
 
       if (closeResult.action !== "CLOSED") {
         clearTradeExcursion(tradeId);
+        recordOperationFailure({
+          operation: "trade.close",
+          reason: "trade_already_closed",
+          flow: "trade_lifecycle",
+          step: "close",
+          startedAtMs,
+        });
         return res.status(409).json({ message: "Trade is already closed" });
       }
 
@@ -497,9 +584,22 @@ export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) 
         }
       }
 
+      recordBusinessFlowStep({
+        flow: "trade_lifecycle",
+        step: "close",
+        outcome: "success",
+        startedAtMs,
+      });
       res.json(closeResult.trade);
     } catch (error) {
       console.error("Close trade error:", error);
+      recordOperationFailure({
+        operation: "trade.close",
+        reason: "failed_to_close_trade",
+        flow: "trade_lifecycle",
+        step: "close",
+        startedAtMs,
+      });
       res.status(500).json({ message: "Failed to close trade" });
     }
   });

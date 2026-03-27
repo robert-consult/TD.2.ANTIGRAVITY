@@ -6,6 +6,7 @@ resources:
   - 03-postgres.yaml
   - 04-pgbouncer.yaml
   - 05-valkey.yaml
+  - 06-postgres-exporters.yaml
   - 10-api-deployment.yaml
   - 11-ingestor-deployment.yaml
   - 12-worker-deployment.yaml

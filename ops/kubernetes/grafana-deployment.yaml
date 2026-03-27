@@ -3,14 +3,11 @@
 # Deploys Grafana with all 64 dashboards (56 Pigsty + 8 TradeHub) auto-provisioned.
 # 100% free, self-hosted, no paid accounts required.
 #
-# Prerequisites:
-#   kubectl create configmap tradehub-dashboards --from-file=ops/dashboards/ -n tradehub
-#   kubectl create configmap pigsty-pgsql-dashboards --from-file=ops/dashboards/pigsty-pgsql/ -n tradehub
-#   kubectl create configmap pigsty-minio-dashboards --from-file=ops/dashboards/pigsty-minio/ -n tradehub
-#   kubectl create configmap pigsty-node-dashboards --from-file=ops/dashboards/pigsty-node/ -n tradehub
-#   kubectl create configmap pigsty-infra-dashboards --from-file=ops/dashboards/pigsty-infra/ -n tradehub
-#   kubectl create configmap pigsty-redis-dashboards --from-file=ops/dashboards/pigsty-redis/ -n tradehub
-#   kubectl create configmap grafana-provisioning --from-file=ops/grafana-config/provisioning/ -n tradehub
+# Canonical deploy path:
+#   kubectl apply -k ops/kubernetes
+#
+# If you bypass kustomize and apply this manifest directly, create the dashboard
+# and provisioning ConfigMaps manually first.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -61,8 +58,20 @@ spec:
               value: "false"
             - name: GF_ANALYTICS_CHECK_FOR_UPDATES
               value: "false"
+            - name: GF_SERVER_ROOT_URL
+              value: "https://tradehub.example.com/grafana/"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
+            - name: GF_AUTH_PROXY_ENABLED
+              value: "true"
+            - name: GF_AUTH_PROXY_HEADER_NAME
+              value: "X-TradeHub-Admin-Email"
+            - name: GF_AUTH_PROXY_AUTO_SIGN_UP
+              value: "true"
+            - name: GF_USERS_AUTO_ASSIGN_ORG_ROLE
+              value: "Viewer"
             - name: GF_INSTALL_PLUGINS
               value: "victoriametrics-logs-datasource,marcusolsson-static-datasource"
             - name: PGPASSWORD

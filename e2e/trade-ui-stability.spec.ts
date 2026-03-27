@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { acceptDoc1IfPrompted, ensureTradeCapacity, login } from "./utils";
+import { acceptDoc1IfPrompted, login, waitForFreshQuote } from "./utils";
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 
@@ -17,67 +17,95 @@ test("Trade: header collapse does not reset scroll + tables remain expandable on
   await login(page, DEMO.email, DEMO.password);
   await acceptDoc1IfPrompted(page);
   await navigateToTrade(page);
-  await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
+
+  const existingCounts = await page.evaluate(async () => {
+    const readRows = async (url: string) => {
+      try {
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) return [];
+        const body = await res.json().catch(() => []);
+        return Array.isArray(body) ? body : [];
+      } catch {
+        return [];
+      }
+    };
+    const normalizeSymbol = (value: unknown): string => String(value ?? "").trim().toUpperCase();
+    const rowSymbol = (row: any): string => {
+      if (row?.symbol && typeof row.symbol === "string") return normalizeSymbol(row.symbol);
+      if (row?.symbol && typeof row.symbol === "object") return normalizeSymbol(row.symbol.symbol);
+      return "";
+    };
+    const [openRows, pendingRows] = await Promise.all([
+      readRows("/api/trades/open"),
+      readRows("/api/trades/pending"),
+    ]);
+    return {
+      open: openRows.filter((row) => rowSymbol(row) === "USDJPY").length,
+      pending: pendingRows.filter((row) => rowSymbol(row) === "USDJPY").length,
+    };
+  });
 
   const scroll = page.locator('[data-testid="trade-tab-scroll"]');
   const header = page.locator('[data-testid="trade-header-shell"]');
 
-  const buyButton = page.locator("button.btn-buy");
-  await expect(buyButton).toBeEnabled({ timeout: 60_000 });
-  // Place a market order quickly (quotes can go stale in E2E if we wait too long).
-  const marketPost1 = page.waitForResponse(
-    (res) => res.url().endsWith("/api/trades") && res.request().method() === "POST",
-    { timeout: 60_000 },
-  );
-  await buyButton.click();
-  const marketRes1 = await marketPost1;
-
-  const acceptedTerms = await acceptDoc1IfPrompted(page);
-  if (acceptedTerms) {
-    await page.getByRole("tab", { name: "Place Order" }).click();
+  if (existingCounts.open === 0) {
+    await waitForFreshQuote(page, { symbol: "USDJPY" });
+    const buyButton = page.locator("button.btn-buy");
     await expect(buyButton).toBeEnabled({ timeout: 60_000 });
-    const marketPost2 = page.waitForResponse(
+    const marketPost1 = page.waitForResponse(
       (res) => res.url().endsWith("/api/trades") && res.request().method() === "POST",
       { timeout: 60_000 },
     );
     await buyButton.click();
-    const marketRes2 = await marketPost2;
-    expect(marketRes2.status(), await marketRes2.text()).toBeLessThan(400);
-  } else {
-    expect(marketRes1.status(), await marketRes1.text()).toBeLessThan(400);
+    const marketRes1 = await marketPost1;
+
+    const acceptedTerms = await acceptDoc1IfPrompted(page);
+    if (acceptedTerms) {
+      await page.getByRole("tab", { name: "Place Order" }).click();
+      await expect(buyButton).toBeEnabled({ timeout: 60_000 });
+      const marketPost2 = page.waitForResponse(
+        (res) => res.url().endsWith("/api/trades") && res.request().method() === "POST",
+        { timeout: 60_000 },
+      );
+      await buyButton.click();
+      const marketRes2 = await marketPost2;
+      expect(marketRes2.status(), await marketRes2.text()).toBeLessThan(400);
+    } else {
+      expect(marketRes1.status(), await marketRes1.text()).toBeLessThan(400);
+    }
   }
 
   // Place a pending Stop order early to avoid quote staleness flaking the test.
-  await page.getByRole("tab", { name: "Place Order" }).click();
-  await page.getByRole("button", { name: /^Stop$/ }).click();
-  const stopInput = page.locator('input[name="stopPrice"]');
-  await expect(stopInput).toBeVisible();
+  if (existingCounts.pending === 0) {
+    await page.getByRole("tab", { name: "Place Order" }).click();
+    await page.getByRole("button", { name: /^Stop$/ }).click();
+    const stopInput = page.locator('input[name="stopPrice"]');
+    await expect(stopInput).toBeVisible();
 
-  // Set a deterministic Stop price based on server-side quotes (avoids client/server tick skew flaking the test).
-  const serverAsk = await page.evaluate(async () => {
-    const res = await fetch("/api/quotes/USDJPY", { credentials: "include" });
-    const data = await res.json().catch(() => null);
-    const ask = data?.ask ?? data?.price ?? null;
-    return typeof ask === "number" ? ask : Number(ask);
-  });
-  const stopPx = Number.isFinite(serverAsk) ? serverAsk + 0.5 /* 50 pips */ : 150;
-  await stopInput.fill(stopPx.toFixed(3));
+    const serverAsk = await page.evaluate(async () => {
+      const res = await fetch("/api/quotes/USDJPY", { credentials: "include" });
+      const data = await res.json().catch(() => null);
+      const ask = data?.ask ?? data?.price ?? null;
+      return typeof ask === "number" ? ask : Number(ask);
+    });
+    const stopPx = Number.isFinite(serverAsk) ? serverAsk + 0.5 : 150;
+    await stopInput.fill(stopPx.toFixed(3));
 
-  const tpInput = page.locator('input[name="takeProfit"]');
-  const slInput = page.locator('input[name="stopLoss"]');
-  await expect(tpInput).toHaveValue(/\S+/, { timeout: 60_000 });
-  await expect(slInput).toHaveValue(/\S+/, { timeout: 60_000 });
+    const tpInput = page.locator('input[name="takeProfit"]');
+    const slInput = page.locator('input[name="stopLoss"]');
+    await expect(tpInput).toHaveValue(/\S+/, { timeout: 60_000 });
+    await expect(slInput).toHaveValue(/\S+/, { timeout: 60_000 });
 
-  const submitSingle = page.locator('button[type="submit"][form="trade-order-form"]').first();
-  await expect(submitSingle).toBeEnabled({ timeout: 60_000 });
-  await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
-  const pendingPost = page.waitForResponse(
-    (res) => res.url().endsWith("/api/trades") && res.request().method() === "POST",
-    { timeout: 60_000 },
-  );
-  await submitSingle.click();
-  const pendingRes = await pendingPost;
-  expect(pendingRes.status(), await pendingRes.text()).toBeLessThan(400);
+    const submitSingle = page.locator('button[type="submit"][form="trade-order-form"]').first();
+    await expect(submitSingle).toBeEnabled({ timeout: 60_000 });
+    const pendingPost = page.waitForResponse(
+      (res) => res.url().endsWith("/api/trades") && res.request().method() === "POST",
+      { timeout: 60_000 },
+    );
+    await submitSingle.click();
+    const pendingRes = await pendingPost;
+    expect(pendingRes.status(), await pendingRes.text()).toBeLessThan(400);
+  }
 
   // Ensure the pending trade exists server-side (WS-driven UI updates can lag slightly).
   await expect

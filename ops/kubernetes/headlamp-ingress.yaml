@@ -1,4 +1,4 @@
-# Headlamp Ingress — Admin-Only Access via Nginx
+# Headlamp Ingress — Superadmin-Only Access via Nginx
 # Exposes Headlamp under /headlamp path, protected by app-session auth + optional CIDR allowlist.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -6,13 +6,12 @@ metadata:
   name: tradehub-headlamp-ingress
   namespace: tradehub
   annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/auth-url: "http://tradehub-api.tradehub.svc.cluster.local/api/admin/ops/ingress-auth?resource=headlamp"
     nginx.ingress.kubernetes.io/auth-response-headers: "X-TradeHub-Admin-Id,X-TradeHub-Admin-Email"
-    # Optional defense-in-depth CIDR allowlist (update with actual admin CIDRs).
-    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12"
     nginx.ingress.kubernetes.io/limit-rps: "30"
     nginx.ingress.kubernetes.io/limit-connections: "10"
 spec:

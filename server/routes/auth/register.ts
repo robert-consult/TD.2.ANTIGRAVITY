@@ -67,6 +67,7 @@ import { computeEmailGracePeriod } from "../../utils/computeEmailGracePeriod";
 import { maybeRecalcAccountForCurrentUser } from "../../services/currentUserRecalc";
 import { applyAdminScopeSession } from "../../security/adminScopeSession";
 import { buildServerVerifyEmailUrl } from "../../services/appLinks";
+import { recordBusinessFlowStep, recordOperationFailure } from "../../observability/business";
 import crypto from "crypto";
 import type { AuthRouterDeps } from "./types";
 
@@ -74,6 +75,8 @@ export function registerRegisterRoute(router: Router, deps: AuthRouterDeps) {
   const { sessionCookieName } = deps;
   const SESSION_COOKIE_NAME = sessionCookieName;
 router.post("/api/auth/register", async (req: Request, res: Response) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "signup", step: "register", outcome: "attempt" });
   try {
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
@@ -101,6 +104,14 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
         console.warn("Failed to record signup freeze attempt:", e);
       }
 
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "signups_frozen",
+        flow: "signup",
+        step: "register",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(403).json({
         message: "SIGNUPS_FROZEN",
         error: "SIGNUPS_FROZEN",
@@ -122,6 +133,13 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
 
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "invalid_registration_payload",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(400).json({
         message: "INVALID_REGISTRATION_PAYLOAD",
         errors: parsed.error.flatten(),
@@ -157,6 +175,14 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
         createdAtSec: nowSec,
       });
 
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: signupJ.reasonCode || "jurisdiction_restricted",
+        flow: "signup",
+        step: "register",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(signupJ.httpStatus).json({
         message: signupJ.message,
         code: signupJ.code,
@@ -172,11 +198,26 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
 
     const captchaResult = await verifySignupCaptcha(req, captchaToken);
     if (!captchaResult.ok) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "captcha_failed",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(400).json({ message: captchaResult.message });
     }
 
     const cov = await checkCoverage(countryIso2);
     if (cov.enforced && !cov.allowed) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "legal_coverage_missing",
+        flow: "signup",
+        step: "register",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(409).json({ message: "LEGAL_COVERAGE_MISSING" });
     }
 
@@ -185,24 +226,59 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
       maxAgeMs: 24 * 60 * 60 * 1000,
     });
     if (!tokenCheck.ok) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "invalid_terms_token",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(400).json({ message: tokenCheck.error });
     }
     if (tokenCheck.payload.combinedSha256 !== combinedSha256) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "terms_combined_sha_mismatch",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "TERMS_COMBINED_SHA_MISMATCH" });
     }
     const regionKey: string | null = tokenCheck.payload.regionKey ?? null;
 
     const existingUser = await storage.getUserByEmail(email);
     if (existingUser) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "user_exists",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(409).json({ message: "User already exists" });
     }
 
     const phoneRequired = Boolean(signupCfg.signupPhoneEnforce);
     const normalizedPhone = normalizeSignupPhone(phone ?? undefined, countryIso2);
     if (!normalizedPhone.ok) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "phone_invalid",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "PHONE_INVALID" });
     }
     if (phoneRequired && !normalizedPhone.e164) {
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "phone_required",
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "PHONE_REQUIRED" });
     }
 
@@ -270,6 +346,13 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
       const code = acceptErr instanceof LegalAcceptanceError ? acceptErr.code : "REGISTRATION_TRANSACTION_FAILED";
       console.error("[Legal] Registration transaction failed:", code, acceptErr?.message || acceptErr);
       if (acceptErr?.stack) console.error("[Legal] Stack trace:", acceptErr.stack);
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: code,
+        flow: "signup",
+        step: "register",
+        startedAtMs,
+      });
       return res.status(500).json({ message: code });
     }
 
@@ -470,6 +553,14 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
           ? "Account is disabled due to integrity review. Please contact support."
           : "Account is frozen due to integrity review. Please contact support.";
 
+      recordOperationFailure({
+        operation: "auth.register",
+        reason: "grift_auto_enforcement",
+        flow: "signup",
+        step: "register",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return req.session.destroy(() =>
         res.status(403).json({
           message: statusMsg,
@@ -484,6 +575,12 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
     });
 
     const registerGrace = computeEmailGracePeriod(user.createdAt, false);
+    recordBusinessFlowStep({
+      flow: "signup",
+      step: "register",
+      outcome: "success",
+      startedAtMs,
+    });
 
     res.status(201).json({
       id: user.id,
@@ -507,6 +604,13 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Registration error:", error);
+    recordOperationFailure({
+      operation: "auth.register",
+      reason: "internal_error",
+      flow: "signup",
+      step: "register",
+      startedAtMs,
+    });
     res.status(500).json({ message: "Internal server error" });
   }
 });

@@ -31,6 +31,7 @@ import {
 } from "../services/objectStorage";
 import { getPetascaleRuntimeConfig } from "../services/petascaleEnv";
 import { onAdminExportJobCreated, onAdminExportJobExpired } from "../services/adminDataExportMetrics";
+import { recordOperationFailure } from "../observability/business";
 
 function getSessionAdminId(req: any): number | null {
   const id = Number(req?.session?.userId);
@@ -170,9 +171,15 @@ export const adminDataExportsRouter = Router();
 adminDataExportsRouter.use(requireAdmin);
 
 adminDataExportsRouter.post("/", async (req: any, res) => {
+  const startedAtMs = Date.now();
   try {
     const requestedByAdminId = getSessionAdminId(req);
     if (!requestedByAdminId) {
+      recordOperationFailure({
+        operation: "admin.data_exports.create",
+        reason: "forbidden",
+        startedAtMs,
+      });
       return res.status(403).json({ message: "Forbidden" });
     }
     if (!enforceAdminRateLimit({ res, adminId: requestedByAdminId, kind: "create" })) return;
@@ -183,6 +190,11 @@ adminDataExportsRouter.post("/", async (req: any, res) => {
     });
     return res.json({ ok: true, ...result });
   } catch (err: any) {
+    recordOperationFailure({
+      operation: "admin.data_exports.create",
+      reason: err?.message || "failed_to_create_export_job",
+      startedAtMs,
+    });
     return res.status(400).json({
       message: err?.message || "Failed to create export job",
     });
@@ -385,14 +397,34 @@ adminDataExportsRouter.get("/:jobId/events", async (req: any, res) => {
 });
 
 adminDataExportsRouter.post("/:jobId/retry", async (req: any, res) => {
+  const startedAtMs = Date.now();
   const jobId = parseJobIdParam(req.params.jobId);
   if (!jobId) return res.status(404).json({ message: "Route not found" });
 
   const job = await getAdminDataExportJob(jobId);
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+  if (!job) {
+    recordOperationFailure({
+      operation: "admin.data_exports.retry",
+      reason: "job_not_found",
+      startedAtMs,
+    });
+    return res.status(404).json({ message: "Job not found" });
+  }
+  if (!canAccessJob(req, job)) {
+    recordOperationFailure({
+      operation: "admin.data_exports.retry",
+      reason: "forbidden",
+      startedAtMs,
+    });
+    return res.status(403).json({ message: "Forbidden" });
+  }
 
   if (!["FAILED", "CANCELED", "EXPIRED"].includes(job.status)) {
+    recordOperationFailure({
+      operation: "admin.data_exports.retry",
+      reason: "invalid_retry_status",
+      startedAtMs,
+    });
     return res.status(409).json({ message: `Cannot retry job in status ${job.status}` });
   }
   if (!enforceAdminRateLimit({ res, adminId: getSessionAdminId(req), kind: "retry" })) return;
@@ -407,7 +439,16 @@ adminDataExportsRouter.post("/:jobId/retry", async (req: any, res) => {
     message: "Retry requested by admin",
     context: { adminId: getSessionAdminId(req) },
   });
-  await retryAdminDataExportJob(jobId);
+  try {
+    await retryAdminDataExportJob(jobId);
+  } catch (error: any) {
+    recordOperationFailure({
+      operation: "admin.data_exports.retry",
+      reason: error?.message || "retry_failed",
+      startedAtMs,
+    });
+    return res.status(500).json({ message: error?.message || "Failed to retry export job" });
+  }
   return res.json({ ok: true, jobId });
 });
 
@@ -431,13 +472,33 @@ adminDataExportsRouter.post("/:jobId/cancel", async (req: any, res) => {
 });
 
 adminDataExportsRouter.get("/:jobId/download-link", async (req: any, res) => {
+  const startedAtMs = Date.now();
   const jobId = parseJobIdParam(req.params.jobId);
   if (!jobId) return res.status(404).json({ message: "Route not found" });
 
   const job = await getAdminDataExportJob(jobId);
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+  if (!job) {
+    recordOperationFailure({
+      operation: "admin.data_exports.download_link",
+      reason: "job_not_found",
+      startedAtMs,
+    });
+    return res.status(404).json({ message: "Job not found" });
+  }
+  if (!canAccessJob(req, job)) {
+    recordOperationFailure({
+      operation: "admin.data_exports.download_link",
+      reason: "forbidden",
+      startedAtMs,
+    });
+    return res.status(403).json({ message: "Forbidden" });
+  }
   if (job.status !== "READY" || !job.objectKey) {
+    recordOperationFailure({
+      operation: "admin.data_exports.download_link",
+      reason: "export_not_ready",
+      startedAtMs,
+    });
     return res.status(409).json({ message: "Export is not ready" });
   }
 
@@ -454,6 +515,11 @@ adminDataExportsRouter.get("/:jobId/download-link", async (req: any, res) => {
       message: "Download link request rejected because artifact is expired",
       context: { adminId: getSessionAdminId(req), expiresAt: job.expiresAt },
     }).catch(() => {});
+    recordOperationFailure({
+      operation: "admin.data_exports.download_link",
+      reason: "artifact_expired",
+      startedAtMs,
+    });
     return res.status(410).json({ message: "Export artifact expired" });
   }
 

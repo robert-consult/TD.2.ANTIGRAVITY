@@ -875,8 +875,8 @@ When adding new folders:
 |-------------|------------------|-------------|
 | `.env` | Yes | ✅ |
 | `.sops.agekey` / `*.agekey` | Yes | ✅ |
-| `MOBILE/android/key.properties` | Operator signing material | No (tracked legacy/operator file) |
-| `MOBILE/android/*.keystore` | Operator signing material | Pattern ignored, but tracked files may still exist |
+| `MOBILE/android/key.properties` | Must not exist populated in repo | ✅ (ignored; use external operator path) |
+| `MOBILE/android/*.keystore` | Must not exist populated in repo | ✅ (ignored; use external operator path) |
 | `NATIVE/android/app/google-services.json` | Firebase config | No (tracked placeholder/operator file) |
 | `NATIVE/ios/TradeQuipNative/GoogleService-Info.plist` | Firebase config | No (tracked placeholder/operator file) |
 | `k8s/02-secrets.yaml` | Template only | No (template tracked; values must stay external) |

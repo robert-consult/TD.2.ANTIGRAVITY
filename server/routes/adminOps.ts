@@ -15,7 +15,6 @@ import { storage } from "../storage";
 import { getCacheStats } from "../feeds/quoteFeed";
 import { resolveSecretRef } from "../marketdata/secret";
 import { getActiveProviderSelection } from "../marketdata/providerManager";
-import { observeHttpRequestDuration } from "./metricsState";
 
 function normalizeProviderKey(raw: unknown): string | null {
   const value = String(raw ?? "").trim();
@@ -26,7 +25,7 @@ function normalizeProviderKey(raw: unknown): string | null {
 
 export const adminOpsRouter = Router();
 
-const INGRESS_AUTH_RESOURCES = new Set(["headlamp", "bullboard", "minio-monitor", "grafana"]);
+const INGRESS_AUTH_RESOURCES = new Set(["headlamp", "bullboard", "minio-monitor", "grafana", "prometheus"]);
 
 function ingressAuthHandler(req: any, res: any) {
   const resource = String(req.query.resource ?? "").trim().toLowerCase();
@@ -64,7 +63,6 @@ adminOpsRouter.get("/ingress-auth", requireAdmin, ingressAuthHandler);
 adminOpsRouter.get("/ops/ingress-auth", requireAdmin, ingressAuthHandler);
 
 adminOpsRouter.get("/trader-stats", requireAdmin, async (req, res) => {
-  const startedAt = process.hrtime.bigint();
   try {
     const { days, limit, offset } = AdminTraderStatsQuerySchema.parse(req.query);
 
@@ -146,11 +144,6 @@ adminOpsRouter.get("/trader-stats", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Error fetching trader statistics:", error);
     return res.status(500).json({ message: "Internal server error" });
-  } finally {
-    observeHttpRequestDuration(
-      "/api/admin/trader-stats",
-      Number(process.hrtime.bigint() - startedAt) / 1e9,
-    );
   }
 });
 

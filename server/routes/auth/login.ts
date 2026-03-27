@@ -383,6 +383,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
       balance: user.balance,
       startingEquity: user.startingEquity,
       isAdmin: user.isAdmin,
+      isSuperAdmin: Boolean(req.session.isSuperAdmin),
       createdAt: user.createdAt,
       emailVerified: emailVerifiedLogin,
       emailVerifiedAt: verificationLogin?.emailVerifiedAt || null,

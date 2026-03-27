@@ -35,6 +35,7 @@ import { appendChallengeEvent } from "../recruitment/challengesV4/challengeEvent
 import { getSystemChallengeConfig } from "../recruitment/challengesV4/challengeConfig";
 import { deriveCertificatePublicCode } from "../recruitment/challengesV4/certificateCode";
 import { parseCustomRewardRules, scopedCustomRewardKey } from "../recruitment/challengesV4/customRewards";
+import { recordBusinessFlowStep, recordOperationFailure } from "../observability/business";
 import { registerTraderTalentCertificateRoutes } from "./trader-talent/certificates";
 
 const traderTalentPublicRouter = Router();
@@ -1078,20 +1079,44 @@ traderTalentRouter.get("/challenges/:id/status", async (req, res) => {
 });
 
 traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "challenge_lifecycle", step: "enroll", outcome: "attempt" });
   try {
     const cfg = await getRecruitmentConfig();
     if (!cfg.traderCompeteEnabled) {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: "trader_compete_disabled",
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(403).json({ message: "TRADER_COMPETE_DISABLED" });
     }
 
     const userId = Number(req.session?.userId || 0);
     const challengeId = Number(req.params.id || 0);
     if (!Number.isInteger(challengeId) || challengeId <= 0) {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: "invalid_challenge_id",
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
 
     const enrollRate = consumeChallengeRateLimit(`enroll:${userId}`, 5, 60_000);
     if (!enrollRate.allowed) {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: "rate_limited",
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        startedAtMs,
+      });
       emitChallengeSuspiciousActivity({
         req,
         userId,
@@ -1130,16 +1155,39 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
       .where(eq(challenges.id, challengeId))
       .limit(1);
     if (!ch || !ch.isActive || !ch.visibleToTraders) {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: "challenge_not_found",
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        startedAtMs,
+      });
       return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
     }
     const challengeCfg = await getSystemChallengeConfig();
 
     if (!isWithinWindow(ts, ch.enrollmentStartAt ?? null, ch.enrollmentEndAt ?? null)) {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: "enrollment_window_closed",
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(403).json({ message: "ENROLLMENT_WINDOW_CLOSED" });
     }
 
     const gate = await checkEligibilityGate({ userId, gate: ch.eligibilityGate ?? null });
     if (!gate.ok) {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: gate.reason ?? "not_eligible",
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(403).json({ message: "NOT_ELIGIBLE", reason: gate.reason ?? "UNKNOWN" });
     }
 
@@ -1319,6 +1367,14 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
     });
 
     if (enrollmentResult.type === "deny") {
+      recordOperationFailure({
+        operation: "challenge.enroll",
+        reason: String(enrollmentResult.payload?.message ?? "enroll_blocked"),
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        outcome: "blocked",
+        startedAtMs,
+      });
       emitChallengeSuspiciousActivity({
         req,
         userId,
@@ -1330,6 +1386,12 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
     }
 
     if (enrollmentResult.type === "reused") {
+      recordBusinessFlowStep({
+        flow: "challenge_lifecycle",
+        step: "enroll",
+        outcome: "success",
+        startedAtMs,
+      });
       return res.json({ ok: true, reused: true, enrollment: enrollmentResult.enrollment });
     }
 
@@ -1398,28 +1460,65 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
       });
     }
 
+    recordBusinessFlowStep({
+      flow: "challenge_lifecycle",
+      step: "enroll",
+      outcome: "success",
+      startedAtMs,
+    });
     return res.json({ ok: true, reused: false, enrollment });
   } catch (error) {
     console.error("[trader-talent] enroll error:", error);
+    recordOperationFailure({
+      operation: "challenge.enroll",
+      reason: "failed_to_enroll",
+      flow: "challenge_lifecycle",
+      step: "enroll",
+      startedAtMs,
+    });
     return res.status(500).json({ message: "FAILED_TO_ENROLL" });
   }
 });
 
 traderTalentRouter.post("/challenges/:id/withdraw", async (req, res) => {
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "challenge_lifecycle", step: "withdraw", outcome: "attempt" });
   try {
     const cfg = await getRecruitmentConfig();
     if (!cfg.traderCompeteEnabled) {
+      recordOperationFailure({
+        operation: "challenge.withdraw",
+        reason: "trader_compete_disabled",
+        flow: "challenge_lifecycle",
+        step: "withdraw",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(403).json({ message: "TRADER_COMPETE_DISABLED" });
     }
 
     const userId = Number(req.session?.userId || 0);
     const challengeId = Number(req.params.id || 0);
     if (!Number.isInteger(challengeId) || challengeId <= 0) {
+      recordOperationFailure({
+        operation: "challenge.withdraw",
+        reason: "invalid_challenge_id",
+        flow: "challenge_lifecycle",
+        step: "withdraw",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
 
     const withdrawRate = consumeChallengeRateLimit(`withdraw:${userId}`, 3, 60_000);
     if (!withdrawRate.allowed) {
+      recordOperationFailure({
+        operation: "challenge.withdraw",
+        reason: "rate_limited",
+        flow: "challenge_lifecycle",
+        step: "withdraw",
+        startedAtMs,
+      });
       res.setHeader("Retry-After", String(withdrawRate.retryAfterSec));
       return res.status(429).json({
         message: "RATE_LIMITED",
@@ -1442,8 +1541,24 @@ traderTalentRouter.post("/challenges/:id/withdraw", async (req, res) => {
       .orderBy(desc(challengeEnrollments.attemptNumber))
       .limit(1);
 
-    if (!enrollment) return res.status(404).json({ message: "NOT_ENROLLED" });
+    if (!enrollment) {
+      recordOperationFailure({
+        operation: "challenge.withdraw",
+        reason: "not_enrolled",
+        flow: "challenge_lifecycle",
+        step: "withdraw",
+        startedAtMs,
+      });
+      return res.status(404).json({ message: "NOT_ENROLLED" });
+    }
     if (!(enrollment.status === "ENROLLED" || enrollment.status === "ACTIVE")) {
+      recordOperationFailure({
+        operation: "challenge.withdraw",
+        reason: "cannot_withdraw_status",
+        flow: "challenge_lifecycle",
+        step: "withdraw",
+        startedAtMs,
+      });
       return res.status(400).json({ message: "CANNOT_WITHDRAW_STATUS", status: enrollment.status });
     }
 
@@ -1487,9 +1602,22 @@ traderTalentRouter.post("/challenges/:id/withdraw", async (req, res) => {
       },
     });
 
+    recordBusinessFlowStep({
+      flow: "challenge_lifecycle",
+      step: "withdraw",
+      outcome: "success",
+      startedAtMs,
+    });
     return res.json({ ok: true });
   } catch (error) {
     console.error("[trader-talent] withdraw error:", error);
+    recordOperationFailure({
+      operation: "challenge.withdraw",
+      reason: "failed_to_withdraw",
+      flow: "challenge_lifecycle",
+      step: "withdraw",
+      startedAtMs,
+    });
     return res.status(500).json({ message: "FAILED_TO_WITHDRAW" });
   }
 });

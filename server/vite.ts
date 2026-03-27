@@ -7,6 +7,7 @@ import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
 
 const viteLogger = createLogger();
+const RUNTIME_ERROR_PREFIX = "[RUNTIME_ERROR]";
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -33,6 +34,8 @@ export async function setupVite(app: Express, server: Server) {
       ...viteLogger,
       error: (msg, options) => {
         viteLogger.error(msg, options);
+        // Browser runtime overlay events should not terminate the Node dev server.
+        if (msg.startsWith(RUNTIME_ERROR_PREFIX)) return;
         process.exit(1);
       },
     },

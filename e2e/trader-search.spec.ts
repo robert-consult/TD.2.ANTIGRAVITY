@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { acceptDoc1IfPrompted, ensureTradeCapacity, login } from "./utils";
+import { acceptDoc1IfPrompted, ensureTradeCapacity, login, waitForFreshQuote } from "./utils";
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 const ADMIN = { email: "admin@local.test", password: "changeme" };
@@ -31,6 +31,7 @@ async function closeOneIfPresent(page: Page): Promise<boolean> {
 
 async function openAndCloseOneTrade(page: Page) {
   await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
+  await waitForFreshQuote(page, { symbol: "USDJPY" });
   await page.getByRole("tab", { name: "Place Order" }).click();
   const buyButton = page.locator("button.btn-buy");
   await expect(buyButton).toBeEnabled({ timeout: 60_000 });

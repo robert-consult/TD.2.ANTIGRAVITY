@@ -18,12 +18,16 @@ import {
 } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox, TileChart } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Box, Paper, Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Link, Grid, LinearProgress, Alert } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
 import React from 'react';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAMESPACE = 'tradehub';
-const GRAFANA_BASE = '/headlamp'; // Updated at deploy time via ConfigMap
+const GRAFANA_BASE = '/grafana';
+const TILE_COLORS = {
+    success: '#2e7d32',
+    error: '#c62828',
+    info: '#0288d1',
+} as const;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function usePods(labelSelector?: string) {
@@ -152,7 +156,6 @@ sidebarItems.forEach(item => {
 
 // ─── Overview Page ──────────────────────────────────────────────────────────
 function OverviewPage() {
-    const theme = useTheme();
     const [pods, podError] = usePods();
     const [deployments, depError] = useDeployments();
 
@@ -180,7 +183,7 @@ function OverviewPage() {
                 <Grid item xs={12} sm={6} md={3}>
                     <TileChart
                         title="Running Pods"
-                        data={[{ name: 'running', value: runningPods, fill: theme.palette.success.main }]}
+                        data={[{ name: 'running', value: runningPods, fill: TILE_COLORS.success }]}
                         total={totalPods}
                         label={`${runningPods}/${totalPods}`}
                         legend="Pods in Running state"
@@ -189,7 +192,7 @@ function OverviewPage() {
                 <Grid item xs={12} sm={6} md={3}>
                     <TileChart
                         title="Failed Pods"
-                        data={[{ name: 'failed', value: failedPods, fill: theme.palette.error.main }]}
+                        data={[{ name: 'failed', value: failedPods, fill: TILE_COLORS.error }]}
                         total={totalPods}
                         label={String(failedPods)}
                         legend="Pods in Failed/Unknown state"
@@ -198,7 +201,7 @@ function OverviewPage() {
                 <Grid item xs={12} sm={6} md={3}>
                     <TileChart
                         title="Deployments"
-                        data={[{ name: 'healthy', value: healthyDeploys, fill: theme.palette.info.main }]}
+                        data={[{ name: 'healthy', value: healthyDeploys, fill: TILE_COLORS.info }]}
                         total={totalDeploys}
                         label={`${healthyDeploys}/${totalDeploys}`}
                         legend="Healthy deployments"
@@ -607,14 +610,14 @@ registerRoute({
 // ─── Grafana Links Page ─────────────────────────────────────────────────────
 function GrafanaLinksPage() {
     const dashboards = [
-        { name: 'Bare Metal Health', file: 'bare-metal-health.json', desc: 'Node CPU, memory, disk, network metrics' },
-        { name: 'Kubernetes Health', file: 'kubernetes-health.json', desc: 'Pod restarts, OOMKills, HPA status' },
-        { name: 'App RED Metrics', file: 'app-red-metrics.json', desc: 'Route rate, errors, duration p50/p95/p99' },
-        { name: 'Export Pipeline', file: 'export-analytics-pipeline.json', desc: 'Queue depth, job throughput, CH sync lag' },
-        { name: 'Cache & Session', file: 'cache-session-health.json', desc: 'Valkey hit rate, memory, evictions' },
-        { name: 'MinIO Storage', file: 'minio-storage.json', desc: 'Disk forecast, request rate, bucket growth' },
-        { name: 'ClickHouse OLAP', file: 'clickhouse-olap.json', desc: 'Queries, merges, disk & memory usage' },
-        { name: 'Security Events', file: 'security-events.json', desc: 'Login failures, CSRF, bot challenges' },
+        { name: 'TradeHub Ops Overview', file: 'ops-overview.json', uid: 'tradehub-ops-overview', desc: 'Executive status view across the core platform signals' },
+        { name: 'HTTP Endpoint Observability', file: 'http-endpoint-observability.json', uid: 'tradehub-http-observability', desc: 'Per-route latency, rate, and error visibility' },
+        { name: 'Business Flow Health', file: 'business-flow-health.json', uid: 'tradehub-business-flow-health', desc: 'Critical live business-flow success/failure views' },
+        { name: 'SLO / Burn Rate', file: 'slo-burn-rate.json', uid: 'tradehub-slo-burn-rate', desc: 'Burn-rate and latency alerting dashboards' },
+        { name: 'App RED Metrics', file: 'app-red-metrics.json', uid: 'tradehub-app-red', desc: 'Legacy/custom RED panels for the application' },
+        { name: 'Cache & Session', file: 'cache-session-health.json', uid: 'th-cache-health', desc: 'Valkey hit rate, memory, and evictions' },
+        { name: 'Bare Metal Health', file: 'bare-metal-health.json', uid: 'th-bare-metal', desc: 'Node CPU, memory, disk, and network metrics' },
+        { name: 'Security Events', file: 'security-events.json', uid: 'tradehub-security', desc: 'Login failures, CSRF, bot challenges, and security telemetry' },
     ];
 
     return (
@@ -631,6 +634,7 @@ function GrafanaLinksPage() {
                             <TableCell><strong>Dashboard</strong></TableCell>
                             <TableCell><strong>Description</strong></TableCell>
                             <TableCell><strong>Source</strong></TableCell>
+                            <TableCell><strong>Access</strong></TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -639,11 +643,39 @@ function GrafanaLinksPage() {
                                 <TableCell><strong>{d.name}</strong></TableCell>
                                 <TableCell>{d.desc}</TableCell>
                                 <TableCell><code>ops/dashboards/{d.file}</code></TableCell>
+                                <TableCell>
+                                    <Link href={`${GRAFANA_BASE}/d/${d.uid}`} target="_blank" rel="noreferrer">
+                                        Open →
+                                    </Link>
+                                </TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
                 </Table>
             </TableContainer>
+
+            <SectionBox title="Direct Tool Links">
+                <Table size="small">
+                    <TableBody>
+                        <TableRow>
+                            <TableCell>Grafana Root</TableCell>
+                            <TableCell><Link href={GRAFANA_BASE} target="_blank" rel="noreferrer">{GRAFANA_BASE}</Link></TableCell>
+                        </TableRow>
+                        <TableRow>
+                            <TableCell>Prometheus</TableCell>
+                            <TableCell><Link href="/prometheus" target="_blank" rel="noreferrer">/prometheus</Link></TableCell>
+                        </TableRow>
+                        <TableRow>
+                            <TableCell>Bull Board</TableCell>
+                            <TableCell><Link href="/api/admin/data-exports/queues" target="_blank" rel="noreferrer">/api/admin/data-exports/queues</Link></TableCell>
+                        </TableRow>
+                        <TableRow>
+                            <TableCell>MinIO Monitor</TableCell>
+                            <TableCell><Link href="/minio-monitor" target="_blank" rel="noreferrer">/minio-monitor</Link></TableCell>
+                        </TableRow>
+                    </TableBody>
+                </Table>
+            </SectionBox>
 
             <SectionBox title="Alert Rule Files">
                 <Table size="small">
@@ -706,7 +738,6 @@ registerOverviewChartsProcessor({
 
 function TradeHubPodHealthChart() {
     const [pods] = usePods();
-    const theme = useTheme();
     const total = pods?.length ?? 0;
     const running = (pods ?? []).filter((p: any) => p.status?.phase === 'Running').length;
     const failed = total - running;
@@ -715,8 +746,8 @@ function TradeHubPodHealthChart() {
         <TileChart
             title="TradeHub Pods"
             data={[
-                { name: 'running', value: running, fill: theme.palette.success.main },
-                { name: 'other', value: failed, fill: theme.palette.error.main },
+                { name: 'running', value: running, fill: TILE_COLORS.success },
+                { name: 'other', value: failed, fill: TILE_COLORS.error },
             ]}
             total={total}
             label={`${running}/${total}`}

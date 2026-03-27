@@ -57,6 +57,7 @@ import { WS_MSG_TRADES_UPDATED } from "@shared/ws/protocol";
 import {
   incTradeOpenRejectedQuoteRevalidationTotal,
 } from "../metricsState";
+import { recordBusinessFlowStep, recordOperationFailure } from "../../observability/business";
 import type { TraderRouterDeps } from "./types";
 import {
   resolveEffectiveTradeLeverage,
@@ -94,9 +95,17 @@ export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
     const auditCtx = buildAuditContext(req);
     auditCtx.correlationId = correlationId;
     const receivedAtMs = Date.now();
+    recordBusinessFlowStep({ flow: "trade_lifecycle", step: "open", outcome: "attempt" });
     const session = req.session as SessionData;
     const userId = Number(session.userId);
     if (!Number.isInteger(userId) || userId <= 0) {
+      recordOperationFailure({
+        operation: "trade.open",
+        reason: "not_authenticated",
+        flow: "trade_lifecycle",
+        step: "open",
+        startedAtMs: receivedAtMs,
+      });
       return res.status(401).json({ message: "Not authenticated" });
     }
 
@@ -225,6 +234,15 @@ export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
         riskObserved: Record<string, unknown> = {},
         extraPayload: Record<string, unknown> = {},
       ) => {
+        if (String(rejectReason).trim().toUpperCase() !== "QUOTE_REVALIDATION_FAILED") {
+          recordOperationFailure({
+            operation: "trade.open",
+            reason: rejectReason,
+            flow: "trade_lifecycle",
+            step: "open",
+            startedAtMs: receivedAtMs,
+          });
+        }
         try {
           await writeOrderIntentAudit({
             ...commonOrderIntentAudit,
@@ -884,12 +902,32 @@ export function registerTradeOpenRoute(router: Router, deps: TraderRouterDeps) {
         }
       }
 
+      recordBusinessFlowStep({
+        flow: "trade_lifecycle",
+        step: "open",
+        outcome: "success",
+        startedAtMs: receivedAtMs,
+      });
       res.status(201).json(trade);
     } catch (error) {
       if (error instanceof z.ZodError) {
+        recordOperationFailure({
+          operation: "trade.open",
+          reason: "invalid_input_data",
+          flow: "trade_lifecycle",
+          step: "open",
+          startedAtMs: receivedAtMs,
+        });
         return res.status(400).json({ message: "Invalid input data", errors: error.issues });
       }
       console.error("Create trade error:", error);
+      recordOperationFailure({
+        operation: "trade.open",
+        reason: "internal_server_error",
+        flow: "trade_lifecycle",
+        step: "open",
+        startedAtMs: receivedAtMs,
+      });
       res.status(500).json({ message: "Internal server error" });
     }
   });

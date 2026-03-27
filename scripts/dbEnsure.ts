@@ -13,6 +13,7 @@ import {
   ensureLoginHistorySessionColumns,
   ensureMarketDailyCloseTable,
   ensureMigrationTables,
+  ensurePgStatStatementsExtension,
   ensureOrderIntentAuditTable,
   ensureQuotesColumns,
   ensureSignupFingerprintSchema,
@@ -38,6 +39,7 @@ import { bootstrapDoc1Seed } from "../server/legal/bootstrapDoc1Seed";
 async function main() {
   try {
     await ensureCoreTradingSchema();
+    await ensurePgStatStatementsExtension();
 
     await ensureSystemConfigTable();
     await ensureGlobalSettingsTable();

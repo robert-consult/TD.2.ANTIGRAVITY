@@ -1,0 +1,31 @@
+# Grafana Ingress — admin and superadmin via app-session auth.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-grafana-ingress
+  namespace: tradehub
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-url: "http://tradehub-api.tradehub.svc.cluster.local/api/admin/ops/ingress-auth?resource=grafana"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-TradeHub-Admin-Id,X-TradeHub-Admin-Email"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "8"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tradehub.example.com
+      secretName: tradehub-tls
+  rules:
+    - host: tradehub.example.com
+      http:
+        paths:
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: tradehub-grafana
+                port:
+                  number: 3000
+

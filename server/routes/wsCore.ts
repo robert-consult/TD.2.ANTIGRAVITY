@@ -54,11 +54,12 @@ import {
 import {
   addWsQuotePermissionRefreshErrorsTotal,
   addWsQuotePermissionRefreshTotal,
-  getHttpRequestDurationHistogramSnapshot,
   getRouteMetricSnapshot,
   incWsMessageRateLimitedTotal,
   incWsOriginRejectedTotal,
   incWsUserConnectionLimitRejectedTotal,
+  metricsContentType,
+  renderObservabilityMetricLines,
 } from "./metricsState";
 import { isPrivateOrLoopbackIp } from "@shared/security/requestIdentity";
 
@@ -176,7 +177,7 @@ app.get("/metrics", (req, res) => {
   const rollupMetrics = getAdminDataRollupMetricsSnapshot();
   const clickhouseSyncMetrics = getClickHouseSyncMetricsSnapshot();
   const metricSnapshot = getRouteMetricSnapshot();
-  const httpDurationMetrics = getHttpRequestDurationHistogramSnapshot();
+  const observabilityMetricLines = renderObservabilityMetricLines();
   const petascaleCfg = getPetascaleRuntimeConfig();
 
   const valkeyEnabled = Boolean(petascaleCfg.valkeyUrl);
@@ -201,28 +202,7 @@ app.get("/metrics", (req, res) => {
     }
   }
 
-  const httpDurationLines: string[] = [];
-  if (httpDurationMetrics.series.length) {
-    httpDurationLines.push(
-      "# HELP http_request_duration_seconds Request duration histogram (server-side)",
-      "# TYPE http_request_duration_seconds histogram",
-    );
-    for (const series of httpDurationMetrics.series) {
-      const routeLabel = String(series.route).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      for (let i = 0; i < httpDurationMetrics.bucketsSec.length; i++) {
-        const bound = httpDurationMetrics.bucketsSec[i];
-        httpDurationLines.push(
-          `http_request_duration_seconds_bucket{route="${routeLabel}",le="${bound}"} ${series.buckets[i]}`,
-        );
-      }
-      httpDurationLines.push(
-        `http_request_duration_seconds_bucket{route="${routeLabel}",le="+Inf"} ${series.count}`,
-        `http_request_duration_seconds_sum{route="${routeLabel}"} ${series.sum}`,
-        `http_request_duration_seconds_count{route="${routeLabel}"} ${series.count}`,
-      );
-    }
-  }
-  res.setHeader("Content-Type", "text/plain; version=0.0.4");
+  res.setHeader("Content-Type", metricsContentType());
   res.send(
     [
       "# HELP ws_active_connections Number of active websocket connections",
@@ -304,7 +284,7 @@ app.get("/metrics", (req, res) => {
       `internal_transport_tls_enabled{service="valkey"} ${valkeyTlsEnabled}`,
       `internal_transport_tls_enabled{service="minio"} ${minioTlsEnabled}`,
       `internal_transport_tls_enabled{service="clickhouse"} ${clickhouseTlsEnabled}`,
-      ...httpDurationLines,
+      ...observabilityMetricLines,
       "# HELP admin_active_sessions Active WebSocket sessions owned by admins",
       "# TYPE admin_active_sessions gauge",
       `admin_active_sessions ${adminSessions}`,
@@ -446,7 +426,7 @@ app.get("/metrics", (req, res) => {
       "# HELP clickhouse_sync_last_order_intent_rows Rows synced for admin_order_intent_audit in last tick",
       "# TYPE clickhouse_sync_last_order_intent_rows gauge",
       `clickhouse_sync_last_order_intent_rows ${clickhouseSyncMetrics.lastSyncedOrderIntentRows}`,
-      "",
+      "# EOF",
     ].join("\n"),
   );
 });

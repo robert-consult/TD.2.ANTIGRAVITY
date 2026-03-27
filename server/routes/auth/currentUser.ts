@@ -174,6 +174,7 @@ router.get("/api/auth/current-user", async (req: Request, res: Response) => {
         contenderTier: (resolvedUser as any).contenderTier || null,
         emailVerified,
         emailVerifiedAt: verification?.emailVerifiedAt || null,
+        isSuperAdmin: Boolean(req.session.isSuperAdmin),
         inGracePeriod: grace.inGracePeriod,
         gracePeriodEndsAt: grace.gracePeriodEndsAt,
         legalReacceptRequired: legalStatus.legalReacceptRequired,

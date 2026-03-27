@@ -33,6 +33,12 @@ spec:
           env:
             - name: APP_ROLE
               value: "worker"
+            - name: OTEL_TRACING_ENABLED
+              value: "1"
+            - name: OTEL_SERVICE_NAME
+              value: "tradehub-worker"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://tradehub-victoria-traces.tradehub.svc.cluster.local:10428/insert/opentelemetry/v1/traces"
           envFrom:
             - configMapRef:
                 name: tradehub-config

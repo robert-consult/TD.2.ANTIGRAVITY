@@ -1,4 +1,5 @@
 import { SW_ACTIVATE_NOW_MESSAGE } from "@/lib/prefetchCatalog";
+import { deleteSecureCacheDatabase, secureClearAll } from "@/lib/secureCache";
 
 type BootWindow = Window & {
   __tqBootNow?: () => void;
@@ -8,6 +9,11 @@ type BootWindow = Window & {
 const BOOT_RECOVERY_TIMEOUT_MS = 12_000;
 const BOOT_RECOVERY_TIMEOUT_CONSTRAINED_MS = 25_000;
 const SHELL_CACHE_PREFIX = "tq-shell-v";
+const BOOT_READY_SESSION_KEY = "tq-boot-ready";
+const DEV_SW_CLEANUP_SESSION_KEY = "tq-dev-sw-cleanup";
+const BOOT_RETRY_QUERY_KEY = "__tq_boot_retry";
+const BOOT_RESET_DONE_SESSION_KEY = "tq-boot-reset-done";
+const OWNED_STORAGE_KEY_PREFIXES = ["tq-", "tq.", "tradequip.", "tradequip:"];
 
 type BootNavigatorLike = Navigator & {
   connection?: {
@@ -130,7 +136,28 @@ function clearBootSplash(): void {
 }
 
 let appStartPromise: Promise<void> | null = null;
-const BOOT_READY_SESSION_KEY = "tq-boot-ready";
+
+function hasBootRetryMarker(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URL(window.location.href).searchParams.has(BOOT_RETRY_QUERY_KEY);
+}
+
+function clearBootRetryMarker(): void {
+  if (typeof window === "undefined" || !hasBootRetryMarker()) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete(BOOT_RETRY_QUERY_KEY);
+  window.history.replaceState(window.history.state, "", url.toString());
+}
+
+function isRecoverableBootFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("BOOT_TIMEOUT") ||
+    message.includes("Failed to fetch dynamically imported module") ||
+    message.includes("Importing a module script failed") ||
+    message.includes("Failed to load module script")
+  );
+}
 
 function startApp(): Promise<void> {
   if (appStartPromise) return appStartPromise;
@@ -154,6 +181,12 @@ function startApp(): Promise<void> {
 
     void initializeQueryPersistence(queryClient).catch(() => undefined);
     createRoot(document.getElementById("root")!).render(<App />);
+    clearBootRetryMarker();
+    try {
+      sessionStorage.removeItem(DEV_SW_CLEANUP_SESSION_KEY);
+    } catch {
+      // Ignore storage failures (private mode, quota, etc.).
+    }
     clearBootSplash();
   })().catch((error) => {
     appStartPromise = null;
@@ -195,10 +228,122 @@ async function clearShellCachesForRecovery(): Promise<void> {
   await Promise.allSettled(tasks);
 }
 
+function clearOwnedStorageBucket(storage: Storage | undefined, preserveKeys: readonly string[] = []): void {
+  if (!storage) return;
+
+  try {
+    const keys = [];
+    for (let idx = 0; idx < storage.length; idx += 1) {
+      const key = storage.key(idx);
+      if (!key) continue;
+      keys.push(key);
+    }
+
+    for (const key of keys) {
+      if (preserveKeys.includes(key)) continue;
+      if (!OWNED_STORAGE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+      storage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage access failures.
+  }
+}
+
+async function clearPersistedBrowserStateForRecovery(): Promise<void> {
+  const tasks: Promise<unknown>[] = [
+    secureClearAll().catch(() => undefined),
+    deleteSecureCacheDatabase().catch(() => undefined),
+  ];
+
+  clearOwnedStorageBucket(
+    typeof localStorage !== "undefined" ? localStorage : undefined,
+    [],
+  );
+  clearOwnedStorageBucket(
+    typeof sessionStorage !== "undefined" ? sessionStorage : undefined,
+    [
+      BOOT_READY_SESSION_KEY,
+      DEV_SW_CLEANUP_SESSION_KEY,
+      BOOT_RESET_DONE_SESSION_KEY,
+    ],
+  );
+
+  await Promise.allSettled(tasks);
+}
+
 function forceRecoveryReload(): void {
   const url = new URL(window.location.href);
-  url.searchParams.set("__tq_boot_retry", String(Date.now()));
+  url.searchParams.set(BOOT_RETRY_QUERY_KEY, String(Date.now()));
   window.location.replace(url.toString());
+}
+
+async function attemptAutomaticBootRecovery(error: unknown): Promise<boolean> {
+  if (!isRecoverableBootFailure(error) || hasBootRetryMarker()) return false;
+  console.warn("[boot] recoverable startup failure; refreshing shell caches", error);
+  updateBootStatus("Refreshing platform cache...");
+  await clearShellCachesForRecovery();
+  await clearPersistedBrowserStateForRecovery();
+  forceRecoveryReload();
+  return true;
+}
+
+async function prepareDevBootEnvironment(): Promise<boolean> {
+  if (typeof window === "undefined" || !import.meta.env.DEV || !("serviceWorker" in navigator)) {
+    return true;
+  }
+
+  if (hasBootRetryMarker()) {
+    try {
+      if (sessionStorage.getItem(BOOT_RESET_DONE_SESSION_KEY) !== "1") {
+        sessionStorage.setItem(BOOT_RESET_DONE_SESSION_KEY, "1");
+        updateBootStatus("Resetting local platform state...");
+        await clearShellCachesForRecovery();
+        await clearPersistedBrowserStateForRecovery();
+      }
+    } catch {
+      await clearShellCachesForRecovery();
+      await clearPersistedBrowserStateForRecovery();
+    }
+  } else {
+    try {
+      sessionStorage.removeItem(BOOT_RESET_DONE_SESSION_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  const [registrations, cacheKeys] = await Promise.all([
+    navigator.serviceWorker.getRegistrations().catch(() => [] as ServiceWorkerRegistration[]),
+    "caches" in window ? caches.keys().catch(() => [] as string[]) : Promise.resolve([] as string[]),
+  ]);
+
+  const hasShellCaches = cacheKeys.some((key) => key.startsWith(SHELL_CACHE_PREFIX));
+  const isControlled = Boolean(navigator.serviceWorker.controller);
+  if (!registrations.length && !hasShellCaches && !isControlled) {
+    try {
+      sessionStorage.removeItem(DEV_SW_CLEANUP_SESSION_KEY);
+    } catch {
+      // Ignore storage failures (private mode, quota, etc.).
+    }
+    return true;
+  }
+
+  await clearShellCachesForRecovery();
+
+  if (!isControlled) return true;
+
+  try {
+    if (sessionStorage.getItem(DEV_SW_CLEANUP_SESSION_KEY) === "1") {
+      return true;
+    }
+    sessionStorage.setItem(DEV_SW_CLEANUP_SESSION_KEY, "1");
+  } catch {
+    // Ignore storage failures (private mode, quota, etc.).
+  }
+
+  updateBootStatus("Refreshing local shell cache...");
+  forceRecoveryReload();
+  return false;
 }
 
 async function startAppWithTimeout(timeoutMs: number): Promise<void> {
@@ -224,6 +369,7 @@ async function handleOpenPlatformClick(): Promise<void> {
     console.warn("[boot] startup retry failed; forcing recovery reload", error);
     updateBootStatus("Refreshing platform cache...");
     await clearShellCachesForRecovery();
+    await clearPersistedBrowserStateForRecovery();
     forceRecoveryReload();
   } finally {
     setBootButtonBusy(false);
@@ -247,7 +393,9 @@ function requireManualBootOnFirstLoad(): boolean {
 function scheduleAppStart(): void {
   const bootWindow = window as BootWindow;
   bootWindow.__tqBootNow = () => {
-    void startApp();
+    void startApp().catch((error) => {
+      void attemptAutomaticBootRecovery(error);
+    });
   };
   bootWindow.__tqOpenPlatform = () => {
     void handleOpenPlatformClick();
@@ -277,12 +425,18 @@ function scheduleAppStart(): void {
     return;
   }
 
-  void startApp();
+  void startApp().catch((error) => {
+    void attemptAutomaticBootRecovery(error);
+  });
 }
 
-function bootstrap(): void {
+async function bootstrap(): Promise<void> {
   installServiceWorkerRegistration();
+  if (!(await prepareDevBootEnvironment())) return;
   scheduleAppStart();
 }
 
-bootstrap();
+void bootstrap().catch((error) => {
+  updateBootStatus("Interface failed to load. Click Open Platform to retry.");
+  console.error("[boot] bootstrap failed", error);
+});

@@ -271,6 +271,7 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
     if ((await traderAccessTab.count()) > 0) {
       await traderAccessTab.first().click();
     }
+    await adminPage.getByRole("tab", { name: /^Data Room$/ }).last().click();
     await expect(adminPage.getByTestId("partner-data-room-table")).toBeVisible();
     await adminPage.getByRole("tab", { name: "Simulations" }).click();
     await expect(adminPage.getByText("Run Simulation Preview")).toBeVisible();

@@ -24,6 +24,8 @@ import { startAdminDataExportRetentionScheduler } from "./services/adminDataExpo
 import { startAdminDataRollupScheduler } from "./services/adminDataRollups";
 import { withGriftClient } from "./grift/griftDb";
 import { summarizeErrorForLog } from "./security/logSanitizer";
+import { initTracing } from "./observability/tracing";
+import { installHttpObservabilityMiddleware } from "./observability/http";
 
 const REQUIRED_TRADE_GUARD_TRIGGERS = [
   "tradequip_no_delete_trades",
@@ -210,6 +212,7 @@ function validateEnvVars() {
 }
 
 validateEnvVars();
+initTracing();
 
 function parseRoles(raw: string): Set<string> {
   const roles = new Set(
@@ -350,6 +353,7 @@ app.get("/ready", async (_req, res) => {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use(installHttpObservabilityMiddleware);
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -368,7 +372,13 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
+      const correlationId = String(res.getHeader("x-correlation-id") || "").trim();
+      const traceId = String(res.getHeader("x-trace-id") || "").trim();
+      const operation = String((res.locals as any)?.__tradehubObservability?.operation || "").trim();
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (operation) logLine += ` op=${operation}`;
+      if (correlationId) logLine += ` corr=${correlationId}`;
+      if (traceId) logLine += ` trace=${traceId}`;
       if (captureBodies && capturedJsonResponse !== undefined) {
         try {
           logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;

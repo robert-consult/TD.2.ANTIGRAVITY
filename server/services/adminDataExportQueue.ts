@@ -23,6 +23,7 @@ import {
   onAdminExportJobStarted,
   setAdminExportQueueDepth,
 } from "./adminDataExportMetrics";
+import { withObservedBackgroundJob } from "../observability/business";
 import { uploadExportArtifact } from "./objectStorage";
 import { getPetascaleRuntimeConfig } from "./petascaleEnv";
 import { insertClickHouseJsonRows } from "./clickhouseClient";
@@ -140,104 +141,113 @@ async function writeExportEventToClickHouse(params: {
   ]).catch(() => {});
 }
 
-async function runAdminExportJob(jobId: string): Promise<void> {
+async function runAdminExportJob(jobId: string): Promise<"success" | "canceled"> {
   const startedAtMs = Date.now();
-  const retentionSec = getRetentionSec();
-  onAdminExportJobStarted();
-  await markAdminDataExportJobRunning(jobId);
-  await appendAdminDataExportEvent({
-    jobId,
-    level: "INFO",
-    message: "Worker started export job",
-  });
-
-  const job = await getAdminDataExportJob(jobId);
-  if (!job) {
-    onAdminExportJobFinished({ success: false, durationMs: Date.now() - startedAtMs });
-    throw new Error("Export job not found");
-  }
-  if (job.status === "CANCELED" || job.status === "EXPIRED") {
-    onAdminExportJobFinished({ success: false, canceled: true, durationMs: Date.now() - startedAtMs });
-    return;
-  }
-
-  let artifactPath = "";
-  try {
-    await incrementAdminDataExportAttempt(jobId);
-    const request = toExportRequest({
-      type: job.type,
-      format: job.format,
-      filtersJson: job.filtersJson,
-    });
-    const built = await buildAdminDataExportArtifact({
-      jobId,
-      request,
-    });
-    artifactPath = built.filePath;
-
-    const uploaded = await uploadExportArtifact({
-      jobId,
-      sourcePath: built.filePath,
-      filename: built.filename,
-      contentType: built.contentType,
-    });
-    const expiresAt = Math.floor(Date.now() / 1000) + retentionSec;
-    await markAdminDataExportJobReady({
-      jobId,
-      objectKey: uploaded.objectKey,
-      rowCount: built.rowCount,
-      bytesWritten: uploaded.bytesWritten,
-      truncated: built.truncated,
-      expiresAt,
-    });
-    await appendAdminDataExportEvent({
-      jobId,
-      level: "INFO",
-      message: "Export artifact uploaded",
-      context: {
-        objectKey: uploaded.objectKey,
-        bytesWritten: uploaded.bytesWritten,
-        rowCount: built.rowCount,
-        truncated: built.truncated,
-      },
-    });
-    await writeExportEventToClickHouse({
-      job,
-      status: "READY",
-      rowCount: built.rowCount,
-      bytesWritten: uploaded.bytesWritten,
-      latencyMs: Date.now() - startedAtMs,
-    });
-    onAdminExportJobFinished({ success: true, durationMs: Date.now() - startedAtMs });
-  } catch (err: any) {
-    const message = String(err?.message || err || "Export worker failed");
-    await markAdminDataExportJobFailed({ jobId, error: message, attemptCountDelta: 0 });
-    await appendAdminDataExportEvent({
-      jobId,
-      level: "ERROR",
-      message: "Export worker failed",
-      context: { error: message },
-    });
-    if (job) {
-      await writeExportEventToClickHouse({
-        job,
-        status: "FAILED",
-        rowCount: 0,
-        bytesWritten: 0,
-        latencyMs: Date.now() - startedAtMs,
+  return withObservedBackgroundJob({
+    job: "admin_export",
+    spanName: "admin.export.job",
+    attributes: {
+      "tradehub.job_id": jobId,
+    },
+    resolveOutcome: (outcome) => outcome,
+    fn: async () => {
+      const retentionSec = getRetentionSec();
+      onAdminExportJobStarted();
+      await markAdminDataExportJobRunning(jobId);
+      await appendAdminDataExportEvent({
+        jobId,
+        level: "INFO",
+        message: "Worker started export job",
       });
-    }
-    onAdminExportJobFinished({ success: false, durationMs: Date.now() - startedAtMs });
-    throw err;
-  } finally {
-    if (artifactPath) {
-      try {
-        fs.rmSync(artifactPath, { force: true });
-      } catch {
-        // ignore cleanup failures
+
+      const job = await getAdminDataExportJob(jobId);
+      if (!job) {
+        onAdminExportJobFinished({ success: false, durationMs: Date.now() - startedAtMs });
+        throw new Error("Export job not found");
       }
-    }
-  }
+      if (job.status === "CANCELED" || job.status === "EXPIRED") {
+        onAdminExportJobFinished({ success: false, canceled: true, durationMs: Date.now() - startedAtMs });
+        return "canceled";
+      }
+
+      let artifactPath = "";
+      try {
+        await incrementAdminDataExportAttempt(jobId);
+        const request = toExportRequest({
+          type: job.type,
+          format: job.format,
+          filtersJson: job.filtersJson,
+        });
+        const built = await buildAdminDataExportArtifact({
+          jobId,
+          request,
+        });
+        artifactPath = built.filePath;
+
+        const uploaded = await uploadExportArtifact({
+          jobId,
+          sourcePath: built.filePath,
+          filename: built.filename,
+          contentType: built.contentType,
+        });
+        const expiresAt = Math.floor(Date.now() / 1000) + retentionSec;
+        await markAdminDataExportJobReady({
+          jobId,
+          objectKey: uploaded.objectKey,
+          rowCount: built.rowCount,
+          bytesWritten: uploaded.bytesWritten,
+          truncated: built.truncated,
+          expiresAt,
+        });
+        await appendAdminDataExportEvent({
+          jobId,
+          level: "INFO",
+          message: "Export artifact uploaded",
+          context: {
+            objectKey: uploaded.objectKey,
+            bytesWritten: uploaded.bytesWritten,
+            rowCount: built.rowCount,
+            truncated: built.truncated,
+          },
+        });
+        await writeExportEventToClickHouse({
+          job,
+          status: "READY",
+          rowCount: built.rowCount,
+          bytesWritten: uploaded.bytesWritten,
+          latencyMs: Date.now() - startedAtMs,
+        });
+        onAdminExportJobFinished({ success: true, durationMs: Date.now() - startedAtMs });
+        return "success";
+      } catch (err: any) {
+        const message = String(err?.message || err || "Export worker failed");
+        await markAdminDataExportJobFailed({ jobId, error: message, attemptCountDelta: 0 });
+        await appendAdminDataExportEvent({
+          jobId,
+          level: "ERROR",
+          message: "Export worker failed",
+          context: { error: message },
+        });
+        await writeExportEventToClickHouse({
+          job,
+          status: "FAILED",
+          rowCount: 0,
+          bytesWritten: 0,
+          latencyMs: Date.now() - startedAtMs,
+        });
+        onAdminExportJobFinished({ success: false, durationMs: Date.now() - startedAtMs });
+        throw err;
+      } finally {
+        if (artifactPath) {
+          try {
+            fs.rmSync(artifactPath, { force: true });
+          } catch {
+            // ignore cleanup failures
+          }
+        }
+      }
+    },
+  });
 }
 
 async function refreshQueueStats(): Promise<void> {

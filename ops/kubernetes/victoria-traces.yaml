@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-victoria-traces
+  namespace: tradehub
+  labels:
+    app: tradehub-victoria-traces
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-victoria-traces
+  template:
+    metadata:
+      labels:
+        app: tradehub-victoria-traces
+    spec:
+      containers:
+        - name: victoria-traces
+          image: victoriametrics/victoria-traces:v0.7.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -httpListenAddr=:10428
+            - -storageDataPath=/victoria-traces-data
+            - -retentionPeriod=7d
+            - -servicegraph.enableTask=true
+          ports:
+            - containerPort: 10428
+              name: http
+          volumeMounts:
+            - name: storage
+              mountPath: /victoria-traces-data
+          readinessProbe:
+            tcpSocket:
+              port: 10428
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 10428
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 2Gi
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: tradehub-victoria-traces-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tradehub-victoria-traces-pvc
+  namespace: tradehub
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-victoria-traces
+  namespace: tradehub
+  labels:
+    app: tradehub-victoria-traces
+spec:
+  selector:
+    app: tradehub-victoria-traces
+  ports:
+    - name: http
+      port: 10428
+      targetPort: 10428

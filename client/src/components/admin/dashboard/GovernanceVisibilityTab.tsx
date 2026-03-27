@@ -2,8 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import type { RuntimeGovernanceSnapshot } from "@shared/runtimeConfig";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/use-auth";
+import { OPS_TOOLS } from "./opsAccess";
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -24,6 +27,8 @@ function statusVariant(status: string): "default" | "outline" | "secondary" | "d
 }
 
 export function GovernanceVisibilityTab() {
+  const { user } = useAuth();
+  const isSuperAdmin = Boolean(user?.isSuperAdmin);
   const { data, isLoading } = useQuery<RuntimeGovernanceSnapshot>({
     queryKey: ["/api/admin/runtime-config/governance"],
     queryFn: () => axios.get("/api/admin/runtime-config/governance").then((response) => response.data),
@@ -52,6 +57,36 @@ export function GovernanceVisibilityTab() {
           <Badge variant="outline">Sections {data.sections.length}</Badge>
           <Badge variant="outline">Reload Domains {data.reloads.length}</Badge>
           <Badge variant="outline">Docs {data.documentation.length}</Badge>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-neutral-700 border-gray-600">
+        <CardHeader>
+          <CardTitle className="text-base">External Ops Surfaces</CardTitle>
+          <CardDescription>
+            Governance stays read-only here, but the linked observability tools remain the live operational surfaces.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm" className="bg-neutral-600 hover:bg-neutral-500">
+            <a href="/grafana/d/tradehub-ops-overview" target="_blank" rel="noreferrer">
+              Open Grafana Overview
+            </a>
+          </Button>
+          {isSuperAdmin ? (
+            <>
+              <Button asChild variant="outline" size="sm" className="bg-neutral-600 hover:bg-neutral-500">
+                <a href={OPS_TOOLS.find((tool) => tool.key === "prometheus")?.href ?? "/prometheus"} target="_blank" rel="noreferrer">
+                  Open Prometheus
+                </a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="bg-neutral-600 hover:bg-neutral-500">
+                <a href={OPS_TOOLS.find((tool) => tool.key === "headlamp")?.href ?? "/headlamp"} target="_blank" rel="noreferrer">
+                  Open Headlamp
+                </a>
+              </Button>
+            </>
+          ) : null}
         </CardContent>
       </Card>
 

@@ -5,12 +5,10 @@
 # NO external registry access needed, NO paid accounts.
 #
 # Deploy:
-#   kubectl apply -f ops/kubernetes/headlamp-rbac.yaml
-#   kubectl create configmap tradehub-ops-plugin \
-#     --from-file=main.js=ops/headlamp-plugin/dist/main.js \
-#     -n tradehub --dry-run=client -o yaml | kubectl apply -f -
-#   kubectl apply -f ops/kubernetes/headlamp-deployment.yaml
-#   kubectl apply -f ops/kubernetes/headlamp-ingress.yaml
+#   kubectl apply -k ops/kubernetes
+#
+# The canonical plugin artifact is versioned at:
+#   ops/kubernetes/assets/headlamp-plugin/main.js
 
 apiVersion: apps/v1
 kind: Deployment
@@ -77,7 +75,7 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 30
           volumeMounts:
-            # Mount pre-compiled plugin JS from ConfigMap
+            # Mount the versioned plugin asset generated into the ConfigMap
             - name: tradehub-ops-plugin
               mountPath: /headlamp/plugins/tradehub-ops/main.js
               subPath: main.js
@@ -92,7 +90,7 @@ spec:
             - name: headlamp-config
               mountPath: /headlamp/.config
       volumes:
-        # Pre-compiled TradeHub Ops plugin (from ops/headlamp-plugin/dist/main.js)
+        # Generated from ops/kubernetes/assets/headlamp-plugin/main.js via kustomize.
         - name: tradehub-ops-plugin
           configMap:
             name: tradehub-ops-plugin

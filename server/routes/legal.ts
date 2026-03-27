@@ -10,6 +10,7 @@ import { clearDoc1ReacceptRequirement, computeDoc1ReacceptStatusWithTerms, upser
 import { assembleDoc1Terms } from '../legal/termsEngineDb';
 import { checkCoverage } from '../legal/coverageGate';
 import { requireAuth } from "../middleware/auth";
+import { recordBusinessFlowStep, recordOperationFailure } from "../observability/business";
 
 const router = Router();
 
@@ -94,6 +95,8 @@ router.get("/doc1/reaccept", requireAuth, async (req, res) => {
 // Records a new acceptance for the current user (used for re-acceptance flow).
 router.post("/doc1/accept", requireAuth, async (req, res) => {
   const userId = Number(req.session.userId);
+  const startedAtMs = Date.now();
+  recordBusinessFlowStep({ flow: "legal_acceptance", step: "doc1_accept", outcome: "attempt" });
 
   try {
     const schema = z.object({
@@ -109,21 +112,52 @@ router.post("/doc1/accept", requireAuth, async (req, res) => {
       .where(eq(users.id, userId))
       .limit(1);
 
-    if (!user) return res.status(401).json({ message: "User not found" });
+    if (!user) {
+      recordOperationFailure({
+        operation: "legal.doc1_accept",
+        reason: "user_not_found",
+        flow: "legal_acceptance",
+        step: "doc1_accept",
+        startedAtMs,
+      });
+      return res.status(401).json({ message: "User not found" });
+    }
 
     const countryIso2 =
       normalizeCountryIso2(user.countryIso2) ?? normalizeCountryIso2(user.country);
     if (!countryIso2) {
+      recordOperationFailure({
+        operation: "legal.doc1_accept",
+        reason: "country_required",
+        flow: "legal_acceptance",
+        step: "doc1_accept",
+        startedAtMs,
+      });
       return res.status(409).json({ message: "COUNTRY_REQUIRED" });
     }
 
     const assembled = await assembleDoc1Terms(countryIso2, { purpose: "LOGIN" });
     if (assembled.blocked) {
       const code = assembled.blockedReason || "LEGAL_COVERAGE_BLOCKED";
+      recordOperationFailure({
+        operation: "legal.doc1_accept",
+        reason: code,
+        flow: "legal_acceptance",
+        step: "doc1_accept",
+        outcome: "blocked",
+        startedAtMs,
+      });
       return res.status(code === "JURISDICTION_RESTRICTED" ? 403 : 409).json({ message: code, code });
     }
 
     if (String(assembled.combined.sha256 || "") !== String(combinedSha256 || "")) {
+      recordOperationFailure({
+        operation: "legal.doc1_accept",
+        reason: "terms_changed",
+        flow: "legal_acceptance",
+        step: "doc1_accept",
+        startedAtMs,
+      });
       return res.status(409).json({
         message: "TERMS_CHANGED",
         currentCombinedSha256: assembled.combined.sha256,
@@ -143,10 +177,23 @@ router.post("/doc1/accept", requireAuth, async (req, res) => {
 
     await clearDoc1ReacceptRequirement(userId);
     (req.session as any).legalReacceptRequired = false;
+    recordBusinessFlowStep({
+      flow: "legal_acceptance",
+      step: "doc1_accept",
+      outcome: "success",
+      startedAtMs,
+    });
 
     return res.json({ ok: true });
   } catch (e: any) {
     console.error("[Legal] Failed to record re-acceptance:", e);
+    recordOperationFailure({
+      operation: "legal.doc1_accept",
+      reason: e?.message || "legal_accept_failed",
+      flow: "legal_acceptance",
+      step: "doc1_accept",
+      startedAtMs,
+    });
     return res.status(400).json({ ok: false, message: e?.message || "LEGAL_ACCEPT_FAILED" });
   }
 });

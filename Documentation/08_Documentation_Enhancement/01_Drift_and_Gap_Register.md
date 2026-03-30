@@ -9,7 +9,8 @@ canonical_sources:
   - server/engine/orderEngine.ts
   - server/routes/trader/
   - ops/
-last_verified: 2026-03-27
+  - WEBSITE/package.json
+last_verified: 2026-03-29
 status: maintained
 ---
 
@@ -19,13 +20,14 @@ status: maintained
 
 | Area | Drift | Current Truth |
 | --- | --- | --- |
-| Tech versions | Multiple docs said React 18 | Repo packages are on React 19 |
+| Tech versions | Legacy docs collapsed repo-wide frontend versions into one claim | The authenticated app uses React 19, while `WEBSITE/` currently uses React 18 |
 | REST paths | Several docs named `/api/profile`, `/api/legal/accept`, `/api/legal/status`, `/api/auth/verify-email`, `/api/trader/trades/open` | Current live paths include `/api/profile/me`, `/api/legal/doc1/accept`, `/api/legal/doc1/resolve`, `/api/verification/email/send`, `POST /api/trades` |
 | WS protocol | Docs used `subscribe` and `unsubscribe` | Canonical types are `auth:hello`, `quotes:subscribe`, `trades:subscribe`, `account:subscribe`, `notifications:updated`, `quote-subscriptions:updated`, `legal:doc1-updated` |
 | Client i18n | Docs described `i18next` | Client uses a custom `I18nProvider` and bundle store |
 | Trading engine intent | Docs implied `orderEngine.ts` is the manual HTTP trade executor | Manual open and close handlers live in `server/routes/trader/`; `orderEngine.ts` processes pending orders and SL/TP |
 | Background jobs | Docs referenced stale service paths | Current runtime uses `server/cron/` and other live files discovered from `server/index.ts` |
-| Observability paths | Docs referenced the stale paths ops/grafana/provisioning/dashboards and ops/prometheus/rules | Current tree uses `ops/grafana-config/provisioning/...` and `ops/dashboards/...` |
+| Observability paths | Docs referenced the stale ops grafana-provisioning and prometheus-rules paths | Current tree uses `ops/grafana-config/provisioning/...`, `ops/dashboards/`, and `ops/prometheus-config/` |
+| Mobile pathing | Legacy/mobile docs referenced the old React Native style-directory assumption and blurred wrapper/native roles | The current path is `NATIVE/src/theme/`, and wrapper/native are separate maintained surfaces |
 
 ## Structural Gaps
 
@@ -33,3 +35,4 @@ status: maintained
 - no generated catalogs for routes, WS, env, or runtime inventory
 - no validation for stale paths or invalid commands
 - internal docs did not mirror the actual trader, admin, partner, and recruitment flows
+- the old migration matrix used `keep` in-place dispositions that were incompatible with a final archive move

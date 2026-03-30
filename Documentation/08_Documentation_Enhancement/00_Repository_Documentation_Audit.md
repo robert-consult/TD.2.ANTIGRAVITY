@@ -9,13 +9,13 @@ canonical_sources:
   - WEBSITE/README.md
   - server/
   - client/
-last_verified: 2026-03-27
+last_verified: 2026-03-29
 status: maintained
 ---
 
 # Repository Documentation Audit
 
-Verified against the current tree on 2026-03-27.
+Verified against the current tree on 2026-03-29.
 
 Current findings:
 
@@ -36,3 +36,9 @@ Revisit coverage update:
 - first-pass maintained docs captured the app runtime and core journeys, but not every top-level repo area explicitly
 - whole-repo capture now includes a generated [Repository Inventory](../generated/Repository_Inventory.md) plus maintained internal coverage for mobile/native, infra/ops, and support/archive modules
 - support modules and artifacts are now classified instead of being left implicit
+
+Current migration state:
+
+- maintained public/internal/generated lanes now carry the current reference set
+- missing internal guides and technical reference pages have been added for database, trading, policy, security, grift, operations, mobile, and definition-of-done material
+- the legacy numbered tree is no longer the active navigation model and is ready to be frozen under `Documentation/legacy/`

@@ -14,14 +14,173 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-type RuntimeInitRecord = {
+type RuntimeTaskRecord = {
   symbol: string;
   file: string;
+  category: string;
+  roles: string;
+  gate: string;
+  responsibility: string;
 };
 
 const RUNTIME_OUTPUT_PATH = repoPath("Documentation", "generated", "Runtime_Inventory.md");
 const AGENT_OUTPUT_PATH = repoPath("Documentation", "generated", "Agent_Guidance_Catalog.md");
 const GENERATOR_SOURCE = "scripts/docs/generators/runtime/index.ts";
+
+const TASK_METADATA: Record<
+  string,
+  { category: string; roles: string; gate: string; responsibility: string }
+> = {
+  bootstrapQuoteHub: {
+    category: "quote-bootstrap",
+    roles: "api,ws",
+    gate: "after listen when `api` or `ws` role is active",
+    responsibility: "Warm quote hub from Valkey snapshot data.",
+  },
+  bootstrapQuoteHubFromValkeySymbols: {
+    category: "quote-bootstrap",
+    roles: "api,ws",
+    gate: "fallback after quote-hub snapshot bootstrap misses",
+    responsibility: "Backfill quote hub from per-symbol Valkey keys.",
+  },
+  syncProviderConfigsFromDirToDb: {
+    category: "market-data-config",
+    roles: "api,ingestor",
+    gate: "only when `MARKET_DATA_PROVIDER_FILE_SYNC=1`",
+    responsibility: "Sync market-data provider config files into DB state.",
+  },
+  checkConfiguredProviderSecrets: {
+    category: "market-data-preflight",
+    roles: "all",
+    gate: "post-listen runtime preflight",
+    responsibility: "Warn when configured market-data providers are missing required env secrets.",
+  },
+  bootstrapDoc1Seed: {
+    category: "legal-bootstrap",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Seed baseline DOC1 legal material.",
+  },
+  maybeImportIp2AsnDataset: {
+    category: "grift-bootstrap",
+    roles: "worker",
+    gate: "worker only when an ip2asn dataset path is configured",
+    responsibility: "Import IP-to-ASN data for grift enrichment.",
+  },
+  startAdminDataExportWorker: {
+    category: "admin-export",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Run BullMQ-backed admin export jobs.",
+  },
+  startClickHouseSyncScheduler: {
+    category: "analytics-sync",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Schedule Postgres-to-ClickHouse synchronization.",
+  },
+  startAdminDataExportRetentionScheduler: {
+    category: "admin-export",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Expire and clean old export artifacts.",
+  },
+  startAdminDataRollupScheduler: {
+    category: "admin-rollups",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Maintain admin rollup read-model data.",
+  },
+  maybeIngestBuiltManifest: {
+    category: "i18n",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Load built i18n manifest data if present.",
+  },
+  startI18nWorker: {
+    category: "i18n",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Run DB-backed i18n worker processing.",
+  },
+  startQuoteFeed: {
+    category: "market-data",
+    roles: "ingestor",
+    gate: "ingestor only",
+    responsibility: "Start quote-feed ingestion.",
+  },
+  initExcursionTrackingPubSub: {
+    category: "trade-analytics",
+    roles: "ingestor",
+    gate: "after quote feed starts",
+    responsibility: "Initialize excursion-tracking pub/sub support.",
+  },
+  startAutoCloseScheduler: {
+    category: "trade-automation",
+    roles: "ingestor",
+    gate: "ingestor only and skipped when background jobs are disabled",
+    responsibility: "Run automated close scheduling.",
+  },
+  startMarginCallScheduler: {
+    category: "risk-automation",
+    roles: "ingestor",
+    gate: "ingestor only and skipped when background jobs are disabled",
+    responsibility: "Run margin-call scheduling.",
+  },
+  setupAdminViews: {
+    category: "admin-bootstrap",
+    roles: "worker",
+    gate: "worker only",
+    responsibility: "Create/update admin data views and tables.",
+  },
+  startGriftEvaluationScheduler: {
+    category: "grift",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Run grift evaluation scheduling.",
+  },
+  startVerificationReminderCron: {
+    category: "verification",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Schedule verification reminder sends.",
+  },
+  startTradeAuditVerificationCron: {
+    category: "audit",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Verify trade audit chain integrity.",
+  },
+  startAccountLifecycleSweepScheduler: {
+    category: "account-lifecycle",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Sweep inactive and deletion-grace accounts.",
+  },
+  startScoutMetricsCron: {
+    category: "scouting",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Calculate scout metrics snapshots.",
+  },
+  startChallengeEvaluationCron: {
+    category: "recruitment",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Evaluate challenge progression and outcomes.",
+  },
+  startPartnerAllocationSyncCron: {
+    category: "partner",
+    roles: "worker",
+    gate: "worker only and skipped when background jobs are disabled",
+    responsibility: "Sync partner allocation state.",
+  },
+};
+
+function normalizeServerSpecifier(specifier: string): string {
+  const withExtension = specifier.endsWith(".ts") ? specifier : `${specifier}.ts`;
+  return path.posix.normalize(`server/${withExtension.replace(/^\.\//, "")}`);
+}
 
 function parseImportedSymbols(serverIndexText: string): Map<string, string> {
   const importMap = new Map<string, string>();
@@ -31,7 +190,7 @@ function parseImportedSymbols(serverIndexText: string): Map<string, string> {
     const rawClause = match[1]?.trim() ?? "";
     const specifier = match[2]?.trim() ?? "";
     if (!specifier.startsWith(".")) continue;
-    const fileTarget = specifier.endsWith(".ts") ? specifier : `${specifier}.ts`;
+    const fileTarget = normalizeServerSpecifier(specifier);
 
     if (rawClause.startsWith("{")) {
       const names = rawClause
@@ -41,36 +200,63 @@ function parseImportedSymbols(serverIndexText: string): Map<string, string> {
         .filter(Boolean)
         .map((value) => value.split(/\s+as\s+/i).shift() ?? value);
       for (const name of names) {
-        importMap.set(name, path.posix.normalize(`server/${fileTarget.replace(/^\.\//, "")}`));
+        importMap.set(name, fileTarget);
       }
       continue;
     }
 
     const defaultName = rawClause.split(",")[0]?.trim();
     if (defaultName) {
-      importMap.set(defaultName, path.posix.normalize(`server/${fileTarget.replace(/^\.\//, "")}`));
+      importMap.set(defaultName, fileTarget);
+    }
+  }
+
+  const dynamicRegex = /const\s+\{\s*([^}]+)\s*\}\s*=\s*await\s+import\(["'](.+?)["']\);/gm;
+  for (const match of serverIndexText.matchAll(dynamicRegex)) {
+    const rawClause = match[1]?.trim() ?? "";
+    const specifier = match[2]?.trim() ?? "";
+    if (!specifier.startsWith(".")) continue;
+    const fileTarget = normalizeServerSpecifier(specifier);
+    const names = rawClause
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .map((value) => value.split(/\s+as\s+/i).shift() ?? value);
+    for (const name of names) {
+      importMap.set(name, fileTarget);
     }
   }
 
   return importMap;
 }
 
-async function collectRuntimeInitRecords(): Promise<RuntimeInitRecord[]> {
+async function collectRuntimeTaskRecords(): Promise<RuntimeTaskRecord[]> {
   const serverIndexText = await readText(repoPath("server", "index.ts"));
   const importMap = parseImportedSymbols(serverIndexText);
-  const callRegex = /\b(start[A-Z][A-Za-z0-9_]*|bootstrap[A-Z][A-Za-z0-9_]*|maybe[A-Z][A-Za-z0-9_]*|setupAdminViews)\s*\(/g;
-  const records: RuntimeInitRecord[] = [];
+  const records: RuntimeTaskRecord[] = [];
 
-  for (const match of serverIndexText.matchAll(callRegex)) {
-    const symbol = match[1] ?? "";
+  for (const [symbol, meta] of Object.entries(TASK_METADATA)) {
+    const appears = new RegExp(`\\b${symbol}\\s*\\(`).test(serverIndexText);
     const file = importMap.get(symbol);
-    if (!symbol || !file) continue;
-    records.push({ symbol, file });
+    if (!appears || !file) continue;
+    records.push({
+      symbol,
+      file,
+      category: meta.category,
+      roles: meta.roles,
+      gate: meta.gate,
+      responsibility: meta.responsibility,
+    });
   }
 
-  return uniqueSorted(records.map((record) => `${record.symbol}\t${record.file}`)).map((value) => {
-    const [symbol, file] = value.split("\t");
-    return { symbol, file };
+  return uniqueSorted(
+    records.map(
+      (record) =>
+        `${record.category}\t${record.symbol}\t${record.file}\t${record.roles}\t${record.gate}\t${record.responsibility}`,
+    ),
+  ).map((value) => {
+    const [category, symbol, file, roles, gate, responsibility] = value.split("\t");
+    return { category, symbol, file, roles, gate, responsibility };
   });
 }
 
@@ -117,11 +303,18 @@ async function collectAgentFiles(): Promise<string[]> {
 }
 
 export async function buildRuntimeInventory(): Promise<string> {
-  const runtimeRecords = await collectRuntimeInitRecords();
+  const runtimeRecords = await collectRuntimeTaskRecords();
   const agentFiles = await collectAgentFiles();
 
   const runtimeRows = runtimeRecords.map((record) =>
-    parseSimpleTableRow([`\`${record.symbol}\``, `\`${record.file}\``]),
+    parseSimpleTableRow([
+      `\`${record.symbol}\``,
+      record.category,
+      `\`${record.file}\``,
+      `\`${record.roles}\``,
+      record.gate,
+      record.responsibility,
+    ]),
   );
 
   return [
@@ -148,10 +341,10 @@ export async function buildRuntimeInventory(): Promise<string> {
     "| `ingestor` | Runs quote-feed and market-ingestion responsibilities. |",
     "| `worker` | Runs schedulers, exports, sync jobs, and support workers. |",
     "",
-    "## Deferred Initialization Symbols",
+    "## Startup And Job Inventory",
     "",
-    "| Symbol | Source File |",
-    "| --- | --- |",
+    "| Symbol | Category | Source File | Active Roles | Startup Gate | Responsibility |",
+    "| --- | --- | --- | --- | --- | --- |",
     ...runtimeRows,
     "",
     "## Runtime Endpoints",

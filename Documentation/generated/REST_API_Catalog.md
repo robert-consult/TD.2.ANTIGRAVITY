@@ -5,7 +5,7 @@ owner: documentation-program
 canonical_sources:
   - server/routes.ts
   - server/routes/
-last_verified: 2026-03-27
+last_verified: 2026-03-30
 status: generated
 generated_from:
   - scripts/docs/generators/rest/index.ts
@@ -15,7 +15,7 @@ generated_from:
 
 > Generated from the current route tree. Do not edit by hand.
 
-Generated on 2026-03-27 from `server/routes.ts` and `server/routes/**`.
+Generated on 2026-03-30 from `server/routes.ts` and `server/routes/**`.
 
 Total route declarations discovered: **197**.
 

@@ -6,7 +6,7 @@ canonical_sources:
   - shared/ws/protocol.ts
   - server/routes/wsCore.ts
   - client/src/live/
-last_verified: 2026-03-27
+last_verified: 2026-03-30
 status: generated
 generated_from:
   - scripts/docs/generators/ws/index.ts

@@ -13,7 +13,7 @@ canonical_sources:
   - migration_imports/
   - db_backups/
   - test-results/
-last_verified: 2026-03-27
+last_verified: 2026-03-29
 status: maintained
 ---
 
@@ -27,12 +27,14 @@ Not every top-level repo area is runtime product code. This page captures the su
 - `design/` and `design_guidelines.md` hold design assets and UI guidance
 - `security/` holds repo-local security materials including the vulnerability database inputs
 - `scripts/` and `e2e/` are execution and verification surfaces, not just incidental utilities
+- root governance docs such as `AGENTS.md`, `PROJECT_STRUCTURE.md`, and `.agents/` remain canonical operating references but are not substitutes for maintained lane docs
 
 ## Archives And Historical Inputs
 
 - `REPORTS AND REVIEWS/` is a large archive of historical audits and review material
 - root audit and tracker markdown files are supporting references and invariant notes, not substitute documentation for current code
 - `attached_assets/` holds local working inputs and prompt/design attachments
+- the frozen legacy documentation archive exists as historical reference material, not active documentation truth
 
 ## Generated And Runtime Artifacts
 

@@ -7,7 +7,7 @@ canonical_sources:
   - PROJECT_STRUCTURE.md
   - .agents/
   - */AGENTS.md
-last_verified: 2026-03-27
+last_verified: 2026-03-30
 status: generated
 generated_from:
   - scripts/docs/generators/runtime/index.ts

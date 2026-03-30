@@ -15,7 +15,7 @@ canonical_sources:
   - WEBSITE/WIRING.md
   - ops/README.md
   - petascale/README.md
-last_verified: 2026-03-27
+last_verified: 2026-03-29
 status: maintained
 ---
 
@@ -48,3 +48,4 @@ status: maintained
 | Security-local operator material | `security/AGENTS.md`, `security/vuln-db/` |
 | Repo support modules and artifacts | `Documentation/generated/Repository_Inventory.md`, `Documentation/internal/09_Repo_Supporting_Modules.md` |
 | Historical audits and report archive | `REPORTS AND REVIEWS/`, root audit markdown files |
+| Frozen legacy documentation archive | `Documentation/legacy/`, with parity and replacement mapping tracked in `Documentation/08_Documentation_Enhancement/04_Migration_Waves.md` |

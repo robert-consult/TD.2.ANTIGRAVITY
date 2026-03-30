@@ -7,7 +7,7 @@ canonical_sources:
   - server/index.ts
   - server/routes/wsCore.ts
   - server/routes.ts
-last_verified: 2026-03-27
+last_verified: 2026-03-30
 status: generated
 generated_from:
   - scripts/docs/generators/env/index.ts
@@ -151,7 +151,7 @@ Environment names discovered: **217**.
 | `PARTNER_ANON_SALT` | No | Referenced only; no explicit fail-fast rule discovered. | `server/partner/anonymizeUser.ts` |
 | `PARTNER_PORTAL_BASE_URL` | No | Referenced only; no explicit fail-fast rule discovered. | `server/routes/adminScout/support.ts` |
 | `POD_NAME` | No | Referenced only; no explicit fail-fast rule discovered. | `server/services/controlledReload.ts` |
-| `PORT` | No | Referenced only; no explicit fail-fast rule discovered. | `WEBSITE/dist/index.js`<br>`WEBSITE/server/index.ts` |
+| `PORT` | No | Referenced only; no explicit fail-fast rule discovered. | `WEBSITE/server/index.ts` |
 | `QUOTE_DB_WRITE_INTERVAL_MS` | `5000` | Referenced only; no explicit fail-fast rule discovered. | `server/feeds/quoteFeed.ts` |
 | `QUOTE_DB_WRITE_MODE` | `append` | Referenced only; no explicit fail-fast rule discovered. | `server/feeds/quoteFeed.ts` |
 | `QUOTE_EXEC_ALLOW_DB_FALLBACK` | No | Referenced only; no explicit fail-fast rule discovered. | `server/services/quoteService.ts` |
@@ -228,7 +228,7 @@ Environment names discovered: **217**.
 | `VITE_API_URL` | `(empty)` | Referenced only; no explicit fail-fast rule discovered. | No source references discovered. |
 | `VITE_APP_URL` | `(empty)` | Referenced only; no explicit fail-fast rule discovered. | No source references discovered. |
 | `VITE_WS_URL` | `(empty)` | Referenced only; no explicit fail-fast rule discovered. | No source references discovered. |
-| `WEBSITE_CONTACT_WEBHOOK_URL` | No | Referenced only; no explicit fail-fast rule discovered. | `WEBSITE/dist/index.js`<br>`WEBSITE/server/routes.ts` |
+| `WEBSITE_CONTACT_WEBHOOK_URL` | No | Referenced only; no explicit fail-fast rule discovered. | `WEBSITE/server/routes.ts` |
 | `WS_ALLOWED_ORIGINS` | No | Referenced only; no explicit fail-fast rule discovered. | `server/routes/wsCore.ts` |
 | `WS_JURISDICTION_RECHECK_MS` | No | Referenced only; no explicit fail-fast rule discovered. | `server/routes/wsCore.ts` |
 | `WS_MAX_CONNECTIONS_PER_USER` | No | Referenced only; no explicit fail-fast rule discovered. | `server/routes/wsCore.ts` |

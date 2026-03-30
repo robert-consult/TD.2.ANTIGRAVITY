@@ -59,6 +59,13 @@ const INTERNAL_ONLY_PATTERNS = [
   /Documentation\/08_Documentation_Enhancement\//,
 ];
 
+const LEGACY_REFERENCE_PATTERNS = [
+  /Documentation\/legacy\//,
+  /Documentation\/0[0-7]_[A-Za-z0-9_-]+\//,
+  /(?:^|[(/`\s])(?:\.\.\/|\.\/)?legacy\/[A-Za-z0-9_-]+\//,
+  /(?:^|[(/`\s])(?:\.\.\/|\.\/)?0[0-7]_[A-Za-z0-9_-]+\//,
+];
+
 const ROOT_PATH_TOKENS = new Set([
   ".agents",
   ".github",
@@ -148,6 +155,14 @@ function isSummaryFile(filePath: string): boolean {
 
 function isGeneratedDoc(filePath: string): boolean {
   return filePath.startsWith(repoPath("Documentation", "generated"));
+}
+
+function isArchiveBoundaryEnforcedDoc(filePath: string): boolean {
+  return (
+    filePath.startsWith(repoPath("Documentation", "public")) ||
+    filePath.startsWith(repoPath("Documentation", "internal")) ||
+    filePath.startsWith(repoPath("Documentation", "generated"))
+  );
 }
 
 function looksLikeRepoPathReference(value: string): boolean {
@@ -282,6 +297,16 @@ function validatePublicDocs(filePath: string, content: string, failures: Validat
   }
 }
 
+function validateLegacyBoundary(filePath: string, content: string, failures: ValidationFailure[]): void {
+  if (!isArchiveBoundaryEnforcedDoc(filePath)) return;
+
+  for (const pattern of LEGACY_REFERENCE_PATTERNS) {
+    if (pattern.test(content)) {
+      addFailure(failures, filePath, `maintained doc references legacy archive material matching ${pattern}`);
+    }
+  }
+}
+
 async function validateGeneratedFreshness(failures: ValidationFailure[]): Promise<void> {
   const expected = new Map<string, string>([
     [repoPath("Documentation", "generated", "REST_API_Catalog.md"), await buildRestCatalog()],
@@ -317,6 +342,7 @@ export async function validateDocs(): Promise<void> {
     await validatePathCodeSpans(filePath, content, failures);
     await validateScriptCommands(filePath, content, failures, scriptRegistry);
     validatePublicDocs(filePath, content, failures);
+    validateLegacyBoundary(filePath, content, failures);
   }
 
   await validateGeneratedFreshness(failures);

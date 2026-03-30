@@ -7,7 +7,7 @@ canonical_sources:
   - package.json
   - scripts/docs/README.md
   - scripts/docs/AGENTS.md
-last_verified: 2026-03-27
+last_verified: 2026-03-29
 status: maintained
 ---
 
@@ -46,9 +46,11 @@ Validation expectations:
 - path references in maintained docs must resolve
 - `npm run` commands in maintained docs must exist in the correct package scope
 - public docs must not reference internal-only material
+- maintained `public/`, `internal/`, and `generated/` docs must not reference legacy archive paths
+- enhancement docs may discuss the legacy archive and migration matrix
 
 Scope:
 
 - maintained docs are the new `public/`, `internal/`, `generated/`, and `08_Documentation_Enhancement/` lanes plus aligned root/module source docs
 - whole-repo capture includes a generated repository inventory so non-product modules and runtime artifacts are explicitly classified
-- legacy numbered docs are migration inputs and are not yet enforced by the validator
+- `Documentation/legacy/` is a frozen archive and is intentionally excluded from docs validation

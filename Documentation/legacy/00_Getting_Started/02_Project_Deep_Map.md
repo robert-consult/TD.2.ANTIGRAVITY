@@ -5,7 +5,7 @@
 
 ---
 
-> This page is a formatted adaptation of the canonical [`PROJECT_STRUCTURE.md`](../../PROJECT_STRUCTURE.md) located at the repository root. For the raw detailed file, always consult the root version as the source of truth.
+> This page is a formatted adaptation of the canonical [`PROJECT_STRUCTURE.md`](../../../PROJECT_STRUCTURE.md) located at the repository root. For the raw detailed file, always consult the root version as the source of truth.
 
 ## Quick Reference
 
@@ -76,7 +76,7 @@ The repository has **three independent `node_modules/`** trees:
 
 ## Full Directory Tree
 
-For the complete annotated directory tree with every file and subdirectory, see the canonical [`PROJECT_STRUCTURE.md`](../../PROJECT_STRUCTURE.md).
+For the complete annotated directory tree with every file and subdirectory, see the canonical [`PROJECT_STRUCTURE.md`](../../../PROJECT_STRUCTURE.md).
 
 ---
 

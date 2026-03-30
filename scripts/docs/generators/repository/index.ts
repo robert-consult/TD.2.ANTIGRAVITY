@@ -169,7 +169,7 @@ const ENTRY_OVERRIDES: Record<string, InventoryMeta> = {
   "Documentation": {
     classification: "maintained-docs",
     documentedIn: ["Documentation/internal/00_Documentation_Hub.md", "Documentation/08_Documentation_Enhancement/03_Target_Documentation_Architecture.md"],
-    note: "Maintained docs lanes plus legacy migration inputs.",
+    note: "Maintained docs lanes plus the frozen legacy archive.",
   },
   "FINAL_AUDIT_REMAINING_GAPS.md": {
     classification: "reference-report",
@@ -605,6 +605,8 @@ async function collectSourceDocs(): Promise<SourceDocRow[]> {
       "WIRING.md",
       "-g",
       "**/WIRING.md",
+      "-g",
+      "!**/node_modules/**",
     ],
     { cwd: repoPath(".") },
   );
@@ -613,7 +615,8 @@ async function collectSourceDocs(): Promise<SourceDocRow[]> {
     ["AGENTS.md", "README.md", ...stdout
       .split("\n")
       .map((value) => value.trim())
-      .filter(Boolean)],
+      .filter(Boolean)
+      .filter((filePath) => !filePath.startsWith("Documentation/legacy/"))],
   ).map((filePath) => ({
     path: filePath,
     type: classifySourceDocType(filePath),
@@ -671,7 +674,7 @@ export async function buildRepositoryInventory(): Promise<string> {
     }),
     "# Repository Inventory",
     "",
-    "> Generated from the live top-level tree and tracked local source-document files.",
+    "> Generated from the live top-level tree and repo-scoped source-document files.",
     "",
     `Top-level entries discovered: **${inventoryRows.length}**.`,
     "",

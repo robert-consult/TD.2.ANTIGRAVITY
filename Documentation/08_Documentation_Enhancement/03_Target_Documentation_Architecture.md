@@ -5,7 +5,7 @@ owner: documentation-program
 canonical_sources:
   - Documentation/
   - scripts/docs/
-last_verified: 2026-03-27
+last_verified: 2026-03-29
 status: maintained
 ---
 
@@ -34,4 +34,5 @@ Rules:
 - generated pages should also cover whole-repo placement when the repo has multiple non-product support surfaces
 - public pages must not reference internal-only material
 - internal pages should link to generated catalogs instead of re-stating large inventories
-- legacy numbered docs remain migration inputs until replaced or retired
+- legacy numbered docs are frozen under `Documentation/legacy/` after parity is achieved
+- maintained `public/`, `internal/`, and `generated/` docs must not depend on legacy links

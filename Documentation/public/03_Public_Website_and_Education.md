@@ -11,7 +11,7 @@ status: maintained
 
 # Public Website And Education
 
-The public website is a separate surface that focuses on:
+The public website is a separate module that focuses on:
 
 - product discovery
 - education content
@@ -25,4 +25,9 @@ The education experience is structured as:
 - lesson pages
 - platform-guide pages
 
-The website integrates with the trading platform through external links rather than shared runtime state.
+Public-facing boundaries:
+
+- the website runs independently from the authenticated trading app
+- cross-domain navigation uses external app URLs rather than shared SPA routing
+- website runtime content is generated into `WEBSITE/server/content/generated/` and served by the website module, not the trading runtime
+- authenticated trading, compliance, admin controls, and partner workflows remain outside the website surface

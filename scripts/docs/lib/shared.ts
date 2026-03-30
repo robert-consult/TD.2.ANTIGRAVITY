@@ -2,8 +2,17 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export const DOC_LAST_VERIFIED = "2026-03-27";
+export const DOC_LAST_VERIFIED = "2026-03-30";
 export const REPO_ROOT = process.cwd();
+
+const DEFAULT_SKIPPED_DIR_NAMES = new Set([
+  ".git",
+  ".gradle",
+  "Pods",
+  "build",
+  "dist",
+  "node_modules",
+]);
 
 export type DocMeta = {
   audience: string;
@@ -41,7 +50,7 @@ export async function pathExists(filePath: string): Promise<boolean> {
 }
 
 export async function walkFiles(dirPath: string): Promise<string[]> {
-  return walkFilesWithOptions(dirPath);
+  return walkFilesWithOptions(dirPath, { skipDirNames: DEFAULT_SKIPPED_DIR_NAMES });
 }
 
 type WalkFilesOptions = {

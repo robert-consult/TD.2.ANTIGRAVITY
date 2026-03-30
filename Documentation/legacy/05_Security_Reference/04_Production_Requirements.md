@@ -5,7 +5,7 @@
 
 ---
 
-> This page summarizes the canonical Production Requirements Ledger. For the full ledger with exact validation commands and failure modes, see [`.agents/PRODUCTION_REQUIREMENTS.md`](../../.agents/PRODUCTION_REQUIREMENTS.md).
+> This page summarizes the canonical Production Requirements Ledger. For the full ledger with exact validation commands and failure modes, see [`.agents/PRODUCTION_REQUIREMENTS.md`](../../../.agents/PRODUCTION_REQUIREMENTS.md).
 
 ## Categories
 
